@@ -16,52 +16,69 @@ impl AddAssign for ApplyStats {
     }
 }
 
-/// Market data for a dense range of symbols `0..len`, stored as structure-of-arrays.
-///
-/// The row index *is* the symbol id. Columns are allocated once in [`MarketTable::new`]
-/// and never resized. Intended to be owned by a single ingestion thread; readers get
-/// copies through [`MarketTable::snapshot_into`].
-#[derive(Debug, Clone)]
-pub struct MarketTable {
-    bid: Box<[f64]>,
-    ask: Box<[f64]>,
-    last: Box<[f64]>,
-    volume: Box<[u64]>,
-    updated_at_ns: Box<[u64]>,
-    last_change_ns: Box<[u64]>,
-    direction: Box<[Direction]>,
+/// One symbol's state: 56 bytes, so an update touches one or two cache lines.
+#[derive(Debug, Clone, Copy)]
+struct Row {
+    bid: f64,
+    ask: f64,
+    last: f64,
+    volume: u64,
+    updated_at_ns: u64,
+    last_change_ns: u64,
+    direction: Direction,
 }
 
-fn column<T: Copy>(len: u32, value: T) -> Box<[T]> {
-    vec![value; len as usize].into_boxed_slice()
+impl Row {
+    /// No quote yet: `NaN` prices.
+    const EMPTY: Self = Self {
+        bid: f64::NAN,
+        ask: f64::NAN,
+        last: f64::NAN,
+        volume: 0,
+        updated_at_ns: 0,
+        last_change_ns: 0,
+        direction: Direction::Flat,
+    };
+}
+
+/// Market data for a dense range of symbols `0..len`, stored as one flat array of rows.
+///
+/// The row index *is* the symbol id. Rows are allocated once in [`MarketTable::new`] and
+/// never resized. Intended to be owned by a single ingestion thread; readers get copies
+/// through [`MarketTable::snapshot_into`].
+///
+/// Array-of-structs, not structure-of-arrays: every tick updates one random row, which
+/// costs one or two cache lines here but one line *per column* in SoA. Measured with
+/// `benches/ingest.rs` at 1M symbols (beyond L3), applying ticks is ~1.7x faster than SoA;
+/// within cache both layouts are equal. Revisit if column scans (aggregates, SIMD) become
+/// the hot path.
+#[derive(Debug, Clone)]
+pub struct MarketTable {
+    rows: Box<[Row]>,
 }
 
 impl MarketTable {
     /// Creates a table for symbols `0..symbols`, all without quotes (`NaN` prices).
     pub fn new(symbols: u32) -> Self {
         Self {
-            bid: column(symbols, f64::NAN),
-            ask: column(symbols, f64::NAN),
-            last: column(symbols, f64::NAN),
-            volume: column(symbols, 0),
-            updated_at_ns: column(symbols, 0),
-            last_change_ns: column(symbols, 0),
-            direction: column(symbols, Direction::Flat),
+            rows: vec![Row::EMPTY; symbols as usize].into_boxed_slice(),
         }
     }
 
     pub fn len(&self) -> u32 {
         // Lossless: `new` takes the length as a u32.
-        self.last.len() as u32
+        self.rows.len() as u32
     }
 
     pub fn is_empty(&self) -> bool {
-        self.last.is_empty()
+        self.rows.is_empty()
     }
 
     /// Copy of one row, or `None` if `symbol_id` is out of range.
     pub fn row(&self, symbol_id: u32) -> Option<RowSnapshot> {
-        (symbol_id < self.len()).then(|| self.row_at(symbol_id as usize))
+        self.rows
+            .get(symbol_id as usize)
+            .map(|row| snapshot_of(symbol_id, row))
     }
 
     /// Applies ticks in order. Invalid ticks are skipped and counted, never panicked on.
@@ -84,15 +101,16 @@ impl MarketTable {
     /// [`RowSnapshot::EMPTY`], since `out` may be a reused, stale buffer. `out.seq` and
     /// `out.published_at_ns` are left to the publisher.
     pub fn snapshot_into<const N: usize>(&self, first_row: u32, out: &mut ViewportSnapshot<N>) {
-        let total = self.last.len();
+        let total = self.rows.len();
         let count = N.min(total);
         let first = (first_row as usize).min(total - count);
+        let window = &self.rows[first..first + count];
 
         for (offset, slot) in out.rows.iter_mut().enumerate() {
-            *slot = if offset < count {
-                self.row_at(first + offset)
-            } else {
-                RowSnapshot::EMPTY
+            *slot = match window.get(offset) {
+                // Lossless: bounded by `total`, which fits in u32.
+                Some(row) => snapshot_of((first + offset) as u32, row),
+                None => RowSnapshot::EMPTY,
             };
         }
         // Lossless: both are bounded by `total`, which fits in u32.
@@ -101,44 +119,41 @@ impl MarketTable {
     }
 
     fn apply(&mut self, tick: &Tick) -> bool {
-        let i = tick.symbol_id as usize;
-        if i >= self.last.len() {
+        let Some(row) = self.rows.get_mut(tick.symbol_id as usize) else {
             return false;
-        }
+        };
         if !(tick.bid.is_finite() && tick.ask.is_finite() && tick.last.is_finite()) {
             return false;
         }
 
         // A `NaN` previous price (no trade yet) compares false both ways, so the first
         // trade is `Flat` and does not trigger a spurious flash.
-        let previous = self.last[i];
-        if tick.last > previous {
-            self.direction[i] = Direction::Up;
-            self.last_change_ns[i] = tick.ts_ns;
-        } else if tick.last < previous {
-            self.direction[i] = Direction::Down;
-            self.last_change_ns[i] = tick.ts_ns;
+        if tick.last > row.last {
+            row.direction = Direction::Up;
+            row.last_change_ns = tick.ts_ns;
+        } else if tick.last < row.last {
+            row.direction = Direction::Down;
+            row.last_change_ns = tick.ts_ns;
         }
 
-        self.bid[i] = tick.bid;
-        self.ask[i] = tick.ask;
-        self.last[i] = tick.last;
-        self.volume[i] = self.volume[i].saturating_add(tick.qty);
-        self.updated_at_ns[i] = tick.ts_ns;
+        row.bid = tick.bid;
+        row.ask = tick.ask;
+        row.last = tick.last;
+        row.volume = row.volume.saturating_add(tick.qty);
+        row.updated_at_ns = tick.ts_ns;
         true
     }
+}
 
-    fn row_at(&self, i: usize) -> RowSnapshot {
-        RowSnapshot {
-            // Lossless: `i < len`, which fits in u32.
-            symbol_id: i as u32,
-            bid: self.bid[i],
-            ask: self.ask[i],
-            last: self.last[i],
-            volume: self.volume[i],
-            updated_at_ns: self.updated_at_ns[i],
-            last_change_ns: self.last_change_ns[i],
-            direction: self.direction[i],
-        }
+fn snapshot_of(symbol_id: u32, row: &Row) -> RowSnapshot {
+    RowSnapshot {
+        symbol_id,
+        bid: row.bid,
+        ask: row.ask,
+        last: row.last,
+        volume: row.volume,
+        updated_at_ns: row.updated_at_ns,
+        last_change_ns: row.last_change_ns,
+        direction: row.direction,
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "densa-data"
-description = "Columnar (SoA) market data storage, synthetic tick feed and viewport snapshots"
+description = "Flat, preallocated market data table, synthetic tick feed and viewport snapshots"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

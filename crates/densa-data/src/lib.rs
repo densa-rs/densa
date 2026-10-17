@@ -1,4 +1,5 @@
-//! Columnar market data storage, a synthetic tick feed, and fixed-size viewport snapshots.
+//! Flat, preallocated market data storage, a synthetic tick feed, and fixed-size viewport
+//! snapshots.
 //!
 //! Everything here allocates only at construction. `apply_batch`, `snapshot_into` and
 //! `TickGenerator::fill` are hot-path safe: no allocation, no locks, no syscalls.
