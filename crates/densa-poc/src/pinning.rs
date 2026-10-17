@@ -1,4 +1,5 @@
-use densa_platform::{find_cpu, pick_performance_cpu, CoreKind, LogicalCpu};
+use densa_platform::{find_cpu, logical_cpus, pick_performance_cpu, CoreKind, LogicalCpu};
+use std::error::Error;
 use std::fmt;
 use std::io::Write;
 
@@ -41,6 +42,44 @@ pub fn resolve_pin(
             .map(Some)
             .ok_or(PinError::NoSuchCpu(index)),
     }
+}
+
+const UNPINNED: &str = "worker not pinned";
+
+/// Resolves `--pin` against the live topology; also returns a human-readable note.
+///
+/// `auto` degrades to unpinned (with a warning on `out`) where the OS offers no affinity
+/// control; an explicit CPU is a hard error.
+pub(crate) fn resolve_worker_pin(
+    request: PinRequest,
+    out: &mut impl Write,
+) -> Result<(Option<LogicalCpu>, String), Box<dyn Error>> {
+    if request == PinRequest::None {
+        return Ok((None, UNPINNED.to_owned()));
+    }
+    let cpus = match logical_cpus() {
+        Ok(cpus) => cpus,
+        Err(e) if request == PinRequest::Auto => {
+            writeln!(
+                out,
+                "warning: cannot pin the worker ({e}); running unpinned"
+            )?;
+            return Ok((None, UNPINNED.to_owned()));
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let pin = resolve_pin(request, &cpus)?;
+    let note = pin.map_or_else(
+        || UNPINNED.to_owned(),
+        |cpu| {
+            format!(
+                "worker pinned to cpu {} ({})",
+                cpu.id,
+                CoreKind::of(&cpu, &cpus)
+            )
+        },
+    );
+    Ok((pin, note))
 }
 
 /// `--list-cpus` output: one row per logical CPU, then the `--pin auto` choice.

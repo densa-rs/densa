@@ -95,7 +95,10 @@ fn defaults_to_window_mode_with_sensible_settings() {
     let args = parse(&[]).unwrap();
     assert_eq!(args.mode, Mode::Window);
     assert!(!args.help);
-    assert_eq!(args.seconds, 10);
+    assert_eq!(
+        args.seconds, None,
+        "headless defaults to 10 s; a window runs until closed"
+    );
     assert_eq!(args.fps, 120);
     assert_eq!(args.worker.symbols, 10_000);
     assert_eq!(args.worker.rate, Some(200_000));
@@ -123,7 +126,7 @@ fn parses_every_option() {
     ])
     .unwrap();
     assert_eq!(args.mode, Mode::Headless);
-    assert_eq!(args.seconds, 3);
+    assert_eq!(args.seconds, Some(3));
     assert_eq!(args.fps, 60);
     assert_eq!(args.worker.rate, Some(50_000));
     assert_eq!(args.worker.symbols, 500);

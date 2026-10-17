@@ -29,11 +29,35 @@ fn bad_argument_exits_2_with_message_and_usage() {
     assert!(err.contains("Usage: densa-poc"), "{err}");
 }
 
+/// Opens a real window for 2 s. Needs a desktop session and a GPU; set
+/// `DENSA_SKIP_GPU_TESTS=1` to skip where neither exists.
 #[test]
-fn window_mode_is_reported_as_not_implemented() {
-    let out = run(&[]);
-    assert_eq!(out.status.code(), Some(2));
-    assert!(text(&out.stderr).contains("window mode is not implemented yet"));
+fn window_session_renders_at_display_rate_with_zero_densa_heap_ops() {
+    if std::env::var_os("DENSA_SKIP_GPU_TESTS").is_some() {
+        return;
+    }
+    let out = run(&["--seconds", "2", "--symbols", "2000"]);
+    let stdout = text(&out.stdout);
+    assert!(
+        out.status.success(),
+        "stderr: {}\nstdout: {stdout}",
+        text(&out.stderr)
+    );
+    assert!(stdout.starts_with("densa window: "), "{stdout}");
+    assert!(stdout.contains("Fifo"), "V-Sync present mode: {stdout}");
+
+    let summary = stdout.lines().last().unwrap_or_default();
+    assert!(summary.starts_with("summary:"), "{stdout}");
+    assert!(
+        summary.contains("heap ops after startup: worker 0, paint 0, gpu submit"),
+        "{summary}"
+    );
+    let fps: f64 = summary
+        .split_once(" frames (")
+        .and_then(|(_, rest)| rest.split_once(" fps"))
+        .and_then(|(fps, _)| fps.parse().ok())
+        .unwrap_or_else(|| panic!("no fps in {summary}"));
+    assert!(fps > 30.0, "only {fps} fps: {summary}");
 }
 
 #[cfg(windows)]

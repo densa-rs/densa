@@ -1,0 +1,21 @@
+[package]
+name = "densa-render"
+description = "wgpu renderer for dense data grids: one instanced-quad draw call, zero per-frame allocation in densa code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bytemuck = { workspace = true, features = ["derive"] }
+densa-data.workspace = true
+densa-fmt.workspace = true
+font8x8 = { workspace = true, default-features = false }
+wgpu.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+pollster.workspace = true
+
+[lints]
+workspace = true

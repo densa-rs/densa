@@ -7,7 +7,18 @@ use densa_poc::{format_duration_ns, run_headless, Args};
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
 
 fn headless_args(extra: &[&str]) -> Args {
-    let base = ["--headless", "--seconds", "1", "--symbols", "2000"];
+    // Unpinned: these tests run concurrently, and `--pin auto` would put both busy-spinning
+    // workers on the same performance core, halving each one's rate (observed: 49.97k of a
+    // 100k target). Pinning has its own tests.
+    let base = [
+        "--headless",
+        "--seconds",
+        "1",
+        "--symbols",
+        "2000",
+        "--pin",
+        "none",
+    ];
     Args::parse(base.iter().chain(extra).map(|s| s.to_string())).unwrap()
 }
 

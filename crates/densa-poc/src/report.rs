@@ -1,6 +1,24 @@
 //! Human-readable metric formatting. Reporting runs outside the measured frame work, so
 //! these helpers may allocate. Output is ASCII-only ("us", not "µs") for any console.
 
+use densa_engine::LatencySummary;
+use densa_platform::CpuId;
+
+/// `p50 45.2us p99 1.25ms max 3.50ms`.
+pub fn format_latency(s: &LatencySummary) -> String {
+    format!(
+        "p50 {} p99 {} max {}",
+        format_duration_ns(s.p50),
+        format_duration_ns(s.p99),
+        format_duration_ns(s.max)
+    )
+}
+
+/// `14`, or `?` where the OS cannot report the CPU.
+pub fn format_cpu(cpu: Option<CpuId>) -> String {
+    cpu.map_or_else(|| "?".to_owned(), |id| id.to_string())
+}
+
 /// `850ns`, `45.2us`, `1.25ms`, `3.50s`.
 pub fn format_duration_ns(ns: u64) -> String {
     let n = ns as f64;
@@ -32,6 +50,25 @@ mod tests {
         assert_eq!(format_rate(950.0), "950");
         assert_eq!(format_rate(200_000.0), "200.0k");
         assert_eq!(format_rate(52_310_000.0), "52.31M");
+    }
+
+    #[test]
+    fn latency_and_cpu() {
+        let s = LatencySummary {
+            count: 3,
+            p50: 45_200,
+            p99: 1_250_000,
+            max: 3_500_000,
+        };
+        assert_eq!(format_latency(&s), "p50 45.2us p99 1.25ms max 3.50ms");
+        assert_eq!(format_cpu(None), "?");
+        assert_eq!(
+            format_cpu(Some(CpuId {
+                group: 0,
+                index: 14
+            })),
+            "14"
+        );
     }
 
     #[test]

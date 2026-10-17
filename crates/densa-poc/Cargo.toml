@@ -13,7 +13,11 @@ densa-data.workspace = true
 densa-engine.workspace = true
 densa-fmt.workspace = true
 densa-platform.workspace = true
+densa-render.workspace = true
 densa-sync.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
 
 [lints]
 workspace = true

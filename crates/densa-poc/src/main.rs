@@ -1,6 +1,6 @@
 use densa_alloc::{is_active, CountingAllocator};
 use densa_platform::logical_cpus;
-use densa_poc::{run_headless, write_cpu_table, Args, Mode, USAGE};
+use densa_poc::{run_headless, run_window, write_cpu_table, Args, Mode, USAGE};
 use std::process::ExitCode;
 
 /// Counts heap operations per thread so the run can prove its hot paths allocate nothing.
@@ -36,17 +36,15 @@ fn main() -> ExitCode {
         eprintln!("warning: allocation counting is inactive; heap-op metrics will read 0");
     }
 
-    match args.mode {
-        Mode::Window => {
-            eprintln!("error: window mode is not implemented yet; run with --headless\n\n{USAGE}");
-            ExitCode::from(2)
+    let result = match args.mode {
+        Mode::Window => run_window(&args),
+        Mode::Headless => run_headless(&args, &mut std::io::stdout().lock()).map(|_| ()),
+    };
+    match result {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
         }
-        Mode::Headless => match run_headless(&args, &mut std::io::stdout().lock()) {
-            Ok(_) => ExitCode::SUCCESS,
-            Err(e) => {
-                eprintln!("error: {e}");
-                ExitCode::FAILURE
-            }
-        },
     }
 }

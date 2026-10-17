@@ -1,12 +1,12 @@
-use crate::report::{format_duration_ns as dur, format_rate as rate};
-use crate::{resolve_pin, Args, PinRequest};
+use crate::pinning::resolve_worker_pin;
+use crate::report::{format_cpu, format_duration_ns as dur, format_latency, format_rate as rate};
+use crate::Args;
 use densa_alloc::measure;
-use densa_data::{RowSnapshot, ViewportSnapshot};
+use densa_data::ViewportSnapshot;
 use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencySummary, ProbeReport, WorkerHandle, WorkerMetrics,
 };
-use densa_fmt::{write_fixed, write_grouped, FmtBuf};
-use densa_platform::{logical_cpus, CoreKind, CpuId, LogicalCpu};
+use densa_render::{GlyphAtlas, GridLayout, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use std::error::Error;
 use std::hint::black_box;
@@ -15,9 +15,10 @@ use std::time::Duration;
 
 /// Rows in the visible viewport of the virtual grid.
 pub const VIEWPORT_ROWS: usize = 50;
+/// Headless run length when `--seconds` is not given.
+pub const DEFAULT_HEADLESS_SECONDS: u64 = 10;
 
 const NANOS_PER_SEC: u64 = 1_000_000_000;
-const PRICE_DECIMALS: usize = 2;
 
 /// Totals of a headless run.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -34,9 +35,11 @@ pub struct RunSummary {
 /// Runs the worker plus a fixed-rate reader loop on the calling thread, printing one
 /// metrics line per second to `out`, then a summary.
 ///
-/// The reader does everything a real frame does except touching the GPU: picks up the
-/// newest snapshot, records latency, formats every visible cell as text, and scrolls.
+/// Each frame does everything a windowed frame does except touching the GPU: picks up
+/// the newest snapshot, records latency, builds the grid's instances with the same
+/// `GridPainter` the window uses, and scrolls.
 pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box<dyn Error>> {
+    let seconds = args.seconds.unwrap_or(DEFAULT_HEADLESS_SECONDS);
     let mut config = args.worker.clone();
     let (pin, pin_note) = resolve_worker_pin(args.pin, out)?;
     config.pin = pin;
@@ -54,7 +57,7 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
         args.worker.batch_size,
         dur(args.worker.publish_interval_ns),
         args.fps,
-        args.seconds,
+        seconds,
         pin_note,
     )?;
 
@@ -62,7 +65,7 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
     let mut total = FrameProbe::new();
     let frame_ns = NANOS_PER_SEC / u64::from(args.fps);
     let start = clock.now_ns();
-    let end = start + args.seconds * NANOS_PER_SEC;
+    let end = start + seconds * NANOS_PER_SEC;
     let mut next_frame = start;
     let mut next_report = start + NANOS_PER_SEC;
     let mut last = WorkerMetrics::default();
@@ -112,50 +115,11 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
     Ok(summary)
 }
 
-const UNPINNED: &str = "worker not pinned";
-
-/// Resolves `--pin` against the live topology. `auto` degrades to unpinned (with a
-/// warning) where the OS offers no affinity control; an explicit CPU is a hard error.
-fn resolve_worker_pin(
-    request: PinRequest,
-    out: &mut impl Write,
-) -> Result<(Option<LogicalCpu>, String), Box<dyn Error>> {
-    if request == PinRequest::None {
-        return Ok((None, UNPINNED.to_owned()));
-    }
-    let cpus = match logical_cpus() {
-        Ok(cpus) => cpus,
-        Err(e) if request == PinRequest::Auto => {
-            writeln!(
-                out,
-                "warning: cannot pin the worker ({e}); running unpinned"
-            )?;
-            return Ok((None, UNPINNED.to_owned()));
-        }
-        Err(e) => return Err(e.into()),
-    };
-    let pin = resolve_pin(request, &cpus)?;
-    let note = pin.map_or_else(
-        || UNPINNED.to_owned(),
-        |cpu| {
-            format!(
-                "worker pinned to cpu {} ({})",
-                cpu.id,
-                CoreKind::of(&cpu, &cpus)
-            )
-        },
-    );
-    Ok((pin, note))
-}
-
-fn cpu_name(cpu: Option<CpuId>) -> String {
-    cpu.map_or_else(|| "?".to_owned(), |id| id.to_string())
-}
-
 /// Per-frame state of the simulated render loop. Everything is preallocated.
 struct Frame {
     window: FrameProbe,
-    cell: FmtBuf<32>,
+    painter: GridPainter,
+    instances: InstanceBuffer,
     first_row: u32,
     max_first_row: u32,
     scrolling_down: bool,
@@ -163,11 +127,13 @@ struct Frame {
 
 impl Frame {
     fn new(symbols: u32) -> Self {
+        // Lossless: VIEWPORT_ROWS is a small constant.
+        let layout = GridLayout::new(VIEWPORT_ROWS as u32);
         Self {
             window: FrameProbe::new(),
-            cell: FmtBuf::new(),
+            painter: GridPainter::new(layout, &GlyphAtlas::font8x8()),
+            instances: InstanceBuffer::with_capacity(layout.max_instances()),
             first_row: 0,
-            // Lossless: VIEWPORT_ROWS is a small constant.
             max_first_row: symbols.saturating_sub(VIEWPORT_ROWS as u32),
             scrolling_down: true,
         }
@@ -182,12 +148,14 @@ impl Frame {
     ) {
         let fresh = reader.update();
         let now = clock.now_ns();
-        let (window, cell) = (&mut self.window, &mut self.cell);
+        let (window, painter, instances) =
+            (&mut self.window, &mut self.painter, &mut self.instances);
         reader.read(|snapshot| {
             window.observe(snapshot, fresh, now);
             total.observe(snapshot, fresh, now);
-            black_box(format_rows(snapshot.visible(), cell));
+            painter.paint(snapshot, now, instances);
         });
+        black_box(self.instances.as_slice());
         self.scroll();
         worker.set_viewport(self.first_row);
     }
@@ -205,27 +173,6 @@ impl Frame {
             self.first_row = self.first_row.saturating_sub(1);
         }
     }
-}
-
-/// Formats every visible cell the way the grid will draw it; returns total text bytes.
-fn format_rows(rows: &[RowSnapshot], cell: &mut FmtBuf<32>) -> usize {
-    let mut bytes = 0;
-    for row in rows {
-        for price in [row.bid, row.ask, row.last] {
-            cell.clear();
-            if write_fixed(cell, price, PRICE_DECIMALS).is_err() {
-                // No quote yet (NaN). A one-byte placeholder always fits.
-                cell.clear();
-                let _ = cell.push_str("-");
-            }
-            bytes += cell.len();
-        }
-        cell.clear();
-        // u64::MAX grouped is 26 bytes: always fits in 32.
-        let _ = write_grouped(cell, row.volume, ',');
-        bytes += cell.len();
-    }
-    bytes
 }
 
 fn report_line(
@@ -246,9 +193,9 @@ fn report_line(
         frames.frames,
         frames.fresh_frames,
         frames.skipped_snapshots,
-        latency(&frames.snapshot_age),
-        latency(&frames.tick_age),
-        cpu_name(now.last_cpu),
+        format_latency(&frames.snapshot_age),
+        format_latency(&frames.tick_age),
+        format_cpu(now.last_cpu),
         now.cpu_migrations - last.cpu_migrations,
         now.heap_ops,
         reader_heap_ops,
@@ -269,15 +216,11 @@ fn summary_line(out: &mut impl Write, s: &RunSummary) -> std::io::Result<()> {
         s.worker.publishes,
         s.frames,
         s.frames as f64 / s.elapsed_s,
-        latency(&s.snapshot_age),
-        latency(&s.tick_age),
-        cpu_name(s.worker.last_cpu),
+        format_latency(&s.snapshot_age),
+        format_latency(&s.tick_age),
+        format_cpu(s.worker.last_cpu),
         s.worker.cpu_migrations,
         s.worker.heap_ops,
         s.reader_heap_ops,
     )
-}
-
-fn latency(s: &LatencySummary) -> String {
-    format!("p50 {} p99 {} max {}", dur(s.p50), dur(s.p99), dur(s.max))
 }

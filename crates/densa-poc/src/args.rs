@@ -6,11 +6,13 @@ pub const USAGE: &str = "\
 Usage: densa-poc [OPTIONS]
 
 Modes:
-  --headless                 Run the render loop without a window (prints metrics)
-                             (window mode is the default once the renderer lands)
+  (default)                  Open a window rendering the live grid (wgpu, V-Sync)
+  --headless                 Run the same frame loop without a window (prints metrics)
+
+Window controls: mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc quits.
 
 Options:
-  --seconds <N>              Run time in seconds [default: 10]
+  --seconds <N>              Run time in seconds [default: 10 headless, until closed in a window]
   --rate <TICKS_PER_SEC>     Target tick rate [default: 200000]
   --unbounded                Generate ticks as fast as possible (conflicts with --rate)
   --symbols <N>              Number of instruments [default: 10000]
@@ -34,7 +36,8 @@ pub enum Mode {
 pub struct Args {
     pub mode: Mode,
     pub help: bool,
-    pub seconds: u64,
+    /// `None`: headless runs `DEFAULT_HEADLESS_SECONDS`, a window runs until closed.
+    pub seconds: Option<u64>,
     pub fps: u32,
     pub worker: WorkerConfig,
     /// Resolved into `worker.pin` against the live CPU topology at startup.
@@ -63,7 +66,7 @@ impl Args {
         let mut parsed = Self {
             mode: Mode::Window,
             help: false,
-            seconds: 10,
+            seconds: None,
             fps: 120,
             worker: WorkerConfig::default(),
             // On hybrid CPUs an unpinned busy-spinning worker migrates hundreds of times
@@ -87,7 +90,7 @@ impl Args {
                 "--unbounded" => unbounded = true,
                 "--list-cpus" => parsed.list_cpus = true,
                 "--pin" => parsed.pin = parse_pin(&value()?)?,
-                "--seconds" => parsed.seconds = parse_u64(&arg, &value()?)?,
+                "--seconds" => parsed.seconds = Some(parse_u64(&arg, &value()?)?),
                 "--rate" => rate = Some(parse_u64(&arg, &value()?)?),
                 "--symbols" => parsed.worker.symbols = parse_bounded(&arg, &value()?)?,
                 "--batch" => parsed.worker.batch_size = parse_bounded(&arg, &value()?)?,
@@ -114,7 +117,7 @@ impl Args {
         } else if rate.is_some() {
             parsed.worker.rate = rate;
         }
-        if parsed.seconds == 0 {
+        if parsed.seconds == Some(0) {
             return Err(error("`--seconds` must be at least 1"));
         }
         if parsed.fps == 0 {
