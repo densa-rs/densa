@@ -1,0 +1,15 @@
+[package]
+name = "densa-fmt"
+description = "Allocation-free number formatting into fixed-capacity stack buffers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+
+[dev-dependencies]
+densa-alloc.workspace = true
+
+[lints]
+workspace = true

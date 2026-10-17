@@ -9,6 +9,8 @@ license = "MIT OR Apache-2.0"
 rust-version = "1.80"
 
 [workspace.dependencies]
+densa-alloc = { path = "crates/densa-alloc" }
+
 crossbeam-utils = "0.8.23"
 loom = "0.7.2"
 

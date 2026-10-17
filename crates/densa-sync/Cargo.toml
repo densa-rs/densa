@@ -12,5 +12,8 @@ crossbeam-utils.workspace = true
 [target.'cfg(loom)'.dependencies]
 loom.workspace = true
 
+[dev-dependencies]
+densa-alloc.workspace = true
+
 [lints]
 workspace = true
