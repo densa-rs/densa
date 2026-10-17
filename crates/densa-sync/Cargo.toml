@@ -1,0 +1,16 @@
+[package]
+name = "densa-sync"
+description = "Lock-free synchronization primitives for low-latency UI/data pipelines"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crossbeam-utils.workspace = true
+
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
+[lints]
+workspace = true
