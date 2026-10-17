@@ -1,0 +1,16 @@
+[package]
+name = "densa-engine"
+description = "Ingestion worker, pacing and latency instrumentation wiring densa-data to densa-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+crossbeam-utils.workspace = true
+densa-alloc.workspace = true
+densa-data.workspace = true
+densa-sync.workspace = true
+
+[lints]
+workspace = true

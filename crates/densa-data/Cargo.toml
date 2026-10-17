@@ -9,7 +9,12 @@ rust-version.workspace = true
 [dependencies]
 
 [dev-dependencies]
+criterion.workspace = true
 densa-alloc.workspace = true
+
+[[bench]]
+name = "ingest"
+harness = false
 
 [lints]
 workspace = true

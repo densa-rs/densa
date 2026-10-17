@@ -1,0 +1,18 @@
+[package]
+name = "densa-poc"
+description = "Proof-of-concept app: zero-lock ingestion feeding a 120 Hz render loop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+densa-alloc.workspace = true
+densa-data.workspace = true
+densa-engine.workspace = true
+densa-fmt.workspace = true
+densa-sync.workspace = true
+
+[lints]
+workspace = true
