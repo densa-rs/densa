@@ -162,10 +162,19 @@ name = "densa-alloc"
 version = "0.1.0"
 
 [[package]]
-name = "densa-data"
+name = "densa-bench"
 version = "0.1.0"
 dependencies = [
  "criterion",
+ "densa-data",
+ "densa-platform",
+ "densa-sync",
+]
+
+[[package]]
+name = "densa-data"
+version = "0.1.0"
+dependencies = [
  "densa-alloc",
 ]
 
@@ -176,6 +185,7 @@ dependencies = [
  "crossbeam-utils",
  "densa-alloc",
  "densa-data",
+ "densa-platform",
  "densa-sync",
 ]
 
@@ -187,6 +197,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "densa-platform"
+version = "0.1.0"
+dependencies = [
+ "windows-sys",
+]
+
+[[package]]
 name = "densa-poc"
 version = "0.1.0"
 dependencies = [
@@ -194,6 +211,7 @@ dependencies = [
  "densa-data",
  "densa-engine",
  "densa-fmt",
+ "densa-platform",
  "densa-sync",
 ]
 
@@ -201,7 +219,6 @@ dependencies = [
 name = "densa-sync"
 version = "0.1.0"
 dependencies = [
- "criterion",
  "crossbeam-utils",
  "densa-alloc",
  "loom",

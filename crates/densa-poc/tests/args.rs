@@ -1,4 +1,90 @@
-use densa_poc::{Args, Mode};
+use densa_platform::{CpuId, LogicalCpu};
+use densa_poc::{resolve_pin, write_cpu_table, Args, Mode, PinRequest};
+
+fn cpu(index: u8, core: u8, efficiency_class: u8) -> LogicalCpu {
+    LogicalCpu {
+        id: CpuId { group: 0, index },
+        core,
+        efficiency_class,
+    }
+}
+
+fn hybrid() -> Vec<LogicalCpu> {
+    vec![
+        cpu(0, 0, 1),
+        cpu(1, 0, 1),
+        cpu(2, 2, 1),
+        cpu(3, 2, 1),
+        cpu(4, 4, 0),
+        cpu(5, 5, 0),
+    ]
+}
+
+#[test]
+fn pin_option_variants() {
+    assert_eq!(parse(&["--pin", "auto"]).unwrap().pin, PinRequest::Auto);
+    assert_eq!(parse(&["--pin", "none"]).unwrap().pin, PinRequest::None);
+    assert_eq!(parse(&["--pin", "5"]).unwrap().pin, PinRequest::Index(5));
+    assert_eq!(
+        parse(&["--pin", "fast"]).unwrap_err(),
+        "`--pin` expects `auto`, `none` or a CPU index (0-255), got `fast`"
+    );
+    assert_eq!(
+        parse(&["--pin", "256"]).unwrap_err(),
+        "`--pin` expects `auto`, `none` or a CPU index (0-255), got `256`"
+    );
+}
+
+#[test]
+fn list_cpus_flag() {
+    assert!(parse(&["--list-cpus"]).unwrap().list_cpus);
+    assert!(!parse(&[]).unwrap().list_cpus);
+}
+
+#[test]
+fn resolves_pin_requests_against_the_topology() {
+    let cpus = hybrid();
+    assert_eq!(resolve_pin(PinRequest::None, &cpus), Ok(None));
+    assert_eq!(
+        resolve_pin(PinRequest::Auto, &cpus)
+            .unwrap()
+            .unwrap()
+            .id
+            .index,
+        2,
+        "highest P-core, first hyper-thread"
+    );
+    assert_eq!(
+        resolve_pin(PinRequest::Index(5), &cpus)
+            .unwrap()
+            .unwrap()
+            .id
+            .index,
+        5
+    );
+    assert_eq!(
+        resolve_pin(PinRequest::Index(9), &cpus)
+            .unwrap_err()
+            .to_string(),
+        "CPU 9 does not exist (see --list-cpus)"
+    );
+    assert_eq!(
+        resolve_pin(PinRequest::Auto, &[]).unwrap_err().to_string(),
+        "the OS reported no CPUs to pin to"
+    );
+}
+
+#[test]
+fn cpu_table_labels_core_kinds() {
+    let mut out = Vec::new();
+    write_cpu_table(&mut out, &hybrid()).unwrap();
+    let text = String::from_utf8(out).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines[0], "cpu  core  class  kind");
+    assert_eq!(lines[1], "  0     0      1  performance");
+    assert_eq!(lines[5], "  4     4      0  efficiency");
+    assert!(text.contains("--pin auto would choose cpu 2"), "{text}");
+}
 
 fn parse(args: &[&str]) -> Result<Args, String> {
     Args::parse(args.iter().map(|s| s.to_string())).map_err(|e| e.to_string())
@@ -13,6 +99,7 @@ fn defaults_to_window_mode_with_sensible_settings() {
     assert_eq!(args.fps, 120);
     assert_eq!(args.worker.symbols, 10_000);
     assert_eq!(args.worker.rate, Some(200_000));
+    assert_eq!(args.pin, PinRequest::Auto);
 }
 
 #[test]
@@ -107,6 +194,8 @@ fn usage_mentions_every_option() {
         "--publish-interval-us",
         "--fps",
         "--seed",
+        "--pin",
+        "--list-cpus",
         "--help",
     ] {
         assert!(densa_poc::USAGE.contains(flag), "usage is missing {flag}");

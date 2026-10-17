@@ -2,6 +2,7 @@ use crate::{Clock, Pacer};
 use crossbeam_utils::CachePadded;
 use densa_alloc::thread_stats;
 use densa_data::{MarketTable, Tick, TickGenerator, ViewportSnapshot};
+use densa_platform::{current_cpu, pin_thread, CpuError, CpuId, LogicalCpu};
 use densa_sync::{triple_buffer, Reader, Writer};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -19,6 +20,8 @@ pub struct WorkerConfig {
     pub rate: Option<u64>,
     /// Minimum time between snapshot publishes; 0 publishes after every batch.
     pub publish_interval_ns: u64,
+    /// CPU to pin the worker thread to; `None` leaves placement to the OS scheduler.
+    pub pin: Option<LogicalCpu>,
 }
 
 impl Default for WorkerConfig {
@@ -29,6 +32,7 @@ impl Default for WorkerConfig {
             batch_size: 64,
             rate: Some(200_000),
             publish_interval_ns: 100_000,
+            pin: None,
         }
     }
 }
@@ -71,6 +75,8 @@ impl std::error::Error for ConfigError {}
 pub enum SpawnError {
     Config(ConfigError),
     Thread(std::io::Error),
+    /// Pinning to `WorkerConfig::pin` failed; the worker was stopped.
+    Pin(CpuError),
 }
 
 impl fmt::Display for SpawnError {
@@ -78,6 +84,7 @@ impl fmt::Display for SpawnError {
         match self {
             Self::Config(e) => write!(f, "invalid worker config: {e}"),
             Self::Thread(e) => write!(f, "failed to spawn worker thread: {e}"),
+            Self::Pin(e) => write!(f, "failed to pin worker thread: {e}"),
         }
     }
 }
@@ -87,6 +94,7 @@ impl std::error::Error for SpawnError {
         match self {
             Self::Config(e) => Some(e),
             Self::Thread(e) => Some(e),
+            Self::Pin(e) => Some(e),
         }
     }
 }
@@ -114,12 +122,31 @@ pub struct WorkerMetrics {
     /// Heap operations (alloc + dealloc + realloc) on the worker thread since its loop
     /// started. Always 0 unless `densa_alloc::CountingAllocator` is the global allocator.
     pub heap_ops: u64,
+    /// CPU the worker ran its most recent batch on (`None` where the OS can't tell).
+    pub last_cpu: Option<CpuId>,
+    /// Times the scheduler moved the worker to another CPU between batches.
+    pub cpu_migrations: u64,
+}
+
+/// `CpuId` packed into a `u32` for atomic storage; `u32::MAX` means unknown.
+const NO_CPU: u32 = u32::MAX;
+
+fn pack_cpu(cpu: Option<CpuId>) -> u32 {
+    cpu.map_or(NO_CPU, |c| (u32::from(c.group) << 8) | u32::from(c.index))
+}
+
+fn unpack_cpu(packed: u32) -> Option<CpuId> {
+    (packed != NO_CPU).then_some(CpuId {
+        // Lossless: packed from a u16 group and a u8 index.
+        group: (packed >> 8) as u16,
+        index: (packed & 0xff) as u8,
+    })
 }
 
 // ORDERING (all counters): each counter has a single writer (the worker) and is read only
 // for reporting. No other data is published through them, so `Relaxed` suffices; values
 // read after `JoinHandle::join` are exact because join synchronizes with the thread's end.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Counters {
     ticks_applied: AtomicU64,
     ticks_rejected: AtomicU64,
@@ -127,6 +154,23 @@ struct Counters {
     publishes: AtomicU64,
     lag_resets: AtomicU64,
     heap_ops: AtomicU64,
+    last_cpu: AtomicU32,
+    cpu_migrations: AtomicU64,
+}
+
+impl Default for Counters {
+    fn default() -> Self {
+        Self {
+            ticks_applied: AtomicU64::new(0),
+            ticks_rejected: AtomicU64::new(0),
+            batches: AtomicU64::new(0),
+            publishes: AtomicU64::new(0),
+            lag_resets: AtomicU64::new(0),
+            heap_ops: AtomicU64::new(0),
+            last_cpu: AtomicU32::new(NO_CPU),
+            cpu_migrations: AtomicU64::new(0),
+        }
+    }
 }
 
 impl Counters {
@@ -138,6 +182,9 @@ impl Counters {
         self.publishes.store(m.publishes, Ordering::Relaxed);
         self.lag_resets.store(m.lag_resets, Ordering::Relaxed);
         self.heap_ops.store(m.heap_ops, Ordering::Relaxed);
+        self.last_cpu.store(pack_cpu(m.last_cpu), Ordering::Relaxed);
+        self.cpu_migrations
+            .store(m.cpu_migrations, Ordering::Relaxed);
     }
 
     fn load(&self) -> WorkerMetrics {
@@ -148,6 +195,8 @@ impl Counters {
             publishes: self.publishes.load(Ordering::Relaxed),
             lag_resets: self.lag_resets.load(Ordering::Relaxed),
             heap_ops: self.heap_ops.load(Ordering::Relaxed),
+            last_cpu: unpack_cpu(self.last_cpu.load(Ordering::Relaxed)),
+            cpu_migrations: self.cpu_migrations.load(Ordering::Relaxed),
         }
     }
 }
@@ -203,6 +252,7 @@ pub fn spawn_worker<const N: usize>(
 
     let (writer, reader) = triple_buffer(ViewportSnapshot::<N>::new());
     let shared = Arc::new(Shared::default());
+    let pin = config.pin;
     let worker = Worker {
         generator: TickGenerator::new(config.symbols, config.seed),
         table: MarketTable::new(config.symbols),
@@ -216,7 +266,19 @@ pub fn spawn_worker<const N: usize>(
         .name("densa-ingest".into())
         .spawn(move || worker.run())
         .map_err(SpawnError::Thread)?;
-    Ok((WorkerHandle { shared, thread }, reader))
+    let handle = WorkerHandle { shared, thread };
+
+    // Pinned from outside through the thread handle so failure is reported synchronously.
+    // The worker may run a few microseconds unpinned before the OS moves it.
+    if let Some(cpu) = pin {
+        if let Err(e) = pin_thread(&handle.thread, cpu) {
+            // The pin error is what matters; a panic during this brief run would only
+            // obscure it, so the stop result is deliberately not reported.
+            let _ = handle.stop();
+            return Err(SpawnError::Pin(e));
+        }
+    }
+    Ok((handle, reader))
 }
 
 struct Worker<const N: usize> {
@@ -288,6 +350,11 @@ impl<const N: usize> Worker<N> {
 
             let heap = thread_stats().since(heap_baseline);
             metrics.heap_ops = heap.allocs + heap.deallocs + heap.reallocs;
+            let cpu = current_cpu();
+            if metrics.last_cpu.is_some() && cpu != metrics.last_cpu {
+                metrics.cpu_migrations += 1;
+            }
+            metrics.last_cpu = cpu;
             shared.counters.store(&metrics);
         }
         shared.counters.store(&metrics);

@@ -49,9 +49,11 @@ impl Row {
 ///
 /// Array-of-structs, not structure-of-arrays: every tick updates one random row, which
 /// costs one or two cache lines here but one line *per column* in SoA. Measured with
-/// `benches/ingest.rs` at 1M symbols (beyond L3), applying ticks is ~1.7x faster than SoA;
-/// within cache both layouts are equal. Revisit if column scans (aggregates, SIMD) become
-/// the hot path.
+/// `benches/ingest.rs` (bench thread pinned to a P-core): at 1M symbols, beyond L3, AoS
+/// generates+applies 39M ticks/s vs 23M/s for SoA; at 10k symbols both run ~111M/s.
+/// Rows stay packed at 56 bytes: padding them to one 64-byte line was 5% faster at 1M
+/// symbols but 4% slower at 10k. Revisit if column scans (aggregates, SIMD) become the hot
+/// path.
 #[derive(Debug, Clone)]
 pub struct MarketTable {
     rows: Box<[Row]>,

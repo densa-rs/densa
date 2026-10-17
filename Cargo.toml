@@ -13,11 +13,13 @@ densa-alloc = { path = "crates/densa-alloc" }
 densa-data = { path = "crates/densa-data" }
 densa-engine = { path = "crates/densa-engine" }
 densa-fmt = { path = "crates/densa-fmt" }
+densa-platform = { path = "crates/densa-platform" }
 densa-sync = { path = "crates/densa-sync" }
 
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 crossbeam-utils = "0.8.23"
 loom = "0.7.2"
+windows-sys = "0.61.2"
 
 [workspace.lints.rust]
 unsafe_op_in_unsafe_fn = "deny"

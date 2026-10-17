@@ -1,0 +1,27 @@
+[package]
+name = "densa-bench"
+description = "Criterion benchmarks for densa crates (kept out of the libraries' dev-dependencies)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+
+[dev-dependencies]
+criterion.workspace = true
+densa-data.workspace = true
+densa-platform.workspace = true
+densa-sync.workspace = true
+
+[[bench]]
+name = "ingest"
+harness = false
+
+[[bench]]
+name = "triple_buffer"
+harness = false
+
+[lints]
+workspace = true

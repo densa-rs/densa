@@ -12,6 +12,57 @@ fn config(rate: Option<u64>) -> WorkerConfig {
         batch_size: 64,
         rate,
         publish_interval_ns: 0,
+        pin: None,
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn pinned_worker_stays_on_its_cpu() {
+    use densa_platform::{logical_cpus, pick_performance_cpu};
+    let target = pick_performance_cpu(&logical_cpus().unwrap()).unwrap();
+    let cfg = WorkerConfig {
+        pin: Some(target),
+        ..config(None)
+    };
+    let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+    let metrics = handle.stop().unwrap();
+    assert_eq!(metrics.last_cpu, Some(target.id), "{metrics:?}");
+    // At most the one hop from wherever the thread started onto the target.
+    assert!(metrics.cpu_migrations <= 1, "{metrics:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn unpinned_worker_reports_its_cpu() {
+    let (handle, _reader) = spawn_worker::<ROWS>(config(None), Clock::new()).unwrap();
+    std::thread::sleep(Duration::from_millis(50));
+    let metrics = handle.stop().unwrap();
+    assert!(metrics.last_cpu.is_some(), "{metrics:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn pinning_failure_stops_the_worker_and_reports_why() {
+    use densa_platform::{CpuId, LogicalCpu};
+    let bogus = LogicalCpu {
+        id: CpuId {
+            group: 0,
+            index: 63,
+        },
+        core: 63,
+        efficiency_class: 0,
+    };
+    let cfg = WorkerConfig {
+        pin: Some(bogus),
+        ..config(None)
+    };
+    match spawn_worker::<ROWS>(cfg, Clock::new()) {
+        Err(SpawnError::Pin(e)) => {
+            assert!(e.to_string().contains("SetThreadGroupAffinity"), "{e}");
+        }
+        other => panic!("expected pin error, got {:?}", other.map(|_| ())),
     }
 }
 
@@ -90,8 +141,9 @@ fn errors_have_readable_messages_and_sources() {
 }
 
 #[test]
-fn default_config_is_valid() {
+fn default_config_is_valid_and_unpinned() {
     assert_eq!(WorkerConfig::default().validate(), Ok(()));
+    assert_eq!(WorkerConfig::default().pin, None);
 }
 
 #[test]

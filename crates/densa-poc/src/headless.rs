@@ -1,11 +1,12 @@
 use crate::report::{format_duration_ns as dur, format_rate as rate};
-use crate::Args;
+use crate::{resolve_pin, Args, PinRequest};
 use densa_alloc::measure;
 use densa_data::{RowSnapshot, ViewportSnapshot};
 use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencySummary, ProbeReport, WorkerHandle, WorkerMetrics,
 };
 use densa_fmt::{write_fixed, write_grouped, FmtBuf};
+use densa_platform::{logical_cpus, CoreKind, CpuId, LogicalCpu};
 use densa_sync::Reader;
 use std::error::Error;
 use std::hint::black_box;
@@ -36,11 +37,15 @@ pub struct RunSummary {
 /// The reader does everything a real frame does except touching the GPU: picks up the
 /// newest snapshot, records latency, formats every visible cell as text, and scrolls.
 pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box<dyn Error>> {
+    let mut config = args.worker.clone();
+    let (pin, pin_note) = resolve_worker_pin(args.pin, out)?;
+    config.pin = pin;
+
     let clock = Clock::new();
-    let (worker, mut reader) = spawn_worker::<VIEWPORT_ROWS>(args.worker.clone(), clock)?;
+    let (worker, mut reader) = spawn_worker::<VIEWPORT_ROWS>(config, clock)?;
     writeln!(
         out,
-        "densa headless: {} symbols, rate {}, batch {}, publish every {}, {} fps, {} s",
+        "densa headless: {} symbols, rate {}, batch {}, publish every {}, {} fps, {} s, {}",
         args.worker.symbols,
         args.worker.rate.map_or_else(
             || "unbounded".to_owned(),
@@ -50,6 +55,7 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
         dur(args.worker.publish_interval_ns),
         args.fps,
         args.seconds,
+        pin_note,
     )?;
 
     let mut frame = Frame::new(args.worker.symbols);
@@ -104,6 +110,46 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
     };
     summary_line(out, &summary)?;
     Ok(summary)
+}
+
+const UNPINNED: &str = "worker not pinned";
+
+/// Resolves `--pin` against the live topology. `auto` degrades to unpinned (with a
+/// warning) where the OS offers no affinity control; an explicit CPU is a hard error.
+fn resolve_worker_pin(
+    request: PinRequest,
+    out: &mut impl Write,
+) -> Result<(Option<LogicalCpu>, String), Box<dyn Error>> {
+    if request == PinRequest::None {
+        return Ok((None, UNPINNED.to_owned()));
+    }
+    let cpus = match logical_cpus() {
+        Ok(cpus) => cpus,
+        Err(e) if request == PinRequest::Auto => {
+            writeln!(
+                out,
+                "warning: cannot pin the worker ({e}); running unpinned"
+            )?;
+            return Ok((None, UNPINNED.to_owned()));
+        }
+        Err(e) => return Err(e.into()),
+    };
+    let pin = resolve_pin(request, &cpus)?;
+    let note = pin.map_or_else(
+        || UNPINNED.to_owned(),
+        |cpu| {
+            format!(
+                "worker pinned to cpu {} ({})",
+                cpu.id,
+                CoreKind::of(&cpu, &cpus)
+            )
+        },
+    );
+    Ok((pin, note))
+}
+
+fn cpu_name(cpu: Option<CpuId>) -> String {
+    cpu.map_or_else(|| "?".to_owned(), |id| id.to_string())
 }
 
 /// Per-frame state of the simulated render loop. Everything is preallocated.
@@ -193,7 +239,8 @@ fn report_line(
     writeln!(
         out,
         "[{second:>3}s] {} ticks/s | {} publishes/s | {} frames ({} fresh, {} skipped) | \
-         snapshot age {} | tick age {} | heap ops: worker {}, frame loop {}",
+         snapshot age {} | tick age {} | worker cpu {} (+{} migrations) | \
+         heap ops: worker {}, frame loop {}",
         rate((now.ticks_applied - last.ticks_applied) as f64),
         rate((now.publishes - last.publishes) as f64),
         frames.frames,
@@ -201,6 +248,8 @@ fn report_line(
         frames.skipped_snapshots,
         latency(&frames.snapshot_age),
         latency(&frames.tick_age),
+        cpu_name(now.last_cpu),
+        now.cpu_migrations - last.cpu_migrations,
         now.heap_ops,
         reader_heap_ops,
     )
@@ -210,8 +259,8 @@ fn summary_line(out: &mut impl Write, s: &RunSummary) -> std::io::Result<()> {
     writeln!(
         out,
         "summary: {:.2}s | {} ticks ({} ticks/s, {} rejected, {} pacer resets) | {} publishes | \
-         {} frames ({:.1} fps) | snapshot age {} | tick age {} | heap ops after startup: \
-         worker {}, frame loop {}",
+         {} frames ({:.1} fps) | snapshot age {} | tick age {} | worker cpu {}, migrations {} | \
+         heap ops after startup: worker {}, frame loop {}",
         s.elapsed_s,
         s.worker.ticks_applied,
         rate(s.worker.ticks_applied as f64 / s.elapsed_s),
@@ -222,6 +271,8 @@ fn summary_line(out: &mut impl Write, s: &RunSummary) -> std::io::Result<()> {
         s.frames as f64 / s.elapsed_s,
         latency(&s.snapshot_age),
         latency(&s.tick_age),
+        cpu_name(s.worker.last_cpu),
+        s.worker.cpu_migrations,
         s.worker.heap_ops,
         s.reader_heap_ops,
     )

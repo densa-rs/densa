@@ -1,13 +1,13 @@
 //! Ingestion hot path costs, including the table layout comparison that chose AoS.
 //!
-//! Run: `cargo bench -p densa-data --bench ingest`
+//! Run: `cargo bench -p densa-bench --bench ingest`
 //!
 //! Ticks are generated inside the timed loop so symbol accesses cover the whole table
 //! uniformly, as a real feed does. (Cycling through a few pre-generated batches touches only
 //! ~64k distinct symbols and flatters any layout on a 1M-row table.) Every variant pays the
 //! same generator cost; `generator_fill_1024` measures it alone for subtraction.
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use densa_data::{Direction, MarketTable, Tick, TickGenerator, ViewportSnapshot};
 use std::hint::black_box;
 
@@ -228,4 +228,19 @@ fn snapshot(c: &mut Criterion) {
 }
 
 criterion_group!(benches, layouts, generate, snapshot);
-criterion_main!(benches);
+
+/// Pinned to a performance core: unpinned, the same code measured 2-3x apart between runs
+/// on a hybrid CPU depending on whether the bench thread landed on an efficiency core.
+fn main() {
+    use densa_platform::{logical_cpus, pick_performance_cpu, pin_current_thread};
+    match logical_cpus().map(|cpus| pick_performance_cpu(&cpus)) {
+        Ok(Some(cpu)) => match pin_current_thread(cpu) {
+            Ok(()) => eprintln!("bench thread pinned to cpu {}", cpu.id),
+            Err(e) => eprintln!("warning: bench thread not pinned: {e}"),
+        },
+        Ok(None) => eprintln!("warning: bench thread not pinned: no CPUs reported"),
+        Err(e) => eprintln!("warning: bench thread not pinned: {e}"),
+    }
+    benches();
+    Criterion::default().configure_from_args().final_summary();
+}

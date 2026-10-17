@@ -36,6 +36,46 @@ fn window_mode_is_reported_as_not_implemented() {
     assert!(text(&out.stderr).contains("window mode is not implemented yet"));
 }
 
+#[cfg(windows)]
+#[test]
+fn list_cpus_prints_the_topology() {
+    let out = run(&["--list-cpus"]);
+    assert!(out.status.success());
+    let stdout = text(&out.stdout);
+    assert!(stdout.starts_with("cpu  core  class  kind"), "{stdout}");
+    assert!(stdout.contains("--pin auto would choose cpu"), "{stdout}");
+}
+
+#[cfg(windows)]
+#[test]
+fn pinned_headless_session_stays_on_one_cpu() {
+    let out = run(&[
+        "--headless",
+        "--seconds",
+        "2",
+        "--symbols",
+        "1000",
+        "--pin",
+        "auto",
+    ]);
+    let stdout = text(&out.stdout);
+    assert!(out.status.success(), "stderr: {}", text(&out.stderr));
+    assert!(
+        stdout
+            .lines()
+            .next()
+            .unwrap_or_default()
+            .contains("worker pinned to cpu"),
+        "{stdout}"
+    );
+    let summary = stdout.lines().last().unwrap_or_default();
+    // 0, or 1 if the first batch ran before the OS applied the affinity.
+    assert!(
+        summary.contains("migrations 0 ") || summary.contains("migrations 1 "),
+        "{summary}"
+    );
+}
+
 #[test]
 fn headless_session_reports_every_second_with_zero_heap_ops() {
     let out = run(&["--headless", "--seconds", "2", "--symbols", "1000"]);

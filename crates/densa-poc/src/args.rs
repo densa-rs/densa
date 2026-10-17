@@ -1,3 +1,4 @@
+use crate::PinRequest;
 use densa_engine::WorkerConfig;
 use std::fmt;
 
@@ -17,6 +18,9 @@ Options:
   --publish-interval-us <N>  Minimum time between snapshot publishes [default: 100]
   --fps <N>                  Frame rate of the render loop [default: 120]
   --seed <N>                 Random seed of the synthetic feed [default: 1]
+  --pin <auto|none|CPU>      Pin the worker thread: `auto` picks a performance core,
+                             `none` leaves placement to the OS [default: auto]
+  --list-cpus                Print the CPU topology (core kinds, --pin choice) and exit
   -h, --help                 Print this help
 ";
 
@@ -33,6 +37,9 @@ pub struct Args {
     pub seconds: u64,
     pub fps: u32,
     pub worker: WorkerConfig,
+    /// Resolved into `worker.pin` against the live CPU topology at startup.
+    pub pin: PinRequest,
+    pub list_cpus: bool,
 }
 
 /// A user-facing command-line error.
@@ -59,6 +66,11 @@ impl Args {
             seconds: 10,
             fps: 120,
             worker: WorkerConfig::default(),
+            // On hybrid CPUs an unpinned busy-spinning worker migrates hundreds of times
+            // per second and runs 2-4x slower whenever it lands on an efficiency core
+            // (scripts/pinning_experiment.ps1).
+            pin: PinRequest::Auto,
+            list_cpus: false,
         };
         let mut rate = None;
         let mut unbounded = false;
@@ -73,6 +85,8 @@ impl Args {
                 "--headless" => parsed.mode = Mode::Headless,
                 "-h" | "--help" => parsed.help = true,
                 "--unbounded" => unbounded = true,
+                "--list-cpus" => parsed.list_cpus = true,
+                "--pin" => parsed.pin = parse_pin(&value()?)?,
                 "--seconds" => parsed.seconds = parse_u64(&arg, &value()?)?,
                 "--rate" => rate = Some(parse_u64(&arg, &value()?)?),
                 "--symbols" => parsed.worker.symbols = parse_bounded(&arg, &value()?)?,
@@ -108,6 +122,18 @@ impl Args {
         }
         parsed.worker.validate().map_err(|e| error(e.to_string()))?;
         Ok(parsed)
+    }
+}
+
+fn parse_pin(raw: &str) -> Result<PinRequest, ArgsError> {
+    match raw {
+        "auto" => Ok(PinRequest::Auto),
+        "none" => Ok(PinRequest::None),
+        _ => raw.parse().map(PinRequest::Index).map_err(|_| {
+            error(format!(
+                "`--pin` expects `auto`, `none` or a CPU index (0-255), got `{raw}`"
+            ))
+        }),
     }
 }
 

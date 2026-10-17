@@ -13,12 +13,7 @@ crossbeam-utils.workspace = true
 loom.workspace = true
 
 [dev-dependencies]
-criterion.workspace = true
 densa-alloc.workspace = true
-
-[[bench]]
-name = "triple_buffer"
-harness = false
 
 [lints]
 workspace = true

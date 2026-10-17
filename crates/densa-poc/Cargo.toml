@@ -12,6 +12,7 @@ densa-alloc.workspace = true
 densa-data.workspace = true
 densa-engine.workspace = true
 densa-fmt.workspace = true
+densa-platform.workspace = true
 densa-sync.workspace = true
 
 [lints]
