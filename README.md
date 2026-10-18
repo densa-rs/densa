@@ -39,6 +39,8 @@ every frame without allocating memory.
   input methods (IME), built on [parley](https://github.com/linebender/parley).
 - **Bounded memory.** The glyph atlas grows to a fixed limit, then reuses the least recently
   used space, never a glyph drawn in the current frame.
+- **Apache Arrow native.** Show record batches from Parquet, DataFusion, DuckDB or a stream
+  directly: arrays are shared, not copied, and a million-row table draws a frame in ~52 µs.
 - **Use only what you need.** Rendering, text and data hand-off are independent crates, and no
   third-party types appear in densa's APIs.
 
@@ -52,6 +54,7 @@ cd densa
 cargo run --release -p trading-demo                          # live data grid
 cargo run --release -p densa-paragraph --example paragraphs  # text and selection
 cargo run --release -p densa-paragraph --example editor      # editable text
+cargo run --release -p densa-arrow --example table -- --live  # a million-row Arrow table
 ```
 
 To use the crates before they are published, depend on the repository:
@@ -69,6 +72,7 @@ densa-sync = { git = "https://github.com/densa-rs/densa" }
 |---|---|
 | [`densa-render`](crates/densa-render) | Drawing with wgpu: a `Canvas` that batches rectangles and text into one draw call, and a data grid you fill from your own data (`GridSource`) |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection, keyboard navigation, and editing with input methods (IME) |
+| [`densa-arrow`](crates/densa-arrow) | Apache Arrow record batches in the data grid: typed, allocation-free cell formatting, appending batches while shown |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
 | [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect` |
 | [`densa-sync`](crates/densa-sync) | Wait-free triple buffer: hand the latest data from a producer thread to the UI thread without locks |
@@ -76,7 +80,8 @@ densa-sync = { git = "https://github.com/densa-rs/densa" }
 | [`densa-fmt`](crates/densa-fmt) | Number formatting into stack buffers, without allocating |
 | [`densa-alloc`](crates/densa-alloc) | A counting global allocator to prove a code path allocates nothing |
 
-Only `densa-render` depends on a GPU or windowing crate.
+Only `densa-render`, and `densa-arrow` through it, depend on a GPU crate; text, paragraphs,
+data hand-off and formatting do not.
 
 ## Usage
 
@@ -118,6 +123,31 @@ impl GridSource for Sensors<'_> {
 `GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuGrid` submits the result.
 [`examples/trading-demo/src/market.rs`](examples/trading-demo/src/market.rs) is a complete
 source with formatting and flashing cells.
+
+### Apache Arrow tables
+
+```rust
+use densa_arrow::ArrowTable;
+use densa_render::{GridPainter, Palette};
+
+let mut table = ArrowTable::from_batches(batches)?; // Vec<RecordBatch>, shared not copied
+table.set_decimals(3, Some(2))?; // fixed decimals for a float column
+let mut painter = GridPainter::new(table.columns(), 40, font, 13.0, Palette::new());
+
+// Every frame: a view scrolled to the first visible row. No allocation.
+painter.paint(&table.view(first_row, &palette), &mut canvas);
+
+// Streaming: append batches while the table is shown.
+table.push(next_batch)?;
+```
+
+Columns are titled by field name, sized from the first rows and aligned by type. Integers,
+floats, decimals, strings (including dictionaries and views), booleans, dates, times,
+timestamps and durations are formatted without allocating; other types show `?`, and nulls
+show a dimmed `null`. The [`table` example](crates/densa-arrow/examples/table.rs) scrolls a
+million-row table and, with `--live`, appends a batch every 100 ms.
+
+<p align="center"><img alt="A million-row Arrow table of orders: id, customer, region, unit price, total, time placed and paid flag" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="560"></p>
 
 ### Paragraphs
 
@@ -244,7 +274,8 @@ Intel i7-14700KF (8 performance + 12 efficiency cores), RTX 4060 Ti (Vulkan), 19
 | Headless, unbounded, batch 1024 | 115.3M ticks/s | 120.0 fps | 47 µs / 107 µs | 0 |
 
 Building a 50-row frame takes ~37 µs (p50) and ~66 µs (p99) on a performance core. Triple
-buffer: publish 4.4 ns, read 10.6 ns. Glyph cache: 2,500 lookups in ~20 µs. wgpu allocates
+buffer: publish 4.4 ns, read 10.6 ns. Glyph cache: 2,500 lookups in ~20 µs. A 50-row frame
+of a million-row Arrow table (6 columns, scrolled to a new place each frame): ~52 µs. wgpu allocates
 internally during submit and present; the allocation counts cover densa's code. Benchmarks are
 pinned to performance cores: unpinned runs on hybrid CPUs vary by 2-3×.
 

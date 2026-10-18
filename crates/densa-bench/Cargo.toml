@@ -12,13 +12,20 @@ publish = false
 trading-demo.workspace = true
 
 [dev-dependencies]
+arrow-array.workspace = true
 criterion.workspace = true
+densa-arrow.workspace = true
+densa-render.workspace = true
 densa-platform.workspace = true
 densa-sync.workspace = true
 densa-text.workspace = true
 
 [[bench]]
 name = "text"
+harness = false
+
+[[bench]]
+name = "arrow"
 harness = false
 
 [[bench]]
