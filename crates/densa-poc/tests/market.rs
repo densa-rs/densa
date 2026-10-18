@@ -5,7 +5,8 @@ use densa_poc::{
     flash_alpha, market_columns, market_painter, MarketGrid, FLASH_MAX_ALPHA, FLASH_NS,
     MARKET_GLYPHS,
 };
-use densa_render::{CellStyle, CellText, GridSource, InstanceBuffer, Palette};
+use densa_render::{Canvas, CellStyle, CellText, GridSource, InstanceBuffer, Palette};
+use densa_text::{AtlasConfig, GlyphCache};
 
 const ROWS: usize = 4;
 const LAST: usize = 3;
@@ -137,7 +138,7 @@ fn last_price_text_is_colored_by_direction() {
 
 #[test]
 fn prices_too_long_for_the_buffer_overflow_to_hash_fill() {
-    let painter = market_painter(1).unwrap();
+    let painter = market_painter(1, &mut GlyphCache::new(AtlasConfig::DEFAULT)).unwrap();
     let snap = snapshot(&[row(1, 1e300, 1.0, 1.0, 0)]);
     let grid = MarketGrid::new(&snap, 0, *painter.palette());
     let mut text = CellText::new();
@@ -147,8 +148,9 @@ fn prices_too_long_for_the_buffer_overflow_to_hash_fill() {
 
 #[test]
 fn worst_case_viewport_fits_capacity_and_needs_no_new_glyphs() {
-    let mut painter = market_painter(50).unwrap();
-    painter.drain_updates().for_each(drop);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut painter = market_painter(50, &mut cache).unwrap();
+    cache.drain_updates().for_each(drop);
     let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
     let mut snap = ViewportSnapshot::<50>::new();
     for (i, r) in snap.rows.iter_mut().enumerate() {
@@ -165,7 +167,11 @@ fn worst_case_viewport_fits_capacity_and_needs_no_new_glyphs() {
         };
     }
     snap.len = 50;
-    painter.paint(&MarketGrid::new(&snap, 100, *painter.palette()), &mut buf);
+    let palette = *painter.palette();
+    painter.paint(
+        &MarketGrid::new(&snap, 100, palette),
+        &mut Canvas::begin(&mut cache, &mut buf),
+    );
     assert_eq!(
         buf.dropped(),
         0,
@@ -173,7 +179,7 @@ fn worst_case_viewport_fits_capacity_and_needs_no_new_glyphs() {
         painter.layout().max_instances()
     );
     assert_eq!(
-        painter.drain_updates().count(),
+        cache.drain_updates().count(),
         0,
         "a glyph is missing from MARKET_GLYPHS ({MARKET_GLYPHS})"
     );

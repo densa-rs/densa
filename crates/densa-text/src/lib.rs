@@ -17,11 +17,13 @@ mod cache;
 mod font;
 mod glyph_map;
 mod raster;
+mod run;
 
 pub use cache::{
     quantize_x, AtlasConfig, AtlasLimitError, AtlasUpdate, CacheStats, CachedGlyph, GlyphCache,
     GlyphUnavailable, GlyphUpload, SUBPIXEL_STEPS,
 };
-pub use font::{Font, FontError, FontId, GlyphId, LineMetrics, BUNDLED_MONO};
+pub use font::{Font, FontBytes, FontError, FontId, GlyphId, LineMetrics, BUNDLED_MONO};
 pub use glyph_map::{GlyphMap, MappedGlyph, MAX_CACHED_CHARS};
 pub use raster::{rasterize, GlyphBitmap};
+pub use run::{GlyphRun, PositionedGlyph};

@@ -16,8 +16,9 @@ use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencyHistogram, WorkerHandle, WorkerMetrics,
 };
 use densa_platform::logical_cpus;
-use densa_render::{GpuGrid, GridPainter, InstanceBuffer};
+use densa_render::{Canvas, GpuGrid, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
+use densa_text::{AtlasConfig, GlyphCache};
 use std::error::Error;
 use std::io::Write;
 use std::sync::Arc;
@@ -156,6 +157,7 @@ struct Session {
     view_format: wgpu::TextureFormat,
     gpu: GpuGrid,
     painter: GridPainter,
+    cache: GlyphCache,
     instances: InstanceBuffer,
     reader: Reader<ViewportSnapshot<VIEWPORT_ROWS>>,
     worker: WorkerHandle,
@@ -175,7 +177,8 @@ impl Session {
         out: &mut impl Write,
     ) -> Result<Self, Box<dyn Error>> {
         // Lossless: VIEWPORT_ROWS is a small constant.
-        let mut painter = market_painter(VIEWPORT_ROWS as u32)?;
+        let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        let painter = market_painter(VIEWPORT_ROWS as u32, &mut cache)?;
         let layout = painter.layout().clone();
         let attributes = Window::default_attributes()
             .with_title("densa")
@@ -209,7 +212,7 @@ impl Session {
         }
         surface.configure(&device, &config);
         // Grow the glyph atlas only as far as this GPU's textures go.
-        painter.limit_atlas_side(GpuGrid::max_atlas_side(&device))?;
+        cache.limit_side(GpuGrid::max_atlas_side(&device))?;
         let gpu = GpuGrid::new(&device, view_format, layout.max_instances());
 
         let mut worker_config = args.worker.clone();
@@ -254,6 +257,7 @@ impl Session {
             view_format,
             gpu,
             painter,
+            cache,
             instances: InstanceBuffer::with_capacity(layout.max_instances()),
             reader,
             worker,
@@ -296,18 +300,15 @@ impl Session {
 
         let fresh = self.reader.update();
         let now = self.clock.now_ns();
-        let (reader, painter, instances, stats) = (
-            &self.reader,
-            &mut self.painter,
-            &mut self.instances,
-            &mut self.stats,
-        );
+        let (reader, painter, stats) = (&self.reader, &mut self.painter, &mut self.stats);
+        let (cache, instances) = (&mut self.cache, &mut self.instances);
         let ((), paint_heap) = measure(|| {
+            let mut canvas = Canvas::begin(cache, instances);
             reader.read(|snapshot| {
                 stats.window_probe.observe(snapshot, fresh, now);
                 stats.total_probe.observe(snapshot, fresh, now);
                 let palette = *painter.palette();
-                painter.paint(&MarketGrid::new(snapshot, now, palette), instances);
+                painter.paint(&MarketGrid::new(snapshot, now, palette), &mut canvas);
             });
         });
         let paint_ns = self.clock.now_ns() - now;
@@ -332,7 +333,7 @@ impl Session {
     /// occluded or just reconfigured).
     fn submit(&mut self) -> Result<bool, Box<dyn Error>> {
         self.gpu
-            .apply_atlas_updates(&self.device, &self.queue, self.painter.drain_updates())?;
+            .apply_atlas_updates(&self.device, &self.queue, self.cache.drain_updates())?;
         let count = self.gpu.prepare(
             &self.queue,
             (self.config.width, self.config.height),

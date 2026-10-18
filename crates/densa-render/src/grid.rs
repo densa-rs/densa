@@ -1,9 +1,6 @@
-use crate::{Align, Column, GridLayout, Instance, InstanceBuffer, Palette};
+use crate::{Align, Canvas, Column, GridLayout, Palette};
 use densa_fmt::FmtBuf;
-use densa_text::{
-    quantize_x, AtlasConfig, AtlasLimitError, AtlasUpdate, CacheStats, Font, GlyphCache, GlyphMap,
-    SUBPIXEL_STEPS,
-};
+use densa_text::{Font, GlyphCache, GlyphMap, SUBPIXEL_STEPS};
 
 /// Bytes a cell's text may take. [`FmtBuf`] appends are all-or-nothing, so a write that
 /// does not fit leaves the cell as it was (blank if nothing was written yet), not truncated.
@@ -37,12 +34,12 @@ pub trait GridSource {
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle;
 }
 
-/// Turns a [`GridSource`] into the [`Instance`]s of one frame.
+/// Draws a [`GridSource`] onto a [`Canvas`].
 ///
-/// Owns the font, its character map and the glyph atlas cache. Painting a frame whose
-/// characters have all been drawn (or [prewarmed](Self::prewarm)) before allocates nothing;
-/// a character seen for the first time is mapped and rasterized (allocating, once) and its
-/// pixels queued in [`drain_updates`](Self::drain_updates) for the GPU atlas.
+/// Owns the column layout and the font's character map; glyphs come from the canvas's
+/// shared cache. Painting a frame whose characters have all been drawn (or
+/// [prewarmed](Self::prewarm)) before allocates nothing; a character seen for the first time
+/// is mapped and rasterized, allocating once.
 #[derive(Debug)]
 pub struct GridPainter {
     columns: Box<[Column]>,
@@ -61,21 +58,9 @@ impl GridPainter {
             columns: columns.into_boxed_slice(),
             layout,
             palette,
-            text: TextPen {
-                glyphs,
-                cache: GlyphCache::new(AtlasConfig::DEFAULT),
-            },
+            text: TextPen { glyphs },
             cell: CellText::new(),
         }
-    }
-
-    /// The painter with a glyph atlas shaped by `config` instead of [`AtlasConfig::DEFAULT`]
-    /// (for example larger pages for big fonts). Starts the cache afresh: call it before
-    /// [`prewarm`](Self::prewarm) or painting.
-    #[must_use]
-    pub fn with_atlas(mut self, config: AtlasConfig) -> Self {
-        self.text.cache = GlyphCache::new(config);
-        self
     }
 
     /// The geometry this painter draws with.
@@ -93,65 +78,36 @@ impl GridPainter {
         &self.columns
     }
 
-    /// Current glyph atlas size in texels, `(width, height)`.
-    pub fn atlas_extent(&self) -> (u32, u32) {
-        self.text.cache.atlas_extent()
-    }
-
-    /// Glyph cache counters.
-    pub fn cache_stats(&self) -> CacheStats {
-        self.text.cache.stats()
-    }
-
-    /// Rasterizes every character of `chars` at every subpixel position now, so frames that
-    /// only use them never rasterize (or allocate). Uploads queue as usual.
+    /// Rasterizes every character of `chars` into `cache` at every subpixel position now,
+    /// so frames that only use them never rasterize (or allocate). Updates queue as usual.
     ///
     /// Returns how many glyphs could not be cached (the atlas is too small for the set, or a
     /// glyph is larger than a page); they would be retried, and allocate, while painting.
-    pub fn prewarm(&mut self, chars: &str) -> usize {
-        let pen = &mut self.text;
-        pen.cache.begin_frame();
+    pub fn prewarm(&mut self, cache: &mut GlyphCache, chars: &str) -> usize {
+        let glyphs = &mut self.text.glyphs;
         let mut missing = 0;
         for ch in chars.chars() {
-            let Some(mapped) = pen.glyphs.get(ch) else {
+            let Some(mapped) = glyphs.get(ch) else {
                 continue;
             };
             for bin in 0..SUBPIXEL_STEPS {
-                let font = pen.glyphs.font();
-                let cached = pen.cache.get(font, mapped.id, pen.glyphs.px(), bin);
+                let cached = cache.get(glyphs.font(), mapped.id, glyphs.px(), bin);
                 missing += usize::from(cached.is_err());
             }
         }
         missing
     }
 
-    /// Caps the glyph atlas to `max_side` texels, the GPU's `max_texture_dimension_2d`
-    /// (see `GpuGrid::max_atlas_side`), so it never grows past what the device can hold.
-    ///
-    /// # Errors
-    /// If the atlas already needs more than `max_side`.
-    pub fn limit_atlas_side(&mut self, max_side: u32) -> Result<(), AtlasLimitError> {
-        self.text.cache.limit_side(max_side)
-    }
-
-    /// Takes the atlas changes queued since the last call; apply them to the GPU atlas
-    /// (`GpuGrid::apply_atlas_updates`) before drawing the frame just painted.
-    pub fn drain_updates(&mut self) -> impl ExactSizeIterator<Item = AtlasUpdate> + '_ {
-        self.text.cache.drain_updates()
-    }
-
-    /// Replaces `out` with the frame for `source`.
-    pub fn paint<S: GridSource + ?Sized>(&mut self, source: &S, out: &mut InstanceBuffer) {
-        out.clear();
-        self.text.cache.begin_frame();
+    /// Draws the grid for `source` onto `canvas`.
+    pub fn paint<S: GridSource + ?Sized>(&mut self, source: &S, canvas: &mut Canvas<'_>) {
         let width = self.layout.width() as f32;
         let row_height = self.layout.row_height() as f32;
 
         let header_y = self.layout.row_y(0) as f32;
-        out.push(Instance::solid(
+        canvas.fill_rect(
             [0.0, header_y, width, row_height],
             self.palette.header_background,
-        ));
+        );
         let baseline = self.layout.baseline_y(0);
         for (index, column) in self.columns.iter().enumerate() {
             let cell = Cell {
@@ -160,24 +116,21 @@ impl GridPainter {
                 baseline,
                 color: self.palette.header_text,
             };
-            self.text.draw(&column.title, cell, &self.layout, out);
+            self.text.draw(&column.title, cell, &self.layout, canvas);
         }
 
         let visible = source.rows().min(self.layout.rows() as usize);
         for (row, grid_row) in (0..visible).zip(1u32..) {
             let y = self.layout.row_y(grid_row) as f32;
             if grid_row.is_multiple_of(2) {
-                out.push(Instance::solid(
-                    [0.0, y, width, row_height],
-                    self.palette.stripe,
-                ));
+                canvas.fill_rect([0.0, y, width, row_height], self.palette.stripe);
             }
             let baseline = self.layout.baseline_y(grid_row);
             for (index, column) in self.columns.iter().enumerate() {
                 self.cell.clear();
                 let style = source.cell(row, index, &mut self.cell);
                 if let Some(background) = style.background {
-                    out.push(Instance::solid(self.cell_rect(index, y), background));
+                    canvas.fill_rect(self.cell_rect(index, y), background);
                 }
                 let cell = Cell {
                     index,
@@ -185,7 +138,8 @@ impl GridPainter {
                     baseline,
                     color: style.color,
                 };
-                self.text.draw(self.cell.as_str(), cell, &self.layout, out);
+                self.text
+                    .draw(self.cell.as_str(), cell, &self.layout, canvas);
             }
         }
     }
@@ -212,11 +166,10 @@ struct Cell {
     color: [f32; 4],
 }
 
-/// Character mapping plus glyph cache: lays out and emits glyph quads.
+/// The grid font's character map: lays out cell text and draws it glyph by glyph.
 #[derive(Debug)]
 struct TextPen {
     glyphs: GlyphMap,
-    cache: GlyphCache,
 }
 
 /// Text that cannot be measured more precisely than this is treated as fitting.
@@ -226,14 +179,14 @@ impl TextPen {
     /// Draws `text` aligned in its column; text wider than the column (in pixels or in
     /// characters) becomes `#` fill, like a spreadsheet, rather than a misleading truncated
     /// number.
-    fn draw(&mut self, text: &str, cell: Cell, layout: &GridLayout, out: &mut InstanceBuffer) {
+    fn draw(&mut self, text: &str, cell: Cell, layout: &GridLayout, canvas: &mut Canvas<'_>) {
         let left = layout.column_x(cell.index) as f32;
         let room = layout.column_width(cell.index) as f32;
         let max_chars = layout.column_chars(cell.index) as usize;
 
         let width = self.glyphs.measure(text);
         if width <= room + FIT_EPSILON && text.chars().count() <= max_chars {
-            self.run(text.chars(), width, left, room, cell, out);
+            self.run(text.chars(), width, left, room, cell, canvas);
             return;
         }
         let hash = self
@@ -243,7 +196,7 @@ impl TextPen {
         // Lossless: column widths are a few hundred pixels at most.
         let count = ((room / hash) as usize).min(max_chars);
         let fill = std::iter::repeat_n('#', count);
-        self.run(fill, count as f32 * hash, left, room, cell, out);
+        self.run(fill, count as f32 * hash, left, room, cell, canvas);
     }
 
     fn run(
@@ -253,7 +206,7 @@ impl TextPen {
         left: f32,
         room: f32,
         cell: Cell,
-        out: &mut InstanceBuffer,
+        canvas: &mut Canvas<'_>,
     ) {
         let mut pen = match cell.align {
             Align::Left => left,
@@ -263,25 +216,9 @@ impl TextPen {
             let Some(mapped) = self.glyphs.get(ch) else {
                 continue;
             };
-            let (x, bin) = quantize_x(pen);
-            pen += mapped.advance;
             let (font, px) = (self.glyphs.font(), self.glyphs.px());
-            let Ok(glyph) = self.cache.get(font, mapped.id, px, bin) else {
-                continue; // Nothing to draw this frame: counted in the cache stats.
-            };
-            if glyph.size[0] == 0.0 {
-                continue; // No ink, e.g. a space.
-            }
-            out.push(Instance::glyph(
-                [
-                    x as f32 + glyph.offset[0],
-                    cell.baseline + glyph.offset[1],
-                    glyph.size[0],
-                    glyph.size[1],
-                ],
-                glyph.atlas_rect,
-                cell.color,
-            ));
+            canvas.draw_glyph(font, mapped.id, px, [pen, cell.baseline], cell.color);
+            pen += mapped.advance;
         }
     }
 }

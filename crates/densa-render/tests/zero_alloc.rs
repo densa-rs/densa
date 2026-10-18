@@ -3,9 +3,9 @@
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_fmt::write_fixed;
 use densa_render::{
-    Align, CellStyle, CellText, Column, GridPainter, GridSource, InstanceBuffer, Palette,
+    Align, Canvas, CellStyle, CellText, Column, GridPainter, GridSource, InstanceBuffer, Palette,
 };
-use densa_text::Font;
+use densa_text::{AtlasConfig, Font, GlyphCache};
 use std::hint::black_box;
 
 #[global_allocator]
@@ -48,19 +48,21 @@ fn painting_warm_frames_performs_zero_heap_operations() {
     let font = Font::bundled_mono().unwrap();
     let mut painter = GridPainter::new(columns, 50, font, 14.0, Palette::new());
     let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
 
     // Startup: every glyph the frames use, at every subpixel position.
-    assert_eq!(painter.prewarm("NAMEVLU0123456789.Ngân hà"), 0);
-    painter.drain_updates().for_each(drop);
+    assert_eq!(painter.prewarm(&mut cache, "NAMEVLU0123456789.Ngân hà"), 0);
+    cache.drain_updates().for_each(drop);
 
     let ((), stats) = measure(|| {
         for frame in 0..1_000 {
-            painter.paint(&Ticking { frame }, &mut buf);
-            painter.drain_updates().for_each(drop);
+            let mut canvas = Canvas::begin(&mut cache, &mut buf);
+            painter.paint(&Ticking { frame }, &mut canvas);
+            cache.drain_updates().for_each(drop);
             black_box(buf.as_slice());
         }
     });
     assert!(stats.is_zero(), "painting allocated: {stats:?}");
     assert_eq!(buf.dropped(), 0);
-    assert_eq!(painter.cache_stats().dropped, 0);
+    assert_eq!(cache.stats().dropped, 0);
 }

@@ -12,6 +12,7 @@
 //!   a glyph sampled from the atlas.
 
 mod atlas;
+mod canvas;
 mod color;
 mod gpu;
 mod grid;
@@ -19,6 +20,7 @@ mod instance;
 mod layout;
 
 pub use atlas::AtlasError;
+pub use canvas::Canvas;
 pub use color::{srgb, Palette};
 pub use gpu::GpuGrid;
 pub use grid::{CellStyle, CellText, GridPainter, GridSource, CELL_BYTES};

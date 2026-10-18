@@ -1,9 +1,10 @@
 //! Generic grid painting: layout from font metrics, alignment, overflow, styles, capacity.
 
 use densa_render::{
-    Align, CellStyle, CellText, Column, GridPainter, GridSource, Instance, InstanceBuffer, Palette,
+    Align, Canvas, CellStyle, CellText, Column, GridPainter, GridSource, Instance, InstanceBuffer,
+    Palette,
 };
-use densa_text::Font;
+use densa_text::{AtlasConfig, Font, GlyphCache};
 
 const PX: f32 = 14.0;
 
@@ -56,8 +57,14 @@ fn source(rows: Vec<Vec<&'static str>>) -> TestSource {
 }
 
 fn paint(p: &mut GridPainter, s: &TestSource) -> InstanceBuffer {
+    paint_with(p, s, &mut GlyphCache::new(AtlasConfig::DEFAULT))
+}
+
+/// One frame of `s` through `cache`.
+fn paint_with(p: &mut GridPainter, s: &TestSource, cache: &mut GlyphCache) -> InstanceBuffer {
     let mut out = InstanceBuffer::with_capacity(p.layout().max_instances());
-    p.paint(s, &mut out);
+    let mut canvas = Canvas::begin(cache, &mut out);
+    p.paint(s, &mut canvas);
     out
 }
 
@@ -294,10 +301,39 @@ mod capacity {
     fn new_glyphs_are_queued_for_upload_once() {
         let mut p = painter(1);
         let s = source(vec![vec!["abc", "1"]]);
-        paint(&mut p, &s);
-        let first = p.drain_updates().count();
+        let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        paint_with(&mut p, &s, &mut cache);
+        let first = cache.drain_updates().count();
         assert!(first >= 4, "header and cell glyphs uploaded, got {first}");
-        paint(&mut p, &s);
-        assert_eq!(p.drain_updates().count(), 0, "warm frame uploads nothing");
+        paint_with(&mut p, &s, &mut cache);
+        assert_eq!(
+            cache.drain_updates().count(),
+            0,
+            "warm frame uploads nothing"
+        );
+    }
+
+    #[test]
+    fn painters_append_to_one_frame_through_one_cache() {
+        let (mut a, mut b) = (painter(1), painter(1));
+        let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        let mut out = InstanceBuffer::with_capacity(2 * a.layout().max_instances());
+        let s = source(vec![vec!["ab", "1"]]);
+        let one = paint(&mut a, &s).len();
+
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        a.paint(&s, &mut canvas);
+        let misses = canvas.cache().stats().misses;
+        b.paint(&s, &mut canvas);
+        assert_eq!(
+            canvas.instances().len(),
+            2 * one,
+            "the second painter appends"
+        );
+        assert_eq!(
+            canvas.cache().stats().misses,
+            misses,
+            "and reuses every glyph"
+        );
     }
 }

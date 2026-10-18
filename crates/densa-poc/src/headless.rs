@@ -10,8 +10,9 @@ use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencySummary, ProbeReport, WorkerHandle, WorkerMetrics,
 };
 use densa_platform::logical_cpus;
-use densa_render::{GridPainter, InstanceBuffer};
+use densa_render::{Canvas, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
+use densa_text::{AtlasConfig, GlyphCache};
 use std::error::Error;
 use std::hint::black_box;
 use std::io::Write;
@@ -136,6 +137,7 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
 struct Frame {
     window: FrameProbe,
     painter: GridPainter,
+    cache: GlyphCache,
     instances: InstanceBuffer,
     first_row: u32,
     max_first_row: u32,
@@ -145,13 +147,15 @@ struct Frame {
 impl Frame {
     fn new(symbols: u32) -> Result<Self, Box<dyn Error>> {
         // Lossless: VIEWPORT_ROWS is a small constant.
-        let mut painter = market_painter(VIEWPORT_ROWS as u32)?;
+        let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        let painter = market_painter(VIEWPORT_ROWS as u32, &mut cache)?;
         // No GPU here: the prewarmed glyphs' pixels are discarded, once, at startup.
-        painter.drain_updates().for_each(drop);
+        cache.drain_updates().for_each(drop);
         let instances = InstanceBuffer::with_capacity(painter.layout().max_instances());
         Ok(Self {
             window: FrameProbe::new(),
             painter,
+            cache,
             instances,
             first_row: 0,
             max_first_row: symbols.saturating_sub(VIEWPORT_ROWS as u32),
@@ -168,16 +172,16 @@ impl Frame {
     ) {
         let fresh = reader.update();
         let now = clock.now_ns();
-        let (window, painter, instances) =
-            (&mut self.window, &mut self.painter, &mut self.instances);
+        let (window, painter) = (&mut self.window, &mut self.painter);
+        let mut canvas = Canvas::begin(&mut self.cache, &mut self.instances);
         reader.read(|snapshot| {
             window.observe(snapshot, fresh, now);
             total.observe(snapshot, fresh, now);
             let palette = *painter.palette();
-            painter.paint(&MarketGrid::new(snapshot, now, palette), instances);
+            painter.paint(&MarketGrid::new(snapshot, now, palette), &mut canvas);
         });
         // Any glyph missed by the prewarm shows up here as heap operations.
-        self.painter.drain_updates().for_each(drop);
+        self.cache.drain_updates().for_each(drop);
         black_box(self.instances.as_slice());
         self.scroll();
         worker.set_viewport(self.first_row);

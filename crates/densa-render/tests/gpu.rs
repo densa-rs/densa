@@ -5,10 +5,10 @@
 //! missing adapter is a failure, not a silent pass.
 
 use densa_render::{
-    srgb, Align, AtlasError, CellStyle, CellText, Column, GpuGrid, GridPainter, GridSource,
+    srgb, Align, AtlasError, Canvas, CellStyle, CellText, Column, GpuGrid, GridPainter, GridSource,
     Instance, InstanceBuffer, Palette,
 };
-use densa_text::{AtlasConfig, AtlasUpdate, Font, GlyphUpload};
+use densa_text::{AtlasConfig, AtlasUpdate, Font, GlyphCache, GlyphUpload};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 // Target widths are multiples of 64 px: 64 * 4 bytes = 256, the copy row alignment.
@@ -400,16 +400,17 @@ fn painted_text_shows_up_as_ink_inside_its_cells() {
     let mut painter = GridPainter::new(columns, 1, font, 14.0, Palette::new());
     let layout = painter.layout().clone();
     let mut instances = InstanceBuffer::with_capacity(layout.max_instances());
-    painter.paint(&OneRow, &mut instances);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    painter.paint(&OneRow, &mut Canvas::begin(&mut cache, &mut instances));
 
     let mut grid = GpuGrid::new(&device, FORMAT, layout.max_instances());
     let written = grid
-        .apply_atlas_updates(&device, &queue, painter.drain_updates())
+        .apply_atlas_updates(&device, &queue, cache.drain_updates())
         .unwrap();
     assert!(written > 0);
     assert_eq!(
         grid.atlas_size(),
-        painter.atlas_extent(),
+        cache.atlas_extent(),
         "the GPU follows the cache"
     );
     let size = (
@@ -446,20 +447,18 @@ fn text_drawn_after_the_atlas_grew_mid_frame_still_lands_in_its_cells() {
     let font = Font::bundled_mono().unwrap();
     // 32 x 32 pages hold only a few glyphs: this frame forces several new pages.
     let atlas = AtlasConfig::new(32, 16);
-    let mut painter = GridPainter::new(columns, 1, font, 14.0, Palette::new()).with_atlas(atlas);
+    let mut painter = GridPainter::new(columns, 1, font, 14.0, Palette::new());
+    let mut cache = GlyphCache::new(atlas);
     let layout = painter.layout().clone();
     let mut instances = InstanceBuffer::with_capacity(layout.max_instances());
-    painter.paint(&OneRow, &mut instances);
-    assert!(
-        painter.atlas_extent().1 > 32,
-        "the frame must grow the atlas"
-    );
-    assert_eq!(painter.cache_stats().dropped, 0);
+    painter.paint(&OneRow, &mut Canvas::begin(&mut cache, &mut instances));
+    assert!(cache.atlas_extent().1 > 32, "the frame must grow the atlas");
+    assert_eq!(cache.stats().dropped, 0);
 
     let mut grid = GpuGrid::new(&device, FORMAT, layout.max_instances());
-    grid.apply_atlas_updates(&device, &queue, painter.drain_updates())
+    grid.apply_atlas_updates(&device, &queue, cache.drain_updates())
         .unwrap();
-    assert_eq!(grid.atlas_size(), painter.atlas_extent());
+    assert_eq!(grid.atlas_size(), cache.atlas_extent());
     let size = (
         layout.width().next_multiple_of(64),
         layout.height().next_multiple_of(64),

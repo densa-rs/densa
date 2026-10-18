@@ -54,11 +54,6 @@ fn line_metrics_scale_with_size() {
 }
 
 #[test]
-fn fonts_get_distinct_ids() {
-    assert_ne!(mono().id(), mono().id());
-}
-
-#[test]
 fn rejects_data_that_is_not_a_font() {
     let err = Font::new(b"definitely not a font".to_vec()).unwrap_err();
     assert_eq!(err, FontError::Parse);
@@ -86,4 +81,23 @@ fn glyph_extent_bounds_the_rasterized_bitmap_without_rasterizing() {
     );
     let space = font.glyph_id(' ').unwrap();
     assert_eq!(font.glyph_extent(space, 40.0), Some([0.0, 0.0]));
+}
+
+#[test]
+fn the_bundled_font_is_one_font_however_often_it_is_asked_for() {
+    assert_eq!(mono().id(), mono().id(), "shares cached glyphs");
+}
+
+#[test]
+fn faces_load_from_shared_bytes_without_copying() {
+    let bytes: densa_text::FontBytes = std::sync::Arc::new(densa_text::BUNDLED_MONO);
+    let a = Font::from_shared(bytes.clone(), 0).unwrap();
+    assert_eq!(a.bytes().as_ptr(), densa_text::BUNDLED_MONO.as_ptr());
+    assert_eq!(a.index(), 0);
+    assert_ne!(a.id(), Font::from_shared(bytes.clone(), 0).unwrap().id());
+    assert_eq!(
+        Font::from_shared(bytes, 1).unwrap_err(),
+        FontError::Parse,
+        "no face 1"
+    );
 }

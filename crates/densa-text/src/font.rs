@@ -1,6 +1,6 @@
 use std::fmt;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
@@ -54,34 +54,66 @@ impl std::error::Error for FontError {}
 
 static NEXT_FONT_ID: AtomicU32 = AtomicU32::new(1);
 
-/// An OpenType/TrueType font. Cheap to clone (the bytes are shared).
-#[derive(Debug, Clone)]
+/// Font file bytes shared without copying: a `Vec`, a `&'static [u8]`, or another library's
+/// shared buffer (such as a parley/fontique `Blob`).
+pub type FontBytes = Arc<dyn AsRef<[u8]> + Send + Sync>;
+
+/// One face of an OpenType/TrueType font file or collection. Cheap to clone (the bytes are
+/// shared); clones keep the same [`FontId`], so they share cached glyphs.
+#[derive(Clone)]
 pub struct Font {
-    data: Arc<[u8]>,
+    data: FontBytes,
+    index: u32,
     id: FontId,
 }
 
+impl fmt::Debug for Font {
+    // Hand-written: the shared bytes are opaque (and large).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Font")
+            .field("id", &self.id)
+            .field("index", &self.index)
+            .field("bytes", &self.bytes().len())
+            .finish()
+    }
+}
+
 impl Font {
-    /// Loads a font from its file bytes.
+    /// Loads a font from its file bytes (face 0 of a collection).
     ///
     /// # Errors
     ///
     /// [`FontError::Parse`] if the bytes are not a readable font.
     pub fn new(data: impl Into<Arc<[u8]>>) -> Result<Self, FontError> {
-        let data = data.into();
-        FontRef::new(&data).map_err(|_| FontError::Parse)?;
-        // ORDERING: Relaxed. Only uniqueness matters; no data is published through it.
-        let id = FontId(NEXT_FONT_ID.fetch_add(1, Ordering::Relaxed));
-        Ok(Self { data, id })
+        let data: Arc<[u8]> = data.into();
+        Self::from_shared(Arc::new(data), 0)
     }
 
-    /// The bundled JetBrains Mono ([`BUNDLED_MONO`]).
+    /// Face `index` of the font file or collection in `data`, sharing the bytes.
+    ///
+    /// Each call creates a new [`FontId`]: load a face once and clone the `Font`.
+    ///
+    /// # Errors
+    ///
+    /// [`FontError::Parse`] if the bytes are not a readable font or have no face `index`.
+    pub fn from_shared(data: FontBytes, index: u32) -> Result<Self, FontError> {
+        FontRef::from_index((*data).as_ref(), index).map_err(|_| FontError::Parse)?;
+        // ORDERING: Relaxed. Only uniqueness matters; no data is published through it.
+        let id = FontId(NEXT_FONT_ID.fetch_add(1, Ordering::Relaxed));
+        Ok(Self { data, index, id })
+    }
+
+    /// The bundled JetBrains Mono ([`BUNDLED_MONO`]). Every call returns the same font
+    /// (same [`FontId`]), so all users share its cached glyphs.
     ///
     /// # Errors
     ///
     /// Only if the bundled file were corrupt; tests guard against that.
     pub fn bundled_mono() -> Result<Self, FontError> {
-        Self::new(BUNDLED_MONO)
+        static BUNDLED: OnceLock<Result<Font, FontError>> = OnceLock::new();
+        BUNDLED
+            .get_or_init(|| Self::from_shared(Arc::new(BUNDLED_MONO), 0))
+            .clone()
     }
 
     /// This font's identity, used to key cached glyphs.
@@ -89,11 +121,21 @@ impl Font {
         self.id
     }
 
+    /// The face's index within its file (0 unless the file is a collection).
+    pub fn index(&self) -> u32 {
+        self.index
+    }
+
+    /// The whole font file.
+    pub fn bytes(&self) -> &[u8] {
+        (*self.data).as_ref()
+    }
+
     /// Parsed view of the font. Parsing reads table headers only: no allocation.
-    /// Cannot fail after `new` succeeded on the same bytes; callers still degrade
+    /// Cannot fail after construction succeeded on the same bytes; callers still degrade
     /// gracefully instead of panicking.
     pub(crate) fn font_ref(&self) -> Option<FontRef<'_>> {
-        FontRef::new(&self.data).ok()
+        FontRef::from_index(self.bytes(), self.index).ok()
     }
 
     /// The glyph the font draws for `ch`, or `None` if it has no glyph for it.
