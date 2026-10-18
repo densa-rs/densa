@@ -60,6 +60,21 @@ fn worker_defaults_to_normal_priority() {
     handle.stop().unwrap();
 }
 
+/// Distinct physical cores of the fastest efficiency class.
+#[cfg(windows)]
+fn performance_cores() -> usize {
+    let cpus = densa_platform::logical_cpus().unwrap();
+    let fastest = cpus.iter().map(|c| c.efficiency_class).max().unwrap_or(0);
+    let mut cores: Vec<u8> = cpus
+        .iter()
+        .filter(|c| c.efficiency_class == fastest)
+        .map(|c| c.core)
+        .collect();
+    cores.sort_unstable();
+    cores.dedup();
+    cores.len()
+}
+
 #[cfg(windows)]
 #[test]
 fn concurrent_auto_workers_get_separate_physical_cores() {
@@ -69,8 +84,17 @@ fn concurrent_auto_workers_get_separate_physical_cores() {
     };
     let (first, _r1) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
     let (second, _r2) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
-    let (a, b) = (first.pinned_cpu().unwrap(), second.pinned_cpu().unwrap());
-    assert_ne!(a.core, b.core, "both workers landed on core {}", a.core);
+    match (first.pinned_cpu(), second.pinned_cpu()) {
+        (Some(a), Some(b)) => assert_ne!(a.core, b.core, "both workers on core {}", a.core),
+        // No free core left (small CI machines, other tests holding claims): the documented
+        // fallback is to run unpinned, never to share. Big machines must pin both.
+        (Some(_), None) => assert!(
+            performance_cores() < 4,
+            "{} performance cores, yet the second worker was not pinned",
+            performance_cores()
+        ),
+        other => panic!("the first worker must be pinned: {other:?}"),
+    }
     first.stop().unwrap();
     second.stop().unwrap();
 }
@@ -300,9 +324,18 @@ fn publish_interval_throttles_publishes() {
         publish_interval_ns: 50_000_000, // 20 Hz
         ..config(None)
     };
+    let started = Instant::now();
     let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let metrics = handle.stop().unwrap();
-    assert!(metrics.batches > metrics.publishes * 10, "{metrics:?}");
-    assert!(metrics.publishes <= 8, "{metrics:?}");
+    // Sleeps overshoot on busy machines (CI): bound publishes by the time that really
+    // passed. One publish per 50 ms interval, plus the first, plus one of slack.
+    let elapsed = started.elapsed().as_millis() as u64;
+    let allowed = elapsed / 50 + 2;
+    assert!(metrics.publishes >= 1, "{metrics:?}");
+    assert!(metrics.publishes <= allowed, "{metrics:?} in {elapsed} ms");
+    assert!(
+        metrics.batches > metrics.publishes * 10,
+        "throttled: {metrics:?}"
+    );
 }

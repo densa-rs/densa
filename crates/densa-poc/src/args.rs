@@ -3,6 +3,18 @@ use densa_engine::WorkerConfig;
 use densa_platform::ThreadPriority;
 use std::fmt;
 
+/// The worker priority when `--priority` is not given.
+///
+/// Pinning alone still time-slices with other threads on the core; next to a busy neighbor
+/// only time-critical kept snapshot age p99 under 1 ms (scripts/priority_experiment.ps1).
+/// Thread priorities are implemented on Windows only, so elsewhere the default stays normal
+/// (asking for another level there is an error). The library default is always Normal.
+pub const DEFAULT_PRIORITY: ThreadPriority = if cfg!(windows) {
+    ThreadPriority::TimeCritical
+} else {
+    ThreadPriority::Normal
+};
+
 /// `--help` text.
 pub const USAGE: &str = "\
 Usage: densa-poc [OPTIONS]
@@ -25,7 +37,7 @@ Options:
   --pin <auto|none|CPU>      Pin the worker thread: `auto` picks a performance core,
                              `none` leaves placement to the OS [default: auto]
   --priority <LEVEL>         Worker thread priority: normal, above, high or critical
-                             [default: critical]
+                             (Windows only) [default: critical on Windows, else normal]
   --list-cpus                Print the CPU topology (core kinds, --pin choice) and exit
   -h, --help                 Print this help
 ";
@@ -88,10 +100,7 @@ impl Args {
             seconds: None,
             fps: 120,
             worker: WorkerConfig {
-                // Pinning alone still time-slices with other threads on the core; next to
-                // a busy neighbor only time-critical kept snapshot age p99 under 1 ms
-                // (scripts/priority_experiment.ps1). The library default stays Normal.
-                priority: ThreadPriority::TimeCritical,
+                priority: DEFAULT_PRIORITY,
                 ..WorkerConfig::default()
             },
             // On hybrid CPUs an unpinned busy-spinning worker migrates hundreds of times

@@ -12,7 +12,7 @@ mod report;
 mod scroll;
 mod window;
 
-pub use args::{Args, ArgsError, Mode, USAGE};
+pub use args::{Args, ArgsError, Mode, DEFAULT_PRIORITY, USAGE};
 pub use headless::{run_headless, RunSummary, DEFAULT_HEADLESS_SECONDS, VIEWPORT_ROWS};
 pub use market::{
     flash_alpha, market_columns, market_painter, MarketGrid, FLASH_MAX_ALPHA, FLASH_NS, FONT_PX,

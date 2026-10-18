@@ -111,7 +111,7 @@ pub enum CpuError {
 impl fmt::Display for CpuError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported => f.write_str("CPU affinity is not supported on this platform"),
+            Self::Unsupported => f.write_str("not supported on this platform"),
             Self::InvalidCpu(id) => write!(f, "CPU {id} cannot be expressed in an affinity mask"),
             Self::Os { call, code } => write!(f, "{call} failed (Windows error {code})"),
         }

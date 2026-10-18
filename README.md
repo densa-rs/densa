@@ -113,7 +113,7 @@ Window controls: mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc qui
 | `--publish-interval-us N` | 100 | Minimum time between snapshot publishes |
 | `--fps N` | 120 | Frame rate of the headless loop |
 | `--pin auto\|none\|N` | auto | Worker placement (see below) |
-| `--priority normal\|above\|high\|critical` | critical | Worker thread priority (see below) |
+| `--priority normal\|above\|high\|critical` | critical on Windows, normal elsewhere | Worker thread priority (Windows only; see below) |
 | `--seed N` | 1 | Seed of the synthetic feed |
 
 Every second a line like this is printed (and the window title shows a summary):
@@ -170,8 +170,9 @@ arrive.
   core: next to a busy normal-priority process pinned to the same core
   (`scripts/priority_experiment.ps1`), a normal-priority worker reached 100.8k of 200k ticks/s
   with snapshot age p99 32.5 ms; `above`/`high` only reached ~170k with p99 ~30 ms; only
-  `critical` held 198k with p99 under 1 ms. The demo defaults to it (`--priority normal` opts
-  out); the library default stays `Normal`.
+  `critical` held 198k with p99 under 1 ms. The demo defaults to it on Windows (`--priority
+  normal` opts out); thread priorities are not implemented on other systems yet, so there the
+  default is `normal`. The library default stays `Normal`.
 - **One draw call.** Every quad is a solid rectangle or a glyph from a coverage atlas, drawn
   as instances. Glyphs are rasterized on first use (4 subpixel positions) and uploaded once;
   the demo rasterizes its whole character set at startup, so frames never allocate. Building

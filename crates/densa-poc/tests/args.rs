@@ -56,13 +56,16 @@ mod priority_option {
     }
 
     #[test]
-    fn defaults_to_time_critical_for_the_pinned_worker() {
+    fn defaults_to_time_critical_where_priorities_exist() {
         // scripts/priority_experiment.ps1: next to a busy normal-priority neighbor on the
         // same core, only time-critical kept snapshot age p99 under 1 ms (normal: 32 ms).
-        assert_eq!(
-            parse(&[]).unwrap().worker.priority,
+        let expected = if cfg!(windows) {
             ThreadPriority::TimeCritical
-        );
+        } else {
+            ThreadPriority::Normal
+        };
+        assert_eq!(parse(&[]).unwrap().worker.priority, expected);
+        assert_eq!(densa_poc::DEFAULT_PRIORITY, expected);
     }
 
     #[test]

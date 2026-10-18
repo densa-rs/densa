@@ -89,7 +89,8 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, paragraph: &Paragraph) -> 
         })
         .expect("poll failed");
     let rgba = slice.get_mapped_range().expect("mapped range").to_vec();
-    rgba.chunks_exact(4).map(|px| px[0]).collect()
+    let (pixels, _) = rgba.as_chunks::<4>();
+    pixels.iter().map(|px| px[0]).collect()
 }
 
 /// Columns holding ink (red above `threshold`) between rows `y0..y1`.
