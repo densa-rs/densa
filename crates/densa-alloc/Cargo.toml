@@ -4,6 +4,7 @@ description = "Per-thread allocation counting allocator for proving zero-allocat
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]

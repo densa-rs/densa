@@ -4,6 +4,7 @@ description = "wgpu renderer for dense data grids: one instanced-quad draw call,
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]

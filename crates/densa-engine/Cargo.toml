@@ -4,6 +4,7 @@ description = "Ingestion worker, pacing and latency instrumentation wiring densa
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]

@@ -4,6 +4,7 @@ description = "Lock-free synchronization primitives for low-latency UI/data pipe
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]

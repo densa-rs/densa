@@ -4,6 +4,7 @@ description = "Flat, preallocated market data table, synthetic tick feed and vie
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
