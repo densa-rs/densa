@@ -20,6 +20,6 @@ pub use histogram::{LatencyHistogram, LatencySummary};
 pub use pacer::{Pacer, MAX_PACER_LAG_NS};
 pub use probe::{FrameProbe, ProbeReport};
 pub use worker::{
-    spawn_worker, ConfigError, SpawnError, WorkerConfig, WorkerHandle, WorkerMetrics,
+    spawn_worker, ConfigError, Pin, SpawnError, WorkerConfig, WorkerHandle, WorkerMetrics,
     WorkerPanicked,
 };

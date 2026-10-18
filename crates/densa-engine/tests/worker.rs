@@ -1,7 +1,8 @@
-use densa_data::ViewportSnapshot;
-use densa_engine::{spawn_worker, Clock, ConfigError, SpawnError, WorkerConfig};
-use densa_sync::Reader;
 use std::time::{Duration, Instant};
+
+use densa_data::ViewportSnapshot;
+use densa_engine::{spawn_worker, Clock, ConfigError, Pin, SpawnError, WorkerConfig};
+use densa_sync::Reader;
 
 const ROWS: usize = 8;
 
@@ -12,7 +13,7 @@ fn config(rate: Option<u64>) -> WorkerConfig {
         batch_size: 64,
         rate,
         publish_interval_ns: 0,
-        pin: None,
+        pin: Pin::None,
     }
 }
 
@@ -22,15 +23,66 @@ fn pinned_worker_stays_on_its_cpu() {
     use densa_platform::{logical_cpus, pick_performance_cpu};
     let target = pick_performance_cpu(&logical_cpus().unwrap()).unwrap();
     let cfg = WorkerConfig {
-        pin: Some(target),
+        pin: Pin::Cpu(target),
         ..config(None)
     };
     let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
+    assert_eq!(handle.pinned_cpu(), Some(target));
     std::thread::sleep(Duration::from_millis(300));
     let metrics = handle.stop().unwrap();
     assert_eq!(metrics.last_cpu, Some(target.id), "{metrics:?}");
     // At most the one hop from wherever the thread started onto the target.
     assert!(metrics.cpu_migrations <= 1, "{metrics:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn concurrent_auto_workers_get_separate_physical_cores() {
+    let auto = || WorkerConfig {
+        pin: Pin::Auto,
+        ..config(None)
+    };
+    let (first, _r1) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
+    let (second, _r2) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
+    let (a, b) = (first.pinned_cpu().unwrap(), second.pinned_cpu().unwrap());
+    assert_ne!(a.core, b.core, "both workers landed on core {}", a.core);
+    first.stop().unwrap();
+    second.stop().unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn stopping_a_worker_releases_its_cpu_claim() {
+    use densa_platform::cpu_registry;
+    let cfg = WorkerConfig {
+        pin: Pin::Auto,
+        ..config(None)
+    };
+    let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
+    let cpu = handle.pinned_cpu().unwrap();
+    let held = |cpu| {
+        cpu_registry()
+            .claimed()
+            .iter()
+            .filter(|c| **c == cpu)
+            .count()
+    };
+    let while_running = held(cpu);
+    handle.stop().unwrap();
+    assert_eq!(held(cpu), while_running - 1);
+}
+
+#[test]
+fn dropping_the_handle_stops_the_worker() {
+    let (handle, mut reader) = spawn_worker::<ROWS>(config(None), Clock::new()).unwrap();
+    wait_for(&mut reader, Duration::from_secs(5), |s| s.seq >= 1);
+    drop(handle);
+    reader.update(); // Drain whatever was published before the worker exited.
+    std::thread::sleep(Duration::from_millis(50));
+    assert!(
+        !reader.has_update(),
+        "worker kept publishing after its handle was dropped"
+    );
 }
 
 #[cfg(windows)]
@@ -55,7 +107,7 @@ fn pinning_failure_stops_the_worker_and_reports_why() {
         efficiency_class: 0,
     };
     let cfg = WorkerConfig {
-        pin: Some(bogus),
+        pin: Pin::Cpu(bogus),
         ..config(None)
     };
     match spawn_worker::<ROWS>(cfg, Clock::new()) {
@@ -143,7 +195,7 @@ fn errors_have_readable_messages_and_sources() {
 #[test]
 fn default_config_is_valid_and_unpinned() {
     assert_eq!(WorkerConfig::default().validate(), Ok(()));
-    assert_eq!(WorkerConfig::default().pin, None);
+    assert_eq!(WorkerConfig::default().pin, Pin::None);
 }
 
 #[test]

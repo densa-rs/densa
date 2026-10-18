@@ -3,7 +3,7 @@
 //! Glue only: frame content comes from `GridPainter` (unit-tested, allocation-free) and
 //! drawing from `GpuGrid` (GPU-tested). This module wires events, timing and reporting.
 
-use crate::pinning::resolve_worker_pin;
+use crate::pinning::{describe_pin, worker_pin};
 use crate::report::{format_cpu, format_duration_ns as dur, format_latency, format_rate as rate};
 use crate::scroll::{wheel_rows, Scroll, ScrollAction};
 use crate::{Args, VIEWPORT_ROWS};
@@ -12,6 +12,7 @@ use densa_data::ViewportSnapshot;
 use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencyHistogram, WorkerHandle, WorkerMetrics,
 };
+use densa_platform::logical_cpus;
 use densa_render::{GlyphAtlas, GpuGrid, GridLayout, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use std::error::Error;
@@ -206,11 +207,15 @@ impl Session {
         let gpu = GpuGrid::new(&device, &queue, view_format, layout.max_instances());
 
         let mut worker_config = args.worker.clone();
-        let (pin, pin_note) = resolve_worker_pin(args.pin, out)?;
-        worker_config.pin = pin;
+        worker_config.pin = worker_pin(args.pin)?;
         let clock = Clock::new();
         let symbols = worker_config.symbols;
         let (worker, reader) = spawn_worker::<VIEWPORT_ROWS>(worker_config, clock)?;
+        let pin_note = describe_pin(
+            worker.pinned_cpu(),
+            args.pin,
+            &logical_cpus().unwrap_or_default(),
+        );
 
         let info = adapter.get_info();
         writeln!(

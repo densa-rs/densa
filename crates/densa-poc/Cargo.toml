@@ -19,5 +19,8 @@ pollster.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 
+[dev-dependencies]
+densa-engine.workspace = true
+
 [lints]
 workspace = true

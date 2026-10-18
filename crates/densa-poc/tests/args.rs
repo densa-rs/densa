@@ -41,37 +41,62 @@ fn list_cpus_flag() {
     assert!(!parse(&[]).unwrap().list_cpus);
 }
 
-#[test]
-fn resolves_pin_requests_against_the_topology() {
-    let cpus = hybrid();
-    assert_eq!(resolve_pin(PinRequest::None, &cpus), Ok(None));
-    assert_eq!(
-        resolve_pin(PinRequest::Auto, &cpus)
-            .unwrap()
-            .unwrap()
-            .id
-            .index,
-        2,
-        "highest P-core, first hyper-thread"
-    );
-    assert_eq!(
-        resolve_pin(PinRequest::Index(5), &cpus)
-            .unwrap()
-            .unwrap()
-            .id
-            .index,
-        5
-    );
-    assert_eq!(
-        resolve_pin(PinRequest::Index(9), &cpus)
-            .unwrap_err()
-            .to_string(),
-        "CPU 9 does not exist (see --list-cpus)"
-    );
-    assert_eq!(
-        resolve_pin(PinRequest::Auto, &[]).unwrap_err().to_string(),
-        "the OS reported no CPUs to pin to"
-    );
+mod resolve_pin {
+    use super::*;
+    use densa_engine::Pin;
+
+    #[test]
+    fn none_leaves_the_worker_unpinned() {
+        assert_eq!(resolve_pin(PinRequest::None, &hybrid()), Ok(Pin::None));
+    }
+
+    #[test]
+    fn auto_defers_core_choice_to_the_engine_registry() {
+        // The engine picks among cores not already claimed by other workers, so the CLI
+        // must not pre-pick one (that is how two workers ended up sharing CPU 14).
+        assert_eq!(resolve_pin(PinRequest::Auto, &hybrid()), Ok(Pin::Auto));
+    }
+
+    #[test]
+    fn index_selects_that_cpu() {
+        assert_eq!(
+            resolve_pin(PinRequest::Index(5), &hybrid()),
+            Ok(Pin::Cpu(cpu(5, 5, 0)))
+        );
+    }
+
+    #[test]
+    fn unknown_index_is_an_error_pointing_at_list_cpus() {
+        let err = resolve_pin(PinRequest::Index(9), &hybrid()).unwrap_err();
+        assert_eq!(err.to_string(), "CPU 9 does not exist (see --list-cpus)");
+    }
+}
+
+mod describe_pin {
+    use super::*;
+    use densa_poc::describe_pin;
+
+    #[test]
+    fn pinned_worker_names_its_cpu_and_core_kind() {
+        let note = describe_pin(Some(cpu(2, 2, 1)), PinRequest::Auto, &hybrid());
+        assert_eq!(note, "worker pinned to cpu 2 (performance)");
+    }
+
+    #[test]
+    fn unpinned_by_request() {
+        assert_eq!(
+            describe_pin(None, PinRequest::None, &hybrid()),
+            "worker not pinned"
+        );
+    }
+
+    #[test]
+    fn auto_that_found_no_free_core_says_so() {
+        assert_eq!(
+            describe_pin(None, PinRequest::Auto, &hybrid()),
+            "worker not pinned (auto: no free core, or no CPU topology on this OS)"
+        );
+    }
 }
 
 #[test]

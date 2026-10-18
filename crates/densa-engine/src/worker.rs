@@ -2,7 +2,9 @@ use crate::{Clock, Pacer};
 use crossbeam_utils::CachePadded;
 use densa_alloc::thread_stats;
 use densa_data::{MarketTable, Tick, TickGenerator, ViewportSnapshot};
-use densa_platform::{current_cpu, pin_thread, CpuError, CpuId, LogicalCpu};
+use densa_platform::{
+    cpu_registry, current_cpu, logical_cpus, pin_thread, CpuClaim, CpuError, CpuId, LogicalCpu,
+};
 use densa_sync::{triple_buffer, Reader, Writer};
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
@@ -20,8 +22,22 @@ pub struct WorkerConfig {
     pub rate: Option<u64>,
     /// Minimum time between snapshot publishes; 0 publishes after every batch.
     pub publish_interval_ns: u64,
-    /// CPU to pin the worker thread to; `None` leaves placement to the OS scheduler.
-    pub pin: Option<LogicalCpu>,
+    /// Where to run the worker thread.
+    pub pin: Pin,
+}
+
+/// Placement policy for the worker thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Pin {
+    /// Leave placement to the OS scheduler.
+    #[default]
+    None,
+    /// The fastest CPU on a physical core not claimed by another pinned thread of this
+    /// process (see `densa_platform::CpuRegistry`). Runs unpinned where the OS reports no
+    /// topology or every core is claimed.
+    Auto,
+    /// Exactly this CPU, even if another thread already uses it.
+    Cpu(LogicalCpu),
 }
 
 impl Default for WorkerConfig {
@@ -32,7 +48,7 @@ impl Default for WorkerConfig {
             batch_size: 64,
             rate: Some(200_000),
             publish_interval_ns: 100_000,
-            pin: None,
+            pin: Pin::None,
         }
     }
 }
@@ -209,13 +225,24 @@ struct Shared {
 }
 
 /// Control and monitoring handle for a running worker.
+///
+/// Dropping the handle stops and joins the worker, so a busy-spinning thread is never
+/// left behind; use [`WorkerHandle::stop`] to also get its final counters.
 #[derive(Debug)]
 pub struct WorkerHandle {
     shared: Arc<Shared>,
-    thread: JoinHandle<()>,
+    /// `None` once joined.
+    thread: Option<JoinHandle<()>>,
+    /// Held for the thread's lifetime; released only after it has exited.
+    claim: Option<CpuClaim<'static>>,
 }
 
 impl WorkerHandle {
+    /// The CPU the worker is pinned to, or `None` if it runs unpinned.
+    pub fn pinned_cpu(&self) -> Option<LogicalCpu> {
+        self.claim.as_ref().map(CpuClaim::cpu)
+    }
+
     /// Requests that future snapshots start at `first_row` (clamped by the worker).
     pub fn set_viewport(&self, first_row: u32) {
         // ORDERING: Relaxed. A hint with no dependent data; each snapshot records the
@@ -231,12 +258,45 @@ impl WorkerHandle {
     }
 
     /// Stops the worker, waits for it to exit and returns its final counters.
-    pub fn stop(self) -> Result<WorkerMetrics, WorkerPanicked> {
+    ///
+    /// # Errors
+    ///
+    /// [`WorkerPanicked`] if the worker thread panicked.
+    pub fn stop(mut self) -> Result<WorkerMetrics, WorkerPanicked> {
+        self.shutdown()?;
+        Ok(self.shared.counters.load())
+    }
+
+    fn shutdown(&mut self) -> Result<(), WorkerPanicked> {
         // ORDERING: Relaxed. Only termination is signalled; `join` below provides the
         // happens-before edge for reading the final counters.
         self.shared.stop.store(true, Ordering::Relaxed);
-        self.thread.join().map_err(|_| WorkerPanicked)?;
-        Ok(self.shared.counters.load())
+        let Some(thread) = self.thread.take() else {
+            return Ok(());
+        };
+        let joined = thread.join().map_err(|_| WorkerPanicked);
+        self.claim = None;
+        joined
+    }
+}
+
+impl Drop for WorkerHandle {
+    fn drop(&mut self) {
+        // Nowhere to report a panic from here; `stop` is the way to observe it.
+        let _ = self.shutdown();
+    }
+}
+
+/// Resolves the placement policy into a claim on the process-wide CPU registry.
+fn claim_cpu(pin: Pin) -> Option<CpuClaim<'static>> {
+    match pin {
+        Pin::None => None,
+        Pin::Cpu(cpu) => Some(cpu_registry().claim(cpu)),
+        // No topology on this OS, or every core claimed: run unpinned, visible as
+        // `pinned_cpu() == None`.
+        Pin::Auto => logical_cpus()
+            .ok()
+            .and_then(|cpus| cpu_registry().claim_auto(&cpus)),
     }
 }
 
@@ -252,7 +312,7 @@ pub fn spawn_worker<const N: usize>(
 
     let (writer, reader) = triple_buffer(ViewportSnapshot::<N>::new());
     let shared = Arc::new(Shared::default());
-    let pin = config.pin;
+    let claim = claim_cpu(config.pin);
     let worker = Worker {
         generator: TickGenerator::new(config.symbols, config.seed),
         table: MarketTable::new(config.symbols),
@@ -266,15 +326,17 @@ pub fn spawn_worker<const N: usize>(
         .name("densa-ingest".into())
         .spawn(move || worker.run())
         .map_err(SpawnError::Thread)?;
-    let handle = WorkerHandle { shared, thread };
+    let handle = WorkerHandle {
+        shared,
+        thread: Some(thread),
+        claim,
+    };
 
     // Pinned from outside through the thread handle so failure is reported synchronously.
     // The worker may run a few microseconds unpinned before the OS moves it.
-    if let Some(cpu) = pin {
-        if let Err(e) = pin_thread(&handle.thread, cpu) {
-            // The pin error is what matters; a panic during this brief run would only
-            // obscure it, so the stop result is deliberately not reported.
-            let _ = handle.stop();
+    if let (Some(thread), Some(cpu)) = (&handle.thread, handle.pinned_cpu()) {
+        if let Err(e) = pin_thread(thread, cpu) {
+            drop(handle); // Stops the worker and releases the claim.
             return Err(SpawnError::Pin(e));
         }
     }

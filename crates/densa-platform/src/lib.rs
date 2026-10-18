@@ -20,6 +20,9 @@ mod fallback;
 #[cfg(not(windows))]
 use fallback as os;
 
+mod registry;
+pub use registry::{cpu_registry, CpuClaim, CpuRegistry};
+
 /// A logical processor: processor group plus index within the group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CpuId {

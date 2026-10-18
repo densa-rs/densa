@@ -1,4 +1,4 @@
-use crate::pinning::resolve_worker_pin;
+use crate::pinning::{describe_pin, worker_pin};
 use crate::report::{format_cpu, format_duration_ns as dur, format_latency, format_rate as rate};
 use crate::Args;
 use densa_alloc::measure;
@@ -6,6 +6,7 @@ use densa_data::ViewportSnapshot;
 use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencySummary, ProbeReport, WorkerHandle, WorkerMetrics,
 };
+use densa_platform::logical_cpus;
 use densa_render::{GlyphAtlas, GridLayout, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use std::error::Error;
@@ -41,11 +42,15 @@ pub struct RunSummary {
 pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box<dyn Error>> {
     let seconds = args.seconds.unwrap_or(DEFAULT_HEADLESS_SECONDS);
     let mut config = args.worker.clone();
-    let (pin, pin_note) = resolve_worker_pin(args.pin, out)?;
-    config.pin = pin;
+    config.pin = worker_pin(args.pin)?;
 
     let clock = Clock::new();
     let (worker, mut reader) = spawn_worker::<VIEWPORT_ROWS>(config, clock)?;
+    let pin_note = describe_pin(
+        worker.pinned_cpu(),
+        args.pin,
+        &logical_cpus().unwrap_or_default(),
+    );
     writeln!(
         out,
         "densa headless: {} symbols, rate {}, batch {}, publish every {}, {} fps, {} s, {}",
