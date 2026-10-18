@@ -100,6 +100,7 @@ Every second a line like this is printed (and the window title shows a summary):
 | `densa-alloc` | Per-thread counting allocator that proves zero-allocation claims |
 | `densa-platform` | CPU topology, thread pinning, process-wide CPU claim registry (the only FFI) |
 | `densa-engine` | Ingestion worker, pacer, latency histogram, frame probe |
+| `densa-text` | Fonts, glyph rasterization and an allocation-free glyph atlas cache |
 | `densa-render` | `GridPainter` (GPU-free, unit-tested) and `GpuGrid` (wgpu 30) |
 | `densa-poc` | The demo binary: argument parsing, window and headless modes |
 | `densa-bench` | Criterion benchmarks, kept out of the libraries' dependencies |
@@ -182,3 +183,7 @@ at your option.
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
 in this work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
 without any additional terms or conditions.
+
+The bundled font `crates/densa-text/fonts/JetBrainsMono-Regular.ttf` (JetBrains Mono 2.304)
+is licensed separately under the SIL Open Font License 1.1; see
+[crates/densa-text/fonts/OFL.txt](crates/densa-text/fonts/OFL.txt).

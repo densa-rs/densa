@@ -1,0 +1,22 @@
+[package]
+name = "densa-text"
+description = "Real text for densa: font loading, glyph rasterization and an allocation-free glyph atlas cache"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+# The bundled JetBrains Mono font is under the SIL Open Font License 1.1 (fonts/OFL.txt).
+include = ["src/**", "tests/**", "fonts/**", "Cargo.toml"]
+
+[dependencies]
+etagere.workspace = true
+rustc-hash.workspace = true
+skrifa.workspace = true
+zeno.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+
+[lints]
+workspace = true
