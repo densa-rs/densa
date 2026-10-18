@@ -8,7 +8,7 @@ static ALLOCATOR: CountingAllocator = CountingAllocator::system();
 
 /// One session at a time. Each runs a busy-spinning worker: on a 2-CPU machine two of them
 /// plus their frame loops leave no CPU for anything (a 1 s run took 5.7 s at 0.4 fps).
-/// Separate cores for concurrent workers are tested in densa-engine's `worker.rs`.
+/// Separate cores for concurrent workers are tested in `tests/worker.rs`.
 static SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn one_session_at_a_time() -> std::sync::MutexGuard<'static, ()> {
