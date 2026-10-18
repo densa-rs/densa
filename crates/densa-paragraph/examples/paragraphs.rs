@@ -1,23 +1,34 @@
-//! Paragraphs in a window: shaped, wrapped and aligned text that re-wraps on resize.
+//! Paragraphs in a window: shaped, wrapped and aligned text that re-wraps on resize, with
+//! selection: click to place the caret, drag, shift+click or shift+arrows to select,
+//! double-click for a word, triple-click for a line, ctrl+arrows by word, Home/End by line
+//! (ctrl: whole text).
 //!
 //! Run: `cargo run --release -p densa-paragraph --example paragraphs [-- --seconds N]`
+//! (`--select` starts with a word selected, for screenshots).
 
 use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use densa_paragraph::{Paragraph, ParagraphStyle, Span, TextAlign, TextSystem};
-use densa_render::{Canvas, Color, GpuGrid, InstanceBuffer, Palette};
+use densa_paragraph::{
+    Motion, Paragraph, ParagraphStyle, Span, TextAlign, TextSelection, TextSystem,
+};
+use densa_render::{Canvas, Color, GpuGrid, InstanceBuffer, Palette, Point};
 use densa_text::{AtlasConfig, GlyphCache};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
-use winit::event::WindowEvent;
+use winit::event::{ElementState, KeyEvent, MouseButton, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
+use winit::keyboard::{Key, ModifiersState, NamedKey};
 use winit::window::{Window, WindowId};
 
 const MARGIN: f32 = 24.0;
 const GAP: f32 = 16.0;
 const MAX_INSTANCES: usize = 8_192;
+const CARET_WIDTH: f32 = 2.0;
+/// Clicks closer than this (in time and space) count as a double or triple click.
+const DOUBLE_CLICK: Duration = Duration::from_millis(400);
+const DOUBLE_CLICK_SLOP: f32 = 4.0;
 
 const TITLE: &str = "densa paragraphs";
 const INTRO: &str = "Văn bản được shape bằng parley, xuống dòng theo chiều rộng cửa sổ và căn lề; \
@@ -34,9 +45,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         .nth(1)
         .map(|s| s.parse::<u64>())
         .transpose()?;
+    let preselect = std::env::args().any(|a| a == "--select");
     let event_loop = EventLoop::new()?;
     let mut app = App {
         deadline: seconds.map(|s| Instant::now() + Duration::from_secs(s)),
+        preselect,
         state: None,
         error: None,
     };
@@ -46,6 +59,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
 struct App {
     deadline: Option<Instant>,
+    preselect: bool,
     state: Option<State>,
     error: Option<Box<dyn Error>>,
 }
@@ -55,7 +69,7 @@ impl ApplicationHandler for App {
         if self.state.is_some() {
             return;
         }
-        match State::new(event_loop) {
+        match State::new(event_loop, self.preselect) {
             Ok(state) => self.state = Some(state),
             Err(e) => {
                 self.error = Some(e);
@@ -75,6 +89,27 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => state.resize(size),
             WindowEvent::RedrawRequested => state.draw(),
+            WindowEvent::ModifiersChanged(modifiers) => {
+                state.modifiers = modifiers.state();
+                Ok(())
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                // Lossless enough: window coordinates are small.
+                state.pointer_moved(Point::new(position.x as f32, position.y as f32));
+                Ok(())
+            }
+            WindowEvent::MouseInput {
+                state: pressed,
+                button: MouseButton::Left,
+                ..
+            } => {
+                state.left_button(pressed == ElementState::Pressed);
+                Ok(())
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                state.key(&event);
+                Ok(())
+            }
             _ => Ok(()),
         };
         if let Err(e) = result {
@@ -101,10 +136,19 @@ struct State {
     instances: InstanceBuffer,
     paragraphs: Vec<Paragraph>,
     background: Color,
+    /// Top of each paragraph, as last drawn.
+    tops: Vec<f32>,
+    /// The paragraph holding the caret, and its selection.
+    selection: Option<(usize, TextSelection)>,
+    dragging: bool,
+    pointer: Point,
+    modifiers: ModifiersState,
+    /// When and where the last click was, and how many clicks in a row it made.
+    last_click: Option<(Instant, Point, u8)>,
 }
 
 impl State {
-    fn new(event_loop: &ActiveEventLoop) -> Result<Self, Box<dyn Error>> {
+    fn new(event_loop: &ActiveEventLoop, preselect: bool) -> Result<Self, Box<dyn Error>> {
         let attributes = Window::default_attributes()
             .with_title(TITLE)
             .with_inner_size(PhysicalSize::new(720, 520));
@@ -134,6 +178,13 @@ impl State {
         cache.limit_side(GpuGrid::max_atlas_side(&device))?;
         let gpu = GpuGrid::new(&device, view_format, MAX_INSTANCES);
         let paragraphs = build_paragraphs(text_width(size.width))?;
+        let selection = preselect.then(|| {
+            let intro = &paragraphs[1];
+            let start = INTRO.find("parley").unwrap_or(0);
+            let word = TextSelection::caret_at(intro, start).moved(intro, Motion::WordRight, true);
+            (1, word)
+        });
+        let tops = stacked_tops(&paragraphs);
         Ok(Self {
             window,
             surface,
@@ -146,6 +197,12 @@ impl State {
             instances: InstanceBuffer::with_capacity(MAX_INSTANCES),
             paragraphs,
             background: Palette::new().background,
+            tops,
+            selection,
+            dragging: false,
+            pointer: Point::ORIGIN,
+            modifiers: ModifiersState::empty(),
+            last_click: None,
         })
     }
 
@@ -160,17 +217,32 @@ impl State {
         for paragraph in &mut self.paragraphs {
             paragraph.reflow(width)?; // re-break only: no shaping
         }
+        if let Some((index, selection)) = &mut self.selection {
+            *selection = selection.refreshed(&self.paragraphs[*index]);
+        }
+        self.tops = stacked_tops(&self.paragraphs);
         Ok(())
     }
 
     fn draw(&mut self) -> Result<(), Box<dyn Error>> {
         let mut canvas = Canvas::begin(&mut self.cache, &mut self.instances);
-        let mut y = MARGIN;
-        for paragraph in &self.paragraphs {
-            for run in paragraph.runs() {
-                canvas.draw_run(run, [MARGIN, y]);
+        let selected = Color::srgb(0x1F6FEB).with_alpha(0.45);
+        let caret = Color::srgb(0x58A6FF);
+        for (index, (paragraph, &top)) in self.paragraphs.iter().zip(&self.tops).enumerate() {
+            let origin = Point::new(MARGIN, top);
+            let active = self.selection.filter(|(i, _)| *i == index);
+            if let Some((_, selection)) = active {
+                selection.for_each_rect(paragraph, |rect| {
+                    canvas.fill_rect(rect.translate(origin), selected);
+                });
             }
-            y += paragraph.height() + GAP;
+            for run in paragraph.runs() {
+                canvas.draw_run(run, origin);
+            }
+            if let Some((_, selection)) = active {
+                let rect = selection.caret_rect(paragraph, CARET_WIDTH);
+                canvas.fill_rect(rect.translate(origin), caret);
+            }
         }
         self.gpu
             .apply_atlas_updates(&self.device, &self.queue, self.cache.drain_updates())?;
@@ -203,6 +275,103 @@ impl State {
         self.queue.present(frame);
         Ok(())
     }
+}
+
+impl State {
+    /// The paragraph under `point` (or nearest above it) and `point` relative to it.
+    fn hit(&self, point: Point) -> Option<(usize, Point)> {
+        let index = self
+            .tops
+            .iter()
+            .rposition(|&top| top <= point.y)
+            .unwrap_or(0);
+        let top = *self.tops.get(index)?;
+        Some((index, Point::new(point.x - MARGIN, point.y - top)))
+    }
+
+    fn pointer_moved(&mut self, point: Point) {
+        self.pointer = point;
+        if !self.dragging {
+            return;
+        }
+        let Some((index, selection)) = self.selection else {
+            return;
+        };
+        let local = Point::new(point.x - MARGIN, point.y - self.tops[index]);
+        let extended = selection.extend_to_point(&self.paragraphs[index], local);
+        self.selection = Some((index, extended));
+    }
+
+    fn left_button(&mut self, pressed: bool) {
+        self.dragging = pressed;
+        if !pressed {
+            return;
+        }
+        let Some((index, local)) = self.hit(self.pointer) else {
+            return;
+        };
+        let now = Instant::now();
+        let repeated = self.last_click.is_some_and(|(at, p, _)| {
+            now - at < DOUBLE_CLICK
+                && (p.x - self.pointer.x).abs() < DOUBLE_CLICK_SLOP
+                && (p.y - self.pointer.y).abs() < DOUBLE_CLICK_SLOP
+        });
+        let clicks = match self.last_click {
+            Some((_, _, count)) if repeated => count % 3 + 1,
+            _ => 1,
+        };
+        self.last_click = Some((now, self.pointer, clicks));
+        let paragraph = &self.paragraphs[index];
+        let current = self.selection.filter(|(i, _)| *i == index);
+        let selection = match (clicks, current) {
+            (2, _) => TextSelection::word_at_point(paragraph, local),
+            (3, _) => TextSelection::line_at_point(paragraph, local),
+            (_, Some((_, current))) if self.modifiers.shift_key() => {
+                current.shift_click(paragraph, local)
+            }
+            _ => TextSelection::at_point(paragraph, local),
+        };
+        self.selection = Some((index, selection));
+    }
+
+    fn key(&mut self, event: &KeyEvent) {
+        if event.state != ElementState::Pressed {
+            return;
+        }
+        let Some((index, selection)) = self.selection else {
+            return;
+        };
+        let ctrl = self.modifiers.control_key();
+        let motion = match &event.logical_key {
+            Key::Named(NamedKey::ArrowLeft) if ctrl => Motion::WordLeft,
+            Key::Named(NamedKey::ArrowRight) if ctrl => Motion::WordRight,
+            Key::Named(NamedKey::ArrowLeft) => Motion::Left,
+            Key::Named(NamedKey::ArrowRight) => Motion::Right,
+            Key::Named(NamedKey::ArrowUp) => Motion::Up,
+            Key::Named(NamedKey::ArrowDown) => Motion::Down,
+            Key::Named(NamedKey::Home) if ctrl => Motion::TextStart,
+            Key::Named(NamedKey::End) if ctrl => Motion::TextEnd,
+            Key::Named(NamedKey::Home) => Motion::LineStart,
+            Key::Named(NamedKey::End) => Motion::LineEnd,
+            _ => return,
+        };
+        let extend = self.modifiers.shift_key();
+        let moved = selection.moved(&self.paragraphs[index], motion, extend);
+        self.selection = Some((index, moved));
+    }
+}
+
+/// Top of each paragraph, stacked from the margin down.
+fn stacked_tops(paragraphs: &[Paragraph]) -> Vec<f32> {
+    let mut y = MARGIN;
+    paragraphs
+        .iter()
+        .map(|p| {
+            let top = y;
+            y += p.height() + GAP;
+            top
+        })
+        .collect()
 }
 
 /// The width paragraphs wrap at inside a window `window_width` pixels wide.

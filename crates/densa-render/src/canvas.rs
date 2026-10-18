@@ -1,5 +1,5 @@
 use crate::{Instance, InstanceBuffer};
-use densa_core::Color;
+use densa_core::{Color, Point, Rect};
 use densa_text::{quantize_x, Font, GlyphCache, GlyphId, GlyphRun};
 
 /// One frame being drawn: everything painters emit goes through it.
@@ -24,24 +24,18 @@ impl<'a> Canvas<'a> {
         Self { cache, out }
     }
 
-    /// A filled rectangle `[x, y, width, height]` in pixels.
-    pub fn fill_rect(&mut self, rect: [f32; 4], color: Color) {
-        self.out.push(Instance::solid(rect, color));
+    /// A filled rectangle.
+    pub fn fill_rect(&mut self, rect: Rect, color: Color) {
+        self.out.push(Instance::solid(rect.to_xywh(), color));
     }
 
-    /// `glyph` of `font` at `px` pixels per em, with its pen at `x` (fractional: drawn at the
-    /// nearest subpixel bin) on the baseline `baseline_y` (rounded to a whole pixel).
+    /// `glyph` of `font` at `px` pixels per em, its pen at `at`: `x` is the pen position
+    /// (fractional: drawn at the nearest subpixel bin), `y` the baseline (rounded to a whole
+    /// pixel).
     ///
     /// Glyphs the cache cannot provide this frame are skipped (counted in its stats).
-    pub fn draw_glyph(
-        &mut self,
-        font: &Font,
-        glyph: GlyphId,
-        px: f32,
-        [x, baseline_y]: [f32; 2],
-        color: Color,
-    ) {
-        let (pixel, bin) = quantize_x(x);
+    pub fn draw_glyph(&mut self, font: &Font, glyph: GlyphId, px: f32, at: Point, color: Color) {
+        let (pixel, bin) = quantize_x(at.x);
         let Ok(cached) = self.cache.get(font, glyph, px, bin) else {
             return;
         };
@@ -51,7 +45,7 @@ impl<'a> Canvas<'a> {
         self.out.push(Instance::glyph(
             [
                 pixel as f32 + cached.offset[0],
-                baseline_y.round() + cached.offset[1],
+                at.y.round() + cached.offset[1],
                 cached.size[0],
                 cached.size[1],
             ],
@@ -60,10 +54,10 @@ impl<'a> Canvas<'a> {
         ));
     }
 
-    /// Every glyph of `run`, offset by `origin` (`[x, y]` in pixels).
-    pub fn draw_run(&mut self, run: GlyphRun<'_>, origin: [f32; 2]) {
+    /// Every glyph of `run`, offset by `origin`.
+    pub fn draw_run(&mut self, run: GlyphRun<'_>, origin: Point) {
         for glyph in run.glyphs {
-            let at = [origin[0] + glyph.x, origin[1] + glyph.y];
+            let at = origin.offset(glyph.x, glyph.y);
             self.draw_glyph(run.font, glyph.id, run.px, at, run.color);
         }
     }

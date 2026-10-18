@@ -3,7 +3,7 @@
 //! Needs a GPU adapter. Set `DENSA_SKIP_GPU_TESTS=1` on machines without one; otherwise a
 //! missing adapter is a failure, not a silent pass.
 
-use densa_paragraph::{Color, Paragraph, ParagraphStyle, TextAlign, TextSystem};
+use densa_paragraph::{Color, Paragraph, ParagraphStyle, Point, TextAlign, TextSystem};
 use densa_render::{Canvas, GpuGrid, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -11,7 +11,7 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const W: u32 = 320; // a multiple of 64: rows of 4-byte pixels meet the 256-byte alignment
 const H: u32 = 128;
-const ORIGIN: [f32; 2] = [8.0, 8.0];
+const ORIGIN: Point = Point::new(8.0, 8.0);
 
 /// Serializes GPU tests: a test panicking mid-submission must not hang the others.
 static GPU: Mutex<()> = Mutex::new(());
@@ -102,7 +102,7 @@ fn inked_columns(red: &[u8], (y0, y1): (u32, u32)) -> Vec<u32> {
 fn line_rows(paragraph: &Paragraph, line: usize) -> (u32, u32) {
     let l = &paragraph.lines()[line];
     // Lossless: small positive pixel coordinates.
-    ((ORIGIN[1] + l.top) as u32, (ORIGIN[1] + l.bottom) as u32)
+    ((ORIGIN.y + l.top) as u32, (ORIGIN.y + l.bottom) as u32)
 }
 
 #[test]
@@ -124,11 +124,11 @@ fn wrapped_lines_are_drawn_inside_their_boxes_and_the_width() {
         assert!(!inked.is_empty(), "line {line} has no ink");
         let right = *inked.last().unwrap() as f32;
         assert!(
-            right <= ORIGIN[0] + max_width + 1.0,
+            right <= ORIGIN.x + max_width + 1.0,
             "line {line} ink at {right}"
         );
     }
-    let below = ((ORIGIN[1] + paragraph.height()) as u32 + 4, H);
+    let below = ((ORIGIN.y + paragraph.height()) as u32 + 4, H);
     assert!(
         inked_columns(&red, below).is_empty(),
         "ink below the last line"
@@ -150,7 +150,7 @@ fn centered_lines_are_drawn_around_the_middle() {
 
     let inked = inked_columns(&red, line_rows(&paragraph, 0));
     let (left, right) = (inked[0] as f32, *inked.last().unwrap() as f32);
-    let middle = ORIGIN[0] + max_width / 2.0;
+    let middle = ORIGIN.x + max_width / 2.0;
     assert!(
         ((left + right) / 2.0 - middle).abs() < 4.0,
         "ink {left}..{right}"

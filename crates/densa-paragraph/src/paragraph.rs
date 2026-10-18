@@ -114,6 +114,16 @@ impl Paragraph {
         Ok(paragraph)
     }
 
+    /// The parley layout, for selection geometry.
+    pub(crate) fn layout(&self) -> &Layout<Color> {
+        &self.layout
+    }
+
+    /// Length of the laid-out text in bytes.
+    pub(crate) fn text_len(&self) -> usize {
+        self.text_len
+    }
+
     /// Width of the widest line, in pixels.
     pub fn width(&self) -> f32 {
         self.layout.width()

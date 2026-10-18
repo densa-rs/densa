@@ -1,5 +1,5 @@
 use crate::{Align, Canvas, Column, GridLayout, Palette};
-use densa_core::Color;
+use densa_core::{Color, Point, Rect};
 use densa_fmt::FmtBuf;
 use densa_text::{Font, GlyphCache, GlyphMap, SUBPIXEL_STEPS};
 
@@ -106,7 +106,7 @@ impl GridPainter {
 
         let header_y = self.layout.row_y(0) as f32;
         canvas.fill_rect(
-            [0.0, header_y, width, row_height],
+            Rect::new(0.0, header_y, width, row_height),
             self.palette.header_background,
         );
         let baseline = self.layout.baseline_y(0);
@@ -124,7 +124,7 @@ impl GridPainter {
         for (row, grid_row) in (0..visible).zip(1u32..) {
             let y = self.layout.row_y(grid_row) as f32;
             if grid_row.is_multiple_of(2) {
-                canvas.fill_rect([0.0, y, width, row_height], self.palette.stripe);
+                canvas.fill_rect(Rect::new(0.0, y, width, row_height), self.palette.stripe);
             }
             let baseline = self.layout.baseline_y(grid_row);
             for (index, column) in self.columns.iter().enumerate() {
@@ -147,14 +147,14 @@ impl GridPainter {
 
     /// Background rectangle of one cell: the column plus half the gap on each side, so
     /// neighbouring cell backgrounds meet without overlapping.
-    fn cell_rect(&self, column: usize, y: f32) -> [f32; 4] {
+    fn cell_rect(&self, column: usize, y: f32) -> Rect {
         let margin = self.layout.gap() as f32 / 2.0;
-        [
+        Rect::new(
             self.layout.column_x(column) as f32 - margin,
             y,
             self.layout.column_width(column) as f32 + 2.0 * margin,
             self.layout.row_height() as f32,
-        ]
+        )
     }
 }
 
@@ -218,7 +218,8 @@ impl TextPen {
                 continue;
             };
             let (font, px) = (self.glyphs.font(), self.glyphs.px());
-            canvas.draw_glyph(font, mapped.id, px, [pen, cell.baseline], cell.color);
+            let at = Point::new(pen, cell.baseline);
+            canvas.draw_glyph(font, mapped.id, px, at, cell.color);
             pen += mapped.advance;
         }
     }

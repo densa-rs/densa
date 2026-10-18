@@ -4,5 +4,7 @@
 //! these types without depending on each other.
 
 mod color;
+mod geometry;
 
 pub use color::Color;
+pub use geometry::{Point, Rect};

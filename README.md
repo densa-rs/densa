@@ -96,7 +96,7 @@ Every second a line like this is printed (and the window title shows a summary):
 
 | Crate | Role |
 |---|---|
-| `densa-core` | Dependency-free primitives every crate shares (`Color`) |
+| `densa-core` | Dependency-free primitives every crate shares (`Color`, `Point`, `Rect`) |
 | `densa-sync` | Wait-free SPSC triple buffer, loom-checked |
 | `densa-data` | `MarketTable`, `TickGenerator`, fixed-size `ViewportSnapshot<N>` |
 | `densa-fmt` | Allocation-free number formatting into stack buffers |
@@ -116,7 +116,9 @@ crates never depend on GPU or windowing crates, and the renderer knows nothing a
 
 `densa-paragraph` shapes, wraps and aligns text with [parley](https://github.com/linebender/parley)
 and draws it through the same glyph atlas as the grid. Resizing re-breaks lines without
-reshaping; drawing a laid-out paragraph allocates nothing.
+reshaping; drawing a laid-out paragraph allocates nothing. `TextSelection` hit-tests points,
+moves by character, word and line, and gives caret and selection rectangles, also without
+allocating. In the example: click, drag, double-click, shift/ctrl + arrows, Home/End.
 
 ![Wrapped, justified, centered and right-aligned paragraphs with Vietnamese text](docs/paragraphs.png)
 
@@ -191,7 +193,7 @@ calls are covered by tests that watch threads actually move between CPUs.
   Paragraphs (`densa-paragraph`) are shaped, wrapped and bidi-ordered, but by default use only
   the bundled font (no fallback: CJK shows missing-glyph boxes; the `system-fonts` feature adds
   the OS fonts). Not yet: inline boxes, variable-font axes, synthetic bold/italic, color emoji,
-  hit-testing and editing.
+  text editing (insertion, deletion, IME).
 - **The glyph atlas is bounded** (by default four 1024 x 1024 pages, 4 MiB, capped to the GPU's
   texture limit). It grows a page at a time, then evicts the least recently used glyphs. If a
   single frame needs more glyphs than the whole atlas holds, the extra ones are skipped that
