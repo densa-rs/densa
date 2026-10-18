@@ -2,7 +2,14 @@
 
 use std::process::{Command, Output};
 
+/// One child process at a time: sessions run busy-spinning workers, and separate processes
+/// cannot see each other's CPU claims, so on a 2-CPU machine two sessions starve each other.
+static CHILD: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 fn run(args: &[&str]) -> Output {
+    let _one_at_a_time = CHILD
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
     Command::new(env!("CARGO_BIN_EXE_densa-poc"))
         .args(args)
         .output()

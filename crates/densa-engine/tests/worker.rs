@@ -60,6 +60,19 @@ fn worker_defaults_to_normal_priority() {
     handle.stop().unwrap();
 }
 
+/// Serializes the tests that auto-pin: on small machines automatic placement hands out a
+/// single core (never the last free one), so concurrent pinning tests would take it from each
+/// other.
+#[cfg(windows)]
+static AUTO_PIN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(windows)]
+fn auto_pin_lock() -> std::sync::MutexGuard<'static, ()> {
+    AUTO_PIN
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 /// Distinct physical cores of the fastest efficiency class.
 #[cfg(windows)]
 fn performance_cores() -> usize {
@@ -78,6 +91,7 @@ fn performance_cores() -> usize {
 #[cfg(windows)]
 #[test]
 fn concurrent_auto_workers_get_separate_physical_cores() {
+    let _serial = auto_pin_lock();
     let auto = || WorkerConfig {
         pin: Pin::Auto,
         ..config(None)
@@ -103,6 +117,7 @@ fn concurrent_auto_workers_get_separate_physical_cores() {
 #[test]
 fn stopping_a_worker_releases_its_cpu_claim() {
     use densa_platform::cpu_registry;
+    let _serial = auto_pin_lock();
     let cfg = WorkerConfig {
         pin: Pin::Auto,
         ..config(None)

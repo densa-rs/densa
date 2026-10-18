@@ -6,16 +6,26 @@ use densa_poc::{format_duration_ns, run_headless, Args};
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
 
+/// One session at a time. Each runs a busy-spinning worker: on a 2-CPU machine two of them
+/// plus their frame loops leave no CPU for anything (a 1 s run took 5.7 s at 0.4 fps).
+/// Separate cores for concurrent workers are tested in densa-engine's `worker.rs`.
+static SESSION: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn one_session_at_a_time() -> std::sync::MutexGuard<'static, ()> {
+    SESSION
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
 fn headless_args(extra: &[&str]) -> Args {
-    // Default `--pin auto` on purpose: these tests run concurrently, which once put both
-    // busy-spinning workers on the same core (rate halved to 49.97k of 100k). The engine's
-    // CPU registry now gives each worker its own physical core; these tests guard that.
+    // Default `--pin auto`, as users run it.
     let base = ["--headless", "--seconds", "1", "--symbols", "2000"];
     Args::parse(base.iter().chain(extra).map(|s| s.to_string())).unwrap()
 }
 
 #[test]
 fn rate_limited_run_hits_targets_with_zero_hot_path_allocations() {
+    let _session = one_session_at_a_time();
     assert!(
         is_active(),
         "counting allocator not installed: test would be vacuous"
@@ -51,6 +61,7 @@ fn rate_limited_run_hits_targets_with_zero_hot_path_allocations() {
 
 #[test]
 fn unbounded_run_is_much_faster_than_rate_limited() {
+    let _session = one_session_at_a_time();
     let mut out = Vec::new();
     let summary = run_headless(&headless_args(&["--unbounded"]), &mut out).unwrap();
     let tick_rate = summary.worker.ticks_applied as f64 / summary.elapsed_s;
