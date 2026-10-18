@@ -16,6 +16,7 @@ densa-alloc = { path = "crates/densa-alloc" }
 densa-data = { path = "crates/densa-data" }
 densa-engine = { path = "crates/densa-engine" }
 densa-fmt = { path = "crates/densa-fmt" }
+densa-paragraph = { path = "crates/densa-paragraph" }
 densa-platform = { path = "crates/densa-platform" }
 densa-render = { path = "crates/densa-render" }
 densa-sync = { path = "crates/densa-sync" }
@@ -26,9 +27,13 @@ criterion = { version = "0.8.2", default-features = false, features = ["cargo_be
 crossbeam-utils = "0.8.23"
 etagere = "0.3.0"
 loom = "0.7.2"
+# No default features: system font discovery is opt-in (densa-paragraph `system-fonts`).
+parley = { version = "0.12.0", default-features = false, features = ["std"] }
 pollster = "1.0.1"
 rustc-hash = "2.1.3"
-skrifa = "0.48.0"
+# Same version as parley_engine 0.12 uses: one font parser in the binary, not two.
+# Upgrade together with parley (`cargo tree -d` must not list skrifa or read-fonts).
+skrifa = "0.44.0"
 wgpu = "30.0.1"
 windows-sys = "0.61.2"
 winit = "0.30.13"

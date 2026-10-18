@@ -1,0 +1,173 @@
+use std::borrow::Cow;
+
+use densa_text::{Font, FontBytes, FontError};
+use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
+use parley::{FontContext, FontData, FontFamily, LayoutContext, LineHeight, StyleProperty};
+use rustc_hash::FxHashMap;
+
+use crate::paragraph::{bytes_key, face_key, FaceKey, Paragraph};
+use crate::style::{
+    check_font_size, check_line_height, check_span, check_width, Color, ParagraphError,
+    ParagraphStyle, Span,
+};
+
+/// Generic families the bundled font stands in for when system fonts are off.
+const GENERICS: [GenericFamily; 9] = [
+    GenericFamily::Serif,
+    GenericFamily::SansSerif,
+    GenericFamily::Monospace,
+    GenericFamily::SystemUi,
+    GenericFamily::UiSerif,
+    GenericFamily::UiSansSerif,
+    GenericFamily::UiMonospace,
+    GenericFamily::UiRounded,
+    GenericFamily::Emoji,
+];
+
+/// Fonts plus layout scratch space: builds [`Paragraph`]s.
+///
+/// Create one per application (or per UI thread) and keep it: it caches font data and reuses
+/// layout buffers. Every face a paragraph uses becomes one `densa_text::Font`, so all
+/// paragraphs (and the bundled font's other users, such as the grid) share cached glyphs.
+/// Faces stay loaded for the system's lifetime (system CJK fonts can be tens of MB each).
+pub struct TextSystem {
+    fonts: FontContext,
+    layouts: LayoutContext<Color>,
+    /// Every face any paragraph used, kept (with its font file) for the system's lifetime.
+    faces: FxHashMap<FaceKey, Font>,
+}
+
+impl std::fmt::Debug for TextSystem {
+    // Hand-written: parley's contexts do not implement Debug.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TextSystem")
+            .field("faces", &self.faces.len())
+            .finish_non_exhaustive()
+    }
+}
+
+impl TextSystem {
+    /// A text system with only the bundled JetBrains Mono, which also stands in for every
+    /// generic family (`monospace`, `sans-serif`, ...). Deterministic on every machine;
+    /// add fonts with [`register_font`](Self::register_font).
+    ///
+    /// # Errors
+    /// Only if the bundled font were corrupt.
+    pub fn new() -> Result<Self, FontError> {
+        Self::build(false)
+    }
+
+    /// A text system that also finds the operating system's fonts, for named families and
+    /// for fallback when a font lacks a character (CJK, symbols, ...).
+    ///
+    /// # Errors
+    /// Only if the bundled font were corrupt.
+    #[cfg(feature = "system-fonts")]
+    pub fn with_system_fonts() -> Result<Self, FontError> {
+        Self::build(true)
+    }
+
+    fn build(system_fonts: bool) -> Result<Self, FontError> {
+        let collection = Collection::new(CollectionOptions {
+            shared: false,
+            system_fonts,
+        });
+        let mut fonts = FontContext {
+            collection,
+            source_cache: SourceCache::default(),
+        };
+        let bundled = Font::bundled_mono()?;
+        let blob = Blob::new(bundled.shared_bytes());
+        let registered = fonts.collection.register_fonts(blob, None);
+        let Some(&(family, _)) = registered.first() else {
+            return Err(FontError::Parse);
+        };
+        if !system_fonts {
+            for generic in GENERICS {
+                fonts
+                    .collection
+                    .set_generic_families(generic, std::iter::once(family));
+            }
+        }
+        let mut faces = FxHashMap::default();
+        // The bundled font keeps its process-wide identity, shared with its other users.
+        faces.insert(bytes_key(bundled.bytes(), 0), bundled);
+        Ok(Self {
+            fonts,
+            layouts: LayoutContext::new(),
+            faces,
+        })
+    }
+
+    /// Adds the fonts in `data` (a font file or collection); returns their family names.
+    ///
+    /// # Errors
+    /// [`FontError::Parse`] if `data` holds no readable font.
+    pub fn register_font(&mut self, data: FontBytes) -> Result<Vec<String>, FontError> {
+        let registered = self.fonts.collection.register_fonts(Blob::new(data), None);
+        if registered.is_empty() {
+            return Err(FontError::Parse);
+        }
+        let mut names = Vec::with_capacity(registered.len());
+        for (family, _) in &registered {
+            // `family_name` borrows the collection mutably: copy each name out.
+            if let Some(name) = self.fonts.collection.family_name(*family) {
+                names.push(name.to_owned());
+            }
+        }
+        Ok(names)
+    }
+
+    /// Shapes `text` with `style`, `spans` overriding parts of it, then breaks and aligns it.
+    ///
+    /// Allocates (shaping is not a per-frame operation); drawing the result does not.
+    ///
+    /// # Errors
+    /// [`ParagraphError`] for a size, line height or width out of range, a span that does not
+    /// lie on character boundaries within `text`, or a font that cannot be read.
+    pub fn paragraph(
+        &mut self,
+        text: &str,
+        style: &ParagraphStyle,
+        spans: &[Span],
+    ) -> Result<Paragraph, ParagraphError> {
+        check_font_size(style.size_px)?;
+        check_line_height(style.line_height)?;
+        let max_width = check_width(style.max_width)?;
+        for span in spans {
+            check_span(text, span)?;
+        }
+
+        let mut builder = self
+            .layouts
+            .ranged_builder(&mut self.fonts, text, 1.0, true);
+        let family = FontFamily::Source(Cow::Borrowed(&style.family));
+        builder.push_default(StyleProperty::FontFamily(family));
+        builder.push_default(StyleProperty::FontSize(style.size_px));
+        let line_height = LineHeight::FontSizeRelative(style.line_height);
+        builder.push_default(StyleProperty::LineHeight(line_height));
+        builder.push_default(StyleProperty::Brush(style.color));
+        for span in spans {
+            if let Some(color) = span.color {
+                builder.push(StyleProperty::Brush(color), span.range.clone());
+            }
+            if let Some(size) = span.size_px {
+                builder.push(StyleProperty::FontSize(size), span.range.clone());
+            }
+        }
+        let layout = builder.build(text);
+
+        let faces = &mut self.faces;
+        let mut resolve = |data: &FontData| -> Option<Font> {
+            let key = face_key(data);
+            if let Some(font) = faces.get(&key) {
+                return Some(font.clone());
+            }
+            let (bytes, _) = data.data.clone().into_raw_parts();
+            let font = Font::from_shared(bytes, data.index).ok()?;
+            faces.insert(key, font.clone());
+            Some(font)
+        };
+        Paragraph::new(layout, text.len(), style.align, max_width, &mut resolve)
+    }
+}

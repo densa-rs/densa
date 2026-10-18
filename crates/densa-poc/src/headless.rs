@@ -146,8 +146,8 @@ struct Frame {
 
 impl Frame {
     fn new(symbols: u32) -> Result<Self, Box<dyn Error>> {
-        // Lossless: VIEWPORT_ROWS is a small constant.
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        // Lossless: VIEWPORT_ROWS is a small constant.
         let painter = market_painter(VIEWPORT_ROWS as u32, &mut cache)?;
         // No GPU here: the prewarmed glyphs' pixels are discarded, once, at startup.
         cache.drain_updates().for_each(drop);

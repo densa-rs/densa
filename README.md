@@ -103,12 +103,25 @@ Every second a line like this is printed (and the window title shows a summary):
 | `densa-platform` | CPU topology, thread pinning, process-wide CPU claim registry (the only FFI) |
 | `densa-engine` | Ingestion worker, pacer, latency histogram, frame probe |
 | `densa-text` | Fonts, glyph rasterization and an allocation-free glyph atlas cache |
+| `densa-paragraph` | Paragraph layout (parley): shaping, wrapping, bidi, alignment, styled spans |
 | `densa-render` | Domain-agnostic grid: `GridSource` trait, `GridPainter` (GPU-free, unit-tested), `GpuGrid` (wgpu 30) |
 | `densa-poc` | The demo binary: market columns (`MarketGrid`), argument parsing, window and headless modes |
 | `densa-bench` | Criterion benchmarks, kept out of the libraries' dependencies |
 
 Dependencies only point downward (app → render → text/fmt, app → engine → data/sync); core
 crates never depend on GPU or windowing crates, and the renderer knows nothing about markets.
+
+### Paragraphs
+
+`densa-paragraph` shapes, wraps and aligns text with [parley](https://github.com/linebender/parley)
+and draws it through the same glyph atlas as the grid. Resizing re-breaks lines without
+reshaping; drawing a laid-out paragraph allocates nothing.
+
+![Wrapped, justified, centered and right-aligned paragraphs with Vietnamese text](docs/paragraphs.png)
+
+```text
+cargo run --release -p densa-paragraph --example paragraphs
+```
 
 ### Design decisions, and the evidence behind them
 
@@ -172,10 +185,12 @@ calls are covered by tests that watch threads actually move between CPUs.
   processes, `isolcpus` on Linux) is the remaining step.
 - **CPU pinning is Windows-only**; elsewhere `--pin auto` runs unpinned and says so.
 - **The CPU claim registry is per process**: two densa processes may still pick the same core.
-- **Text is unshaped, single-line.** One glyph per character: precomposed Vietnamese and
-  other Latin text work, but ligatures, combining marks, complex scripts and bidi need a
-  shaper (parley is planned). No font fallback: missing characters render as `?`. Characters
-  outside the prewarmed set allocate once, the first time they are drawn.
+- **Grid cells are unshaped, single-line text** (one glyph per character, `?` for missing
+  ones); characters outside the prewarmed set allocate once, the first time they are drawn.
+  Paragraphs (`densa-paragraph`) are shaped, wrapped and bidi-ordered, but by default use only
+  the bundled font (no fallback: CJK shows missing-glyph boxes; the `system-fonts` feature adds
+  the OS fonts). Not yet: inline boxes, variable-font axes, synthetic bold/italic, color emoji,
+  hit-testing and editing.
 - **The glyph atlas is bounded** (by default four 1024 x 1024 pages, 4 MiB, capped to the GPU's
   texture limit). It grows a page at a time, then evicts the least recently used glyphs. If a
   single frame needs more glyphs than the whole atlas holds, the extra ones are skipped that

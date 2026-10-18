@@ -176,8 +176,8 @@ impl Session {
         args: &Args,
         out: &mut impl Write,
     ) -> Result<Self, Box<dyn Error>> {
-        // Lossless: VIEWPORT_ROWS is a small constant.
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        // Lossless: VIEWPORT_ROWS is a small constant.
         let painter = market_painter(VIEWPORT_ROWS as u32, &mut cache)?;
         let layout = painter.layout().clone();
         let attributes = Window::default_attributes()

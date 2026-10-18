@@ -131,6 +131,11 @@ impl Font {
         (*self.data).as_ref()
     }
 
+    /// The shared file bytes, for handing to another library without copying.
+    pub fn shared_bytes(&self) -> FontBytes {
+        Arc::clone(&self.data)
+    }
+
     /// Parsed view of the font. Parsing reads table headers only: no allocation.
     /// Cannot fail after construction succeeded on the same bytes; callers still degrade
     /// gracefully instead of panicking.

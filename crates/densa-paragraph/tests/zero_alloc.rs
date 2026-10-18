@@ -1,0 +1,50 @@
+//! Proves drawing a laid-out paragraph every frame never touches the heap.
+
+use densa_alloc::{is_active, measure, CountingAllocator};
+use densa_paragraph::{ParagraphStyle, Span, TextSystem};
+use densa_render::{Canvas, InstanceBuffer};
+use densa_text::{AtlasConfig, GlyphCache};
+use std::hint::black_box;
+
+#[global_allocator]
+static ALLOCATOR: CountingAllocator = CountingAllocator::system();
+
+#[test]
+fn drawing_a_paragraph_performs_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut system = TextSystem::new().unwrap();
+    let text = "Tiếng Việt có dấu, wrapped across several lines of a narrow column.";
+    let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
+    let spans = [Span::new(0.."Tiếng Việt".len()).with_color([1.0, 0.5, 0.0, 1.0])];
+    let paragraph = system.paragraph(text, &style, &spans).unwrap();
+    assert!(paragraph.lines().len() > 2);
+
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(paragraph.glyph_count());
+    let draw = |cache: &mut GlyphCache, out: &mut InstanceBuffer| {
+        let mut canvas = Canvas::begin(cache, out);
+        for run in paragraph.runs() {
+            canvas.draw_run(run, [10.0, 20.0]);
+        }
+    };
+    draw(&mut cache, &mut out); // first frame rasterizes
+    cache.drain_updates().for_each(drop);
+
+    let ((), stats) = measure(|| {
+        for _ in 0..1_000 {
+            draw(&mut cache, &mut out);
+            black_box(out.as_slice());
+        }
+    });
+    assert!(stats.is_zero(), "drawing allocated: {stats:?}");
+    assert!(!out.is_empty());
+    assert_eq!(out.dropped(), 0);
+    assert_eq!(
+        cache.drain_updates().count(),
+        0,
+        "warm frames upload nothing"
+    );
+}

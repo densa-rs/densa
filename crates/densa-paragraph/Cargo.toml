@@ -1,0 +1,27 @@
+[package]
+name = "densa-paragraph"
+description = "Paragraph layout for densa: shaping, line breaking, bidi and alignment (parley), drawn through densa-text glyph runs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+
+[features]
+# Discover the operating system's fonts for families and fallback (CJK, symbols, ...).
+system-fonts = ["parley/system"]
+
+[dependencies]
+densa-text.workspace = true
+parley.workspace = true
+rustc-hash.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+densa-render.workspace = true
+pollster.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true
