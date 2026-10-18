@@ -67,3 +67,23 @@ fn rejects_data_that_is_not_a_font() {
         "the data is not a readable OpenType/TrueType font"
     );
 }
+
+#[test]
+fn glyph_extent_bounds_the_rasterized_bitmap_without_rasterizing() {
+    let font = Font::bundled_mono().unwrap();
+    let w = font.glyph_id('W').unwrap();
+    let [width, height] = font.glyph_extent(w, 40.0).unwrap();
+    let bitmap = densa_text::rasterize(&font, w, 40.0, 0.0);
+    assert!(
+        (bitmap.width as f32 - width).abs() <= 2.0,
+        "{width} vs {}",
+        bitmap.width
+    );
+    assert!(
+        (bitmap.height as f32 - height).abs() <= 2.0,
+        "{height} vs {}",
+        bitmap.height
+    );
+    let space = font.glyph_id(' ').unwrap();
+    assert_eq!(font.glyph_extent(space, 40.0), Some([0.0, 0.0]));
+}

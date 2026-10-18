@@ -2,6 +2,9 @@ use rustc_hash::FxHashMap;
 
 use crate::{Font, GlyphId, LineMetrics};
 
+/// Non-ASCII characters remembered at most; past it the memory is forgotten and rebuilt.
+pub const MAX_CACHED_CHARS: usize = 4096;
+
 /// A character's glyph and advance at the map's size.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MappedGlyph {
@@ -17,6 +20,9 @@ pub struct MappedGlyph {
 /// answer for thousands of characters, so this caches it: ASCII is resolved up front into
 /// a table, any other character on first use (that first use allocates, later ones don't).
 /// Characters the font lacks map to its `?` glyph.
+///
+/// Memory is bounded: after [`MAX_CACHED_CHARS`] distinct non-ASCII characters (streaming
+/// text, CJK), the non-ASCII memory is cleared, keeping its capacity, and refilled on use.
 #[derive(Debug, Clone)]
 pub struct GlyphMap {
     font: Font,
@@ -59,6 +65,11 @@ impl GlyphMap {
         self.px
     }
 
+    /// Non-ASCII characters currently remembered (at most [`MAX_CACHED_CHARS`]).
+    pub fn cached_chars(&self) -> usize {
+        self.other.len()
+    }
+
     /// The font's line metrics at this size.
     pub fn line_metrics(&self) -> LineMetrics {
         self.font.line_metrics(self.px)
@@ -71,6 +82,9 @@ impl GlyphMap {
         let mapped = match self.ascii.get(ch as usize) {
             Some(slot) => *slot,
             None => {
+                if self.other.len() >= MAX_CACHED_CHARS && !self.other.contains_key(&ch) {
+                    self.other.clear();
+                }
                 let (font, px) = (&self.font, self.px);
                 *self.other.entry(ch).or_insert_with(|| {
                     font.glyph_id(ch).map(|id| MappedGlyph {

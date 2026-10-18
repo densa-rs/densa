@@ -29,7 +29,8 @@ priority (the defaults). Numbers are from the summary line each run prints.
 
 Building a frame's 50 rows of instances (`GridPainter::paint`) takes ~35 us (p50) and ~65 us
 (p99) with real text (JetBrains Mono 13px, two cache lookups per glyph); the 8x8 bitmap font it
-replaced took ~19 us. wgpu itself allocates during submit/present (~199 heap operations per
+replaced took ~19 us. That is on a P-core: the render thread is not pinned, and when Windows
+schedules it on an E-core the same work takes ~70 us (p50). wgpu itself allocates during submit/present (~199 heap operations per
 frame); that is measured and reported separately, not hidden.
 
 Micro-benchmarks (criterion, bench thread pinned to a P-core): triple buffer publish 4.4 ns,
@@ -175,9 +176,10 @@ calls are covered by tests that watch threads actually move between CPUs.
   other Latin text work, but ligatures, combining marks, complex scripts and bidi need a
   shaper (parley is planned). No font fallback: missing characters render as `?`. Characters
   outside the prewarmed set allocate once, the first time they are drawn.
-- **The glyph atlas has a fixed size** (1024 x 1024). When it fills with glyphs needed in the
-  same frame, extra glyphs are dropped (counted) and retried every frame; eviction is plain LRU
-  on a shelf packer. Fine for grids, not yet for text-heavy views.
+- **The glyph atlas is bounded** (by default four 1024 x 1024 pages, 4 MiB, capped to the GPU's
+  texture limit). It grows a page at a time, then evicts the least recently used glyphs. If a
+  single frame needs more glyphs than the whole atlas holds, the extra ones are skipped that
+  frame (counted) and placed in a later frame; glyphs larger than a page are never drawn.
 - **The feed is synthetic.** No network ingestion, order book or persistence yet.
 - wgpu allocates per frame internally; "zero-allocation frames" covers densa's own code.
 

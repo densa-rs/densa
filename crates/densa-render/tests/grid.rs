@@ -295,9 +295,9 @@ mod capacity {
         let mut p = painter(1);
         let s = source(vec![vec!["abc", "1"]]);
         paint(&mut p, &s);
-        let first = p.drain_uploads().count();
+        let first = p.drain_updates().count();
         assert!(first >= 4, "header and cell glyphs uploaded, got {first}");
         paint(&mut p, &s);
-        assert_eq!(p.drain_uploads().count(), 0, "warm frame uploads nothing");
+        assert_eq!(p.drain_updates().count(), 0, "warm frame uploads nothing");
     }
 }

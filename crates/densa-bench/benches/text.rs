@@ -3,7 +3,7 @@
 //! Run: `cargo bench -p densa-bench --bench text`
 
 use criterion::{criterion_group, Criterion, Throughput};
-use densa_text::{quantize_x, rasterize, Font, GlyphCache};
+use densa_text::{quantize_x, rasterize, AtlasConfig, Font, GlyphCache};
 use std::hint::black_box;
 
 /// About one 50-row grid frame: 50 rows x 50 characters.
@@ -17,13 +17,13 @@ fn warm_lookups(c: &mut Criterion) {
         .filter_map(|ch| font.glyph_id(ch))
         .collect();
     let advance = font.advance(glyphs[0], PX);
-    let mut cache = GlyphCache::new(1024);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
     let frame = |cache: &mut GlyphCache| {
         cache.begin_frame();
         let mut x = 0.0;
         for i in 0..LOOKUPS_PER_FRAME {
             let (_, bin) = quantize_x(x);
-            black_box(cache.get(&font, glyphs[i % glyphs.len()], PX, bin));
+            black_box(cache.get(&font, glyphs[i % glyphs.len()], PX, bin).ok());
             x += advance;
         }
     };

@@ -8,7 +8,7 @@ use bytemuck::{Pod, Zeroable};
 pub struct Instance {
     /// `[x, y, width, height]` in physical pixels, origin top-left.
     pub rect: [f32; 4],
-    /// `[u0, v0, u1, v1]` in the glyph atlas.
+    /// `[x0, y0, x1, y1]` of the glyph in the atlas, in texels (the shader normalizes).
     pub uv: [f32; 4],
     /// Linear RGBA, not premultiplied.
     pub color: [f32; 4],

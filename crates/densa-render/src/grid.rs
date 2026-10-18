@@ -1,6 +1,9 @@
 use crate::{Align, Column, GridLayout, Instance, InstanceBuffer, Palette};
 use densa_fmt::FmtBuf;
-use densa_text::{quantize_x, CacheStats, Font, GlyphCache, GlyphMap, GlyphUpload, SUBPIXEL_STEPS};
+use densa_text::{
+    quantize_x, AtlasConfig, AtlasLimitError, AtlasUpdate, CacheStats, Font, GlyphCache, GlyphMap,
+    SUBPIXEL_STEPS,
+};
 
 /// Bytes a cell's text may take. [`FmtBuf`] appends are all-or-nothing, so a write that
 /// does not fit leaves the cell as it was (blank if nothing was written yet), not truncated.
@@ -8,9 +11,6 @@ pub const CELL_BYTES: usize = 64;
 
 /// The stack buffer a [`GridSource`] writes one cell's text into.
 pub type CellText = FmtBuf<CELL_BYTES>;
-
-/// Side of the square glyph atlas in pixels: room for thousands of glyphs at grid sizes.
-pub const ATLAS_SIZE: u32 = 1024;
 
 /// How one cell is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -42,8 +42,7 @@ pub trait GridSource {
 /// Owns the font, its character map and the glyph atlas cache. Painting a frame whose
 /// characters have all been drawn (or [prewarmed](Self::prewarm)) before allocates nothing;
 /// a character seen for the first time is mapped and rasterized (allocating, once) and its
-/// pixels queued in [`drain_uploads`](Self::drain_uploads) for the GPU atlas, whose side must
-/// be [`atlas_size`](Self::atlas_size).
+/// pixels queued in [`drain_updates`](Self::drain_updates) for the GPU atlas.
 #[derive(Debug)]
 pub struct GridPainter {
     columns: Box<[Column]>,
@@ -64,10 +63,19 @@ impl GridPainter {
             palette,
             text: TextPen {
                 glyphs,
-                cache: GlyphCache::new(ATLAS_SIZE),
+                cache: GlyphCache::new(AtlasConfig::DEFAULT),
             },
             cell: CellText::new(),
         }
+    }
+
+    /// The painter with a glyph atlas shaped by `config` instead of [`AtlasConfig::DEFAULT`]
+    /// (for example larger pages for big fonts). Starts the cache afresh: call it before
+    /// [`prewarm`](Self::prewarm) or painting.
+    #[must_use]
+    pub fn with_atlas(mut self, config: AtlasConfig) -> Self {
+        self.text.cache = GlyphCache::new(config);
+        self
     }
 
     /// The geometry this painter draws with.
@@ -85,9 +93,9 @@ impl GridPainter {
         &self.columns
     }
 
-    /// Side of the square atlas texture the uploads target, in pixels.
-    pub fn atlas_size(&self) -> u32 {
-        self.text.cache.atlas_size()
+    /// Current glyph atlas size in texels, `(width, height)`.
+    pub fn atlas_extent(&self) -> (u32, u32) {
+        self.text.cache.atlas_extent()
     }
 
     /// Glyph cache counters.
@@ -97,25 +105,39 @@ impl GridPainter {
 
     /// Rasterizes every character of `chars` at every subpixel position now, so frames that
     /// only use them never rasterize (or allocate). Uploads queue as usual.
-    pub fn prewarm(&mut self, chars: &str) {
+    ///
+    /// Returns how many glyphs could not be cached (the atlas is too small for the set, or a
+    /// glyph is larger than a page); they would be retried, and allocate, while painting.
+    pub fn prewarm(&mut self, chars: &str) -> usize {
         let pen = &mut self.text;
         pen.cache.begin_frame();
+        let mut missing = 0;
         for ch in chars.chars() {
             let Some(mapped) = pen.glyphs.get(ch) else {
                 continue;
             };
             for bin in 0..SUBPIXEL_STEPS {
-                let _ = pen
-                    .cache
-                    .get(pen.glyphs.font(), mapped.id, pen.glyphs.px(), bin);
+                let font = pen.glyphs.font();
+                let cached = pen.cache.get(font, mapped.id, pen.glyphs.px(), bin);
+                missing += usize::from(cached.is_err());
             }
         }
+        missing
     }
 
-    /// Takes the glyph pixels queued since the last call; copy them into the GPU atlas
-    /// before drawing the frame just painted.
-    pub fn drain_uploads(&mut self) -> std::vec::Drain<'_, GlyphUpload> {
-        self.text.cache.drain_uploads()
+    /// Caps the glyph atlas to `max_side` texels, the GPU's `max_texture_dimension_2d`
+    /// (see `GpuGrid::max_atlas_side`), so it never grows past what the device can hold.
+    ///
+    /// # Errors
+    /// If the atlas already needs more than `max_side`.
+    pub fn limit_atlas_side(&mut self, max_side: u32) -> Result<(), AtlasLimitError> {
+        self.text.cache.limit_side(max_side)
+    }
+
+    /// Takes the atlas changes queued since the last call; apply them to the GPU atlas
+    /// (`GpuGrid::apply_atlas_updates`) before drawing the frame just painted.
+    pub fn drain_updates(&mut self) -> impl ExactSizeIterator<Item = AtlasUpdate> + '_ {
+        self.text.cache.drain_updates()
     }
 
     /// Replaces `out` with the frame for `source`.
@@ -244,8 +266,8 @@ impl TextPen {
             let (x, bin) = quantize_x(pen);
             pen += mapped.advance;
             let (font, px) = (self.glyphs.font(), self.glyphs.px());
-            let Some(glyph) = self.cache.get(font, mapped.id, px, bin) else {
-                continue; // Atlas full of this frame's glyphs: counted in the cache stats.
+            let Ok(glyph) = self.cache.get(font, mapped.id, px, bin) else {
+                continue; // Nothing to draw this frame: counted in the cache stats.
             };
             if glyph.size[0] == 0.0 {
                 continue; // No ink, e.g. a space.
@@ -257,7 +279,7 @@ impl TextPen {
                     glyph.size[0],
                     glyph.size[1],
                 ],
-                glyph.uv,
+                glyph.atlas_rect,
                 cell.color,
             ));
         }

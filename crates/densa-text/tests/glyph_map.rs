@@ -1,6 +1,6 @@
 //! Cached character-to-glyph mapping for one font at one size.
 
-use densa_text::{Font, GlyphMap};
+use densa_text::{Font, GlyphMap, MAX_CACHED_CHARS};
 
 fn map() -> GlyphMap {
     GlyphMap::new(Font::bundled_mono().unwrap(), 16.0)
@@ -41,4 +41,16 @@ fn exposes_its_font_size_and_line_metrics() {
     let glyphs = map();
     assert_eq!(glyphs.px(), 16.0);
     assert_eq!(glyphs.line_metrics(), glyphs.font().line_metrics(16.0));
+}
+
+#[test]
+fn non_ascii_memory_is_bounded_and_keeps_answering() {
+    let mut glyphs = map();
+    let font = Font::bundled_mono().unwrap();
+    // Every CJK ideograph maps to the '?' fallback in JetBrains Mono; each is a new entry.
+    for ch in ('\u{4E00}'..).take(MAX_CACHED_CHARS * 2 + 7) {
+        glyphs.get(ch);
+    }
+    assert!(glyphs.cached_chars() <= MAX_CACHED_CHARS);
+    assert_eq!(glyphs.get('ệ').unwrap().id, font.glyph_id('ệ').unwrap());
 }

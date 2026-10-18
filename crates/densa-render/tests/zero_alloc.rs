@@ -50,13 +50,13 @@ fn painting_warm_frames_performs_zero_heap_operations() {
     let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
 
     // Startup: every glyph the frames use, at every subpixel position.
-    painter.prewarm("NAMEVLU0123456789.Ngân hà");
-    painter.drain_uploads().for_each(drop);
+    assert_eq!(painter.prewarm("NAMEVLU0123456789.Ngân hà"), 0);
+    painter.drain_updates().for_each(drop);
 
     let ((), stats) = measure(|| {
         for frame in 0..1_000 {
             painter.paint(&Ticking { frame }, &mut buf);
-            painter.drain_uploads().for_each(drop);
+            painter.drain_updates().for_each(drop);
             black_box(buf.as_slice());
         }
     });

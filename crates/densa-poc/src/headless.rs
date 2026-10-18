@@ -147,7 +147,7 @@ impl Frame {
         // Lossless: VIEWPORT_ROWS is a small constant.
         let mut painter = market_painter(VIEWPORT_ROWS as u32)?;
         // No GPU here: the prewarmed glyphs' pixels are discarded, once, at startup.
-        painter.drain_uploads().for_each(drop);
+        painter.drain_updates().for_each(drop);
         let instances = InstanceBuffer::with_capacity(painter.layout().max_instances());
         Ok(Self {
             window: FrameProbe::new(),
@@ -177,7 +177,7 @@ impl Frame {
             painter.paint(&MarketGrid::new(snapshot, now, palette), instances);
         });
         // Any glyph missed by the prewarm shows up here as heap operations.
-        self.painter.drain_uploads().for_each(drop);
+        self.painter.drain_updates().for_each(drop);
         black_box(self.instances.as_slice());
         self.scroll();
         worker.set_viewport(self.first_row);

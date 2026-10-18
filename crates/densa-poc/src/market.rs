@@ -6,7 +6,8 @@
 use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_fmt::{write_fixed, write_grouped};
 use densa_render::{Align, CellStyle, CellText, Column, GridPainter, GridSource, Palette};
-use densa_text::{Font, FontError};
+use densa_text::Font;
+use std::error::Error;
 use std::fmt::Write as _;
 
 /// Pixels per em of the grid font.
@@ -140,9 +141,18 @@ impl<const N: usize> GridSource for MarketGrid<'_, N> {
 
 /// The market grid painter for `rows` data rows, with every market glyph already
 /// rasterized (their uploads are queued for the first frame).
-pub fn market_painter(rows: u32) -> Result<GridPainter, FontError> {
+///
+/// # Errors
+/// If the bundled font fails to load, or the glyph atlas cannot hold `MARKET_GLYPHS` (the
+/// frame loop would then rasterize, and allocate, every frame).
+pub fn market_painter(rows: u32) -> Result<GridPainter, Box<dyn Error>> {
     let font = Font::bundled_mono()?;
     let mut painter = GridPainter::new(market_columns(), rows, font, FONT_PX, Palette::new());
-    painter.prewarm(MARKET_GLYPHS);
+    let missing = painter.prewarm(MARKET_GLYPHS);
+    if missing > 0 {
+        return Err(
+            format!("the glyph atlas cannot hold the market glyphs ({missing} missing)").into(),
+        );
+    }
     Ok(painter)
 }

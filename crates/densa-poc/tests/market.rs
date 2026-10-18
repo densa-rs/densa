@@ -148,7 +148,7 @@ fn prices_too_long_for_the_buffer_overflow_to_hash_fill() {
 #[test]
 fn worst_case_viewport_fits_capacity_and_needs_no_new_glyphs() {
     let mut painter = market_painter(50).unwrap();
-    painter.drain_uploads().for_each(drop);
+    painter.drain_updates().for_each(drop);
     let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
     let mut snap = ViewportSnapshot::<50>::new();
     for (i, r) in snap.rows.iter_mut().enumerate() {
@@ -173,7 +173,7 @@ fn worst_case_viewport_fits_capacity_and_needs_no_new_glyphs() {
         painter.layout().max_instances()
     );
     assert_eq!(
-        painter.drain_uploads().count(),
+        painter.drain_updates().count(),
         0,
         "a glyph is missing from MARKET_GLYPHS ({MARKET_GLYPHS})"
     );

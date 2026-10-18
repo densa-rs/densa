@@ -35,7 +35,9 @@ fn vs_main(
 
     var out: VertexOut;
     out.position = vec4<f32>(ndc, 0.0, 1.0);
-    out.uv = mix(uv.xy, uv.zw, corner);
+    // UVs arrive in atlas texels, so they stay valid when the atlas grows.
+    let atlas_size = vec2<f32>(textureDimensions(atlas));
+    out.uv = mix(uv.xy, uv.zw, corner) / atlas_size;
     out.color = color;
     out.textured = select(0.0, 1.0, uv.z > uv.x);
     return out;

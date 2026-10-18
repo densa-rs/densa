@@ -175,7 +175,7 @@ impl Session {
         out: &mut impl Write,
     ) -> Result<Self, Box<dyn Error>> {
         // Lossless: VIEWPORT_ROWS is a small constant.
-        let painter = market_painter(VIEWPORT_ROWS as u32)?;
+        let mut painter = market_painter(VIEWPORT_ROWS as u32)?;
         let layout = painter.layout().clone();
         let attributes = Window::default_attributes()
             .with_title("densa")
@@ -208,12 +208,9 @@ impl Session {
             config.view_formats.push(view_format);
         }
         surface.configure(&device, &config);
-        let gpu = GpuGrid::new(
-            &device,
-            view_format,
-            layout.max_instances(),
-            painter.atlas_size(),
-        );
+        // Grow the glyph atlas only as far as this GPU's textures go.
+        painter.limit_atlas_side(GpuGrid::max_atlas_side(&device))?;
+        let gpu = GpuGrid::new(&device, view_format, layout.max_instances());
 
         let mut worker_config = args.worker.clone();
         worker_config.pin = worker_pin(args.pin)?;
@@ -335,7 +332,7 @@ impl Session {
     /// occluded or just reconfigured).
     fn submit(&mut self) -> Result<bool, Box<dyn Error>> {
         self.gpu
-            .upload_glyphs(&self.queue, self.painter.drain_uploads());
+            .apply_atlas_updates(&self.device, &self.queue, self.painter.drain_updates())?;
         let count = self.gpu.prepare(
             &self.queue,
             (self.config.width, self.config.height),
