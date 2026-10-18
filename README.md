@@ -32,7 +32,8 @@ the pixel.
 </p>
 
 - **Data.** Arrow record batches from files, streams or query engines go into live tables;
-  views sort and filter them, and follow every change incrementally.
+  views sort and filter them, groups aggregate them, and both follow every change
+  incrementally.
 - **Interface.** Widgets (a data grid, paragraphs of text) draw into a display list that is
   independent of any GPU API; `densa-render` draws a whole frame in one call with wgpu.
 - **Runtime.** Hand data between threads without locks, place threads on the right cores,
@@ -42,8 +43,8 @@ Each crate is usable on its own, and only `densa-render` depends on a GPU or win
 
 ## Highlights
 
-- **Live tables.** Upsert Arrow batches by key; sorted, filtered views are kept up to date
-  as rows change instead of being recomputed.
+- **Live tables.** Upsert Arrow batches by key; sorted, filtered views and grouped
+  aggregates are kept up to date as rows change instead of being recomputed.
 - **Arrow from end to end.** Batches are shared, never copied, from the source to the
   screen; a grid over millions of rows costs only its visible rows.
 - **No allocation per frame.** Drawing, scrolling, hit-testing and moving a caret allocate
@@ -80,7 +81,7 @@ densa-render = { git = "https://github.com/densa-rs/densa" }
 
 | Crate | Use it for |
 |---|---|
-| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views kept up to date incrementally |
+| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, with typed, allocation-free cell formatting |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridSource`): columns, alignment, cell styles |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
@@ -95,10 +96,12 @@ densa-render = { git = "https://github.com/densa-rs/densa" }
 
 ## Usage
 
-### A live table and a sorted view
+### A live table, a sorted view and aggregates
 
 ```rust
-use densa_data::{CompareOp, Filter, LiveTable, Order, Scalar, ViewSpec};
+use densa_data::{
+    Aggregate, CompareOp, Filter, GroupSpec, LiveTable, Order, Scalar, ViewSpec,
+};
 
 let mut table = LiveTable::new(schema, "symbol")?; // keyed by the `symbol` column
 let movers = table.add_view(
@@ -112,6 +115,15 @@ table.delete(&delisted)?; // an array of keys
 
 let view = table.view(movers).unwrap(); // in order, after every change
 let top = view.row(0); // where the row's values are in table.batches()
+
+// Grouped aggregates follow every change the same way.
+let by_sector = table.add_groups(
+    GroupSpec::new()
+        .group_by("sector")
+        .aggregate(Aggregate::count())
+        .aggregate(Aggregate::sum("volume").named("volume")),
+)?;
+let summary = table.groups(by_sector).unwrap().to_batch()?; // one row per sector
 ```
 
 To show it, `densa_arrow::LiveGrid` turns a view into the grid's data source; the
@@ -217,7 +229,7 @@ if reader.update() {
 
 | Guarantee | Checked by |
 |---|---|
-| Live views equal a full recomputation | A model-based test checks every view after each of thousands of random upserts, deletes and compactions |
+| Live views and aggregates equal a full recomputation | Model-based tests check every view and every group after each of thousands of random upserts, deletes and compactions |
 | Drawing, hit-testing and selection allocate nothing | A counting global allocator in each crate's `tests/zero_alloc.rs` |
 | The triple buffer is free of data races | loom model checking; a mutation script proves every weaker memory ordering fails |
 | Correct pixels | GPU tests render offscreen and read the pixels back (on machines with a GPU) |
@@ -237,8 +249,8 @@ if reader.update() {
 
 - **Widgets:** a data grid, paragraphs and editable text. No layout system, event routing,
   focus handling or accessibility yet; text editing has no undo, redo or clipboard yet.
-- **Live data:** views sort and filter; grouping, aggregates and time windows are not there
-  yet. A table is used from one thread at a time.
+- **Live data:** views sort and filter, groups count, sum, average and find extremes; time
+  windows and joins are not there yet. A table is used from one thread at a time.
 - **Text:** grid cells are single-line, unshaped text. Paragraphs use only the bundled font
   unless the `system-fonts` feature is enabled. Not supported yet: inline boxes,
   variable-font axes, synthetic bold and italic, color emoji.
@@ -261,8 +273,9 @@ Set `DENSA_SKIP_GPU_TESTS=1` on machines without a GPU or desktop session. Miri 
 the Linux target: with a custom global allocator, Miri reports a false positive in the Windows
 `System` allocator.
 
-Bug reports and pull requests are welcome. Please run the checks above before opening a pull
-request.
+Bug reports and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) explains how
+the workspace is laid out, what the code must guarantee and every check a pull request has to
+pass.
 
 ## License
 

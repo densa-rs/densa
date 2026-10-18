@@ -3,12 +3,13 @@ use std::sync::Arc;
 
 use arrow_array::{Array, ArrayRef, RecordBatch};
 use arrow_schema::{Field, Schema, SchemaRef};
-use arrow_select::interleave::interleave;
 use rustc_hash::FxHashMap;
 
+use crate::dictionary::interleave_column;
+use crate::group::{GroupState, Groups};
 use crate::key::{key_reader, KeyFn, KeyIndex, KeyRef};
 use crate::view::{Rows, ViewState};
-use crate::{DataError, RowId, Scalar, ViewSpec};
+use crate::{DataError, GroupSpec, RowId, Scalar, ViewSpec};
 
 /// Changing more than one row in this many rebuilds each view instead of patching it.
 const REBUILD_RATIO: usize = 8;
@@ -19,15 +20,18 @@ const MIN_DEAD_ROWS: usize = 4_096;
 const MAX_BATCHES: usize = 4_096;
 /// Rows per batch written by compaction.
 const COMPACT_ROWS: usize = 65_536;
+/// Compaction splits a chunk Arrow cannot build into halves, down to this many rows. Any
+/// dictionary key type indexes this many distinct strings, so a smaller chunk would not help.
+const MIN_SPLIT_ROWS: usize = 128;
 /// Row ids are `u32`: at most this many live keys.
 const MAX_ROWS: usize = 1 << 32;
 
-/// Hands out table identities, unique within the process.
-static NEXT_TABLE: AtomicU64 = AtomicU64::new(1);
+/// Hands out identities of tables, views and groups, unique within the process.
+static NEXT_SERIAL: AtomicU64 = AtomicU64::new(1);
 
-fn next_table_id() -> u64 {
+fn next_serial() -> u64 {
     // ORDERING: Relaxed. Only uniqueness matters; no other memory is published with it.
-    NEXT_TABLE.fetch_add(1, AtomicOrdering::Relaxed)
+    NEXT_SERIAL.fetch_add(1, AtomicOrdering::Relaxed)
 }
 
 /// Where a row's values are: `table.batches()[batch]`, row `row`. Valid until the next
@@ -75,7 +79,8 @@ pub struct Changes {
 pub struct TableOptions {
     /// Whether [`LiveTable::upsert`] and [`LiveTable::delete`] compact the table when
     /// superseded rows outnumber live ones (at least 4,096 of them) or more than 4,096 batches
-    /// are stored. Compaction copies every live row, a pause proportional to the table;
+    /// were stored since the last compaction. Compaction copies every live row, a pause
+    /// proportional to the table;
     /// without it, call [`LiveTable::compact`] when convenient. Default: on.
     pub auto_compact: bool,
 }
@@ -95,11 +100,20 @@ impl TableOptions {
     }
 }
 
-/// Identifies a view of one [`LiveTable`] (and of its clones, which copy its views).
+/// Identifies a view of one [`LiveTable`]. A clone of the table copies its views, so the id
+/// of a view added before cloning works on both; one added afterwards, only on its table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ViewId {
-    /// The family of tables the view belongs to.
-    owner: u64,
+    /// Unique to the view's addition.
+    serial: u64,
+    index: usize,
+}
+
+/// Identifies grouped aggregates of one [`LiveTable`] (and of clones made after they were
+/// added, as for [`ViewId`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct GroupsId {
+    serial: u64,
     index: usize,
 }
 
@@ -115,10 +129,12 @@ type Change<'a> = (RowId, Option<Slot>, Slot, Option<KeyRef<'a>>);
 /// automatically (see [`TableOptions`]) or with [`compact`](Self::compact). Every key has a
 /// stable internal id, so compaction never reorders a view.
 ///
-/// Views are maintained incrementally: changing `k` rows costs about `k` sorted insertions
-/// and removals (each a few binary searches over contiguous memory plus moving one block of
-/// at most 1,024 entries), not a re-sort; a change touching more than an eighth of the rows
-/// rebuilds instead. Reading a view ([`View::row`], `O(log n)`) never allocates.
+/// Views and grouped aggregates ([`GroupSpec`]) are maintained incrementally: changing `k`
+/// rows costs each view about `k` sorted insertions and removals (a few binary searches over
+/// contiguous memory plus moving one block of at most 1,024 entries), and each group spec as
+/// much per min or max column plus `O(log groups)` per row, not a re-sort or a recount; a
+/// change touching more than an eighth of the rows rebuilds them instead. Reading a view
+/// ([`View::row`], `O(log n)`) never allocates; [`Groups::to_batch`] does.
 ///
 /// Every column of the table is nullable, whatever the schema given says; batches must have
 /// the table's column names and data types, in order.
@@ -126,8 +142,6 @@ type Change<'a> = (RowId, Option<Slot>, Slot, Option<KeyRef<'a>>);
 pub struct LiveTable {
     /// Unique to this table object; a clone gets its own.
     instance: u64,
-    /// Shared by a table and its clones, which hold the same views.
-    owner: u64,
     options: TableOptions,
     schema: SchemaRef,
     key_column: usize,
@@ -139,19 +153,22 @@ pub struct LiveTable {
     free: Vec<RowId>,
     /// Stored rows that are no longer live.
     dead: usize,
-    views: Vec<Option<ViewState>>,
+    /// Each view with the serial of its id.
+    views: Vec<Option<(u64, ViewState)>>,
+    groups: Vec<Option<(u64, GroupState)>>,
     generation: u64,
     /// The last automatic compaction's failure, until a compaction succeeds.
     compaction_error: Option<DataError>,
     /// Dead rows at which automatic compaction tries again after a failure.
     retry_at_dead: usize,
+    /// Batches the last compaction wrote: automatic compaction counts the ones stored since.
+    compacted_batches: usize,
 }
 
 impl Clone for LiveTable {
     fn clone(&self) -> Self {
         Self {
-            instance: next_table_id(),
-            owner: self.owner,
+            instance: next_serial(),
             options: self.options,
             schema: Arc::clone(&self.schema),
             key_column: self.key_column,
@@ -162,9 +179,11 @@ impl Clone for LiveTable {
             free: self.free.clone(),
             dead: self.dead,
             views: self.views.clone(),
+            groups: self.groups.clone(),
             generation: self.generation,
             compaction_error: self.compaction_error.clone(),
             retry_at_dead: self.retry_at_dead,
+            compacted_batches: self.compacted_batches,
         }
     }
 }
@@ -194,10 +213,8 @@ impl LiveTable {
         let unsupported = || DataError::UnsupportedKey(key.to_owned());
         let key_read = key_reader(field.data_type()).ok_or_else(unsupported)?;
         let keys = KeyIndex::for_type(field.data_type()).ok_or_else(unsupported)?;
-        let id = next_table_id();
         Ok(Self {
-            instance: id,
-            owner: id,
+            instance: next_serial(),
             options,
             schema: nullable(&schema),
             key_column,
@@ -208,9 +225,11 @@ impl LiveTable {
             free: Vec::new(),
             dead: 0,
             views: Vec::new(),
+            groups: Vec::new(),
             generation: 0,
             compaction_error: None,
             retry_at_dead: MIN_DEAD_ROWS,
+            compacted_batches: 0,
         })
     }
 
@@ -338,12 +357,15 @@ impl LiveTable {
         })
     }
 
-    /// Rewrites the stored batches with only the live rows, in batches of up to 65,536 rows.
-    /// Views keep their order; [`generation`](Self::generation) increases.
+    /// Rewrites the stored batches with only the live rows, in batches of up to 65,536 rows
+    /// (fewer where one batch cannot hold them: more distinct strings than a dictionary
+    /// column's key type indexes, over 2 GiB of strings). Dictionary columns of strings are
+    /// re-encoded with the strings their rows use. Views keep their order;
+    /// [`generation`](Self::generation) increases.
     ///
     /// # Errors
-    /// [`DataError::Arrow`] if Arrow cannot build the new batches (a string column over
-    /// 2 GiB in one batch); nothing changes.
+    /// [`DataError::Arrow`] if Arrow cannot build a batch of even 128 of the rows; nothing
+    /// changes.
     pub fn compact(&mut self) -> Result<(), DataError> {
         let live: Vec<(RowId, Slot)> = self
             .slots
@@ -351,19 +373,22 @@ impl LiveTable {
             .enumerate()
             .filter_map(|(id, slot)| Some((RowId::try_from(id).ok()?, (*slot)?)))
             .collect();
-        let compacted = live
-            .chunks(COMPACT_ROWS)
-            .map(|chunk| self.gather(chunk))
-            .collect::<Result<Vec<_>, _>>()?;
-        for (batch, chunk) in live.chunks(COMPACT_ROWS).enumerate() {
-            for (row, &(id, _)) in chunk.iter().enumerate() {
-                // Lossless: at most 2^32 / 65,536 batches of 65,536 rows.
-                self.slots[id as usize] = Some(Slot {
-                    batch: batch as u32,
-                    row: row as u32,
-                });
-            }
+        let mut compacted = Vec::new();
+        for chunk in live.chunks(COMPACT_ROWS) {
+            self.gather_into(chunk, &mut compacted)?;
         }
+        // The live rows, in order, fill the new batches in order.
+        let places = compacted.iter().enumerate().flat_map(|(batch, rows)| {
+            // Lossless: at most 2^32 live rows, so as many batches or rows in one.
+            (0..rows.num_rows()).map(move |row| Slot {
+                batch: batch as u32,
+                row: row as u32,
+            })
+        });
+        for (&(id, _), slot) in live.iter().zip(places) {
+            self.slots[id as usize] = Some(slot);
+        }
+        self.compacted_batches = compacted.len();
         self.batches = compacted;
         self.dead = 0;
         self.generation += 1;
@@ -383,9 +408,10 @@ impl LiveTable {
             batches: &self.batches,
             slots: &self.slots,
         });
-        self.views.push(Some(view));
+        let serial = next_serial();
+        self.views.push(Some((serial, view)));
         Ok(ViewId {
-            owner: self.owner,
+            serial,
             index: self.views.len() - 1,
         })
     }
@@ -393,24 +419,55 @@ impl LiveTable {
     /// Removes a view; `false` if it was already gone or belongs to another table. Its id is
     /// not reused.
     pub fn remove_view(&mut self, id: ViewId) -> bool {
-        id.owner == self.owner
-            && self
-                .views
-                .get_mut(id.index)
-                .and_then(Option::take)
-                .is_some()
+        take(&mut self.views, id.index, id.serial)
     }
 
     /// The rows of view `id`, in order; `None` if it was removed or belongs to another
     /// table.
     pub fn view(&self, id: ViewId) -> Option<View<'_>> {
-        if id.owner != self.owner {
-            return None;
-        }
-        let state = self.views.get(id.index)?.as_ref()?;
+        let state = find(&self.views, id.index, id.serial)?;
         Some(View {
             state,
             slots: &self.slots,
+        })
+    }
+
+    /// Adds grouped aggregates of the rows matching `spec`, filled from the current rows.
+    ///
+    /// # Errors
+    /// [`DataError::UnknownColumn`] or [`DataError::UnsupportedColumn`] for a key or an
+    /// aggregated column, [`DataError::NotNumeric`] for a sum or mean of a column that is
+    /// not numeric, [`DataError::DuplicateName`] if two result columns share a name,
+    /// [`DataError::LiteralMismatch`] for a filter that does not fit.
+    pub fn add_groups(&mut self, spec: GroupSpec) -> Result<GroupsId, DataError> {
+        let mut groups = GroupState::compile(&spec, &self.schema)?;
+        groups.rebuild(Rows {
+            batches: &self.batches,
+            slots: &self.slots,
+        });
+        let serial = next_serial();
+        self.groups.push(Some((serial, groups)));
+        Ok(GroupsId {
+            serial,
+            index: self.groups.len() - 1,
+        })
+    }
+
+    /// Removes grouped aggregates; `false` if already gone or another table's. Their id is
+    /// not reused.
+    pub fn remove_groups(&mut self, id: GroupsId) -> bool {
+        take(&mut self.groups, id.index, id.serial)
+    }
+
+    /// The groups of `id`, in key order; `None` if removed or another table's.
+    pub fn groups(&self, id: GroupsId) -> Option<Groups<'_>> {
+        let state = find(&self.groups, id.index, id.serial)?;
+        Some(Groups {
+            state,
+            rows: Rows {
+                batches: &self.batches,
+                slots: &self.slots,
+            },
         })
     }
 
@@ -491,52 +548,98 @@ impl LiveTable {
         (self.slots.len() - 1) as RowId
     }
 
+    /// Copies the live rows of `chunk` into new batches at the end of `out`: one if Arrow can
+    /// build it, otherwise each half on its own, recursively, down to [`MIN_SPLIT_ROWS`]:
+    /// fewer rows use fewer distinct strings, so they fit a narrow dictionary key type.
+    fn gather_into(
+        &self,
+        chunk: &[(RowId, Slot)],
+        out: &mut Vec<RecordBatch>,
+    ) -> Result<(), DataError> {
+        match self.gather(chunk) {
+            Ok(batch) => {
+                out.push(batch);
+                Ok(())
+            }
+            Err(_) if chunk.len() > MIN_SPLIT_ROWS => {
+                let (first, second) = chunk.split_at(chunk.len() / 2);
+                self.gather_into(first, out)?;
+                self.gather_into(second, out)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// The live rows of `chunk`, copied into one batch.
     fn gather(&self, chunk: &[(RowId, Slot)]) -> Result<RecordBatch, DataError> {
+        // Only the batches the chunk reads go to Arrow, which may size a dictionary column by
+        // all of its inputs' values.
+        let mut position: FxHashMap<usize, usize> = FxHashMap::default();
+        let mut sources = Vec::new();
         let indices: Vec<(usize, usize)> = chunk
             .iter()
-            .map(|(_, slot)| (slot.batch as usize, slot.row as usize))
+            .map(|(_, slot)| {
+                let batch = slot.batch as usize;
+                let at = *position.entry(batch).or_insert_with(|| {
+                    sources.push(batch);
+                    sources.len() - 1
+                });
+                (at, slot.row as usize)
+            })
             .collect();
         let columns = (0..self.schema.fields().len())
             .map(|column| {
-                let arrays: Vec<&dyn Array> = self
-                    .batches
+                let arrays: Vec<&dyn Array> = sources
                     .iter()
-                    .map(|batch| batch.column(column).as_ref())
+                    .map(|&batch| self.batches[batch].column(column).as_ref())
                     .collect();
-                interleave(&arrays, &indices)
+                interleave_column(&arrays, &indices)
             })
             .collect::<Result<Vec<ArrayRef>, _>>()
-            .map_err(|e| DataError::Arrow(e.to_string()))?;
-        RecordBatch::try_new(Arc::clone(&self.schema), columns)
-            .map_err(|e| DataError::Arrow(e.to_string()))
+            .map_err(DataError::arrow)?;
+        RecordBatch::try_new(Arc::clone(&self.schema), columns).map_err(DataError::arrow)
     }
 
-    /// Removes rows from every view, each at the place its values were when it entered.
+    /// Removes rows from every view and group, each at the place its values were when it
+    /// entered.
     fn drop_from_views(&mut self, rows: impl Iterator<Item = (RowId, Slot)> + Clone) {
         let source = Rows {
             batches: &self.batches,
             slots: &self.slots,
         };
-        for view in self.views.iter_mut().flatten() {
+        for (_, view) in self.views.iter_mut().flatten() {
             for (id, slot) in rows.clone() {
                 view.remove(source, id, slot.row_ref());
             }
         }
+        for (_, groups) in self.groups.iter_mut().flatten() {
+            for (id, slot) in rows.clone() {
+                groups.remove(source, id, slot.row_ref());
+            }
+        }
     }
 
-    /// Adds changed rows to every view, or rebuilds the views.
+    /// Adds changed rows to every view and group, or rebuilds them.
     fn add_to_views(&mut self, rebuild: bool, rows: impl Iterator<Item = (RowId, Slot)> + Clone) {
         let source = Rows {
             batches: &self.batches,
             slots: &self.slots,
         };
-        for view in self.views.iter_mut().flatten() {
+        for (_, view) in self.views.iter_mut().flatten() {
             if rebuild {
                 view.rebuild(source);
             } else {
                 for (id, slot) in rows.clone() {
                     view.insert(source, id, slot.row_ref());
+                }
+            }
+        }
+        for (_, groups) in self.groups.iter_mut().flatten() {
+            if rebuild {
+                groups.rebuild(source);
+            } else {
+                for (id, slot) in rows.clone() {
+                    groups.insert(source, id, slot.row_ref());
                 }
             }
         }
@@ -549,7 +652,10 @@ impl LiveTable {
             return;
         }
         let dead_majority = self.dead >= self.retry_at_dead && self.dead > self.len();
-        let too_many_batches = self.batches.len() > MAX_BATCHES && self.compaction_error.is_none();
+        // Counting only the batches stored since the last compaction: one that had to write
+        // many small batches does not run again at every change.
+        let added = self.batches.len().saturating_sub(self.compacted_batches);
+        let too_many_batches = added > MAX_BATCHES && self.compaction_error.is_none();
         if !(dead_majority || too_many_batches) {
             return;
         }
@@ -558,6 +664,22 @@ impl LiveTable {
             self.retry_at_dead = self.dead.saturating_mul(2);
         }
     }
+}
+
+/// The entry at `index` if its serial is `serial`.
+fn find<T>(entries: &[Option<(u64, T)>], index: usize, serial: u64) -> Option<&T> {
+    match entries.get(index)? {
+        Some((s, entry)) if *s == serial => Some(entry),
+        _ => None,
+    }
+}
+
+/// Removes the entry at `index` if its serial is `serial`; whether it did.
+fn take<T>(entries: &mut [Option<(u64, T)>], index: usize, serial: u64) -> bool {
+    entries
+        .get_mut(index)
+        .and_then(|entry| entry.take_if(|(s, _)| *s == serial))
+        .is_some()
 }
 
 /// `schema` with every field nullable: superseded rows and compaction never need a column
@@ -647,5 +769,22 @@ mod tests {
         table.compact_if_due();
         assert!(table.compaction_error().is_some());
         assert_eq!(table.retry_at_dead, 2 * MIN_DEAD_ROWS);
+    }
+
+    #[test]
+    fn automatic_compaction_counts_the_batches_stored_since_the_last_one() {
+        let mut table = LiveTable::new(ids(vec![]).schema(), "id").unwrap();
+        table.upsert(ids(vec![1])).unwrap();
+        // As if the last compaction had to write 10 batches.
+        table.compacted_batches = 10;
+        while table.batches.len() < 10 + MAX_BATCHES {
+            table.batches.push(ids(vec![]));
+        }
+        table.compact_if_due();
+        assert_eq!(table.generation(), 0, "4,096 batches added");
+        table.batches.push(ids(vec![]));
+        table.compact_if_due();
+        assert_eq!(table.generation(), 1, "4,097 batches added");
+        assert_eq!(table.compacted_batches, 1);
     }
 }

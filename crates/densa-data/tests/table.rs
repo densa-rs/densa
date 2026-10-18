@@ -2,10 +2,11 @@
 
 use std::sync::Arc;
 
-use arrow_array::types::Int32Type;
+use arrow_array::cast::AsArray;
+use arrow_array::types::{Int32Type, UInt8Type};
 use arrow_array::{
-    Array, ArrayRef, Decimal128Array, DictionaryArray, Float64Array, Int64Array, ListArray,
-    RecordBatch, StringArray, TimestampMillisecondArray,
+    Array, ArrayRef, BinaryViewArray, Decimal128Array, DictionaryArray, Float64Array, Int64Array,
+    ListArray, RecordBatch, StringArray, StringViewArray, TimestampMillisecondArray, UInt8Array,
 };
 use arrow_schema::{DataType, Field, Schema};
 use densa_data::{
@@ -245,6 +246,136 @@ mod compaction {
         }
         let stored: usize = t.batches().iter().map(RecordBatch::num_rows).sum();
         assert!(stored < 20_000 / 2, "{stored} rows kept for 10 keys");
+    }
+
+    /// 200 rows whose `name` is a u8-keyed dictionary of 200 distinct strings, starting at
+    /// key `first`; strings or string views.
+    fn names(first: i64, views: bool) -> RecordBatch {
+        let text: Vec<String> = (first..first + 200).map(|i| format!("n{i:03}")).collect();
+        let values: ArrayRef = if views {
+            Arc::new(StringViewArray::from_iter_values(text))
+        } else {
+            Arc::new(StringArray::from(text))
+        };
+        let keys = UInt8Array::from((0..200u8).collect::<Vec<_>>());
+        let names = DictionaryArray::<UInt8Type>::try_new(keys, values).unwrap();
+        batch(vec![
+            (
+                "id",
+                Arc::new(Int64Array::from((first..first + 200).collect::<Vec<_>>())) as ArrayRef,
+            ),
+            ("name", Arc::new(names) as ArrayRef),
+        ])
+    }
+
+    /// Rows `ids` whose `name` is a u8-keyed dictionary of 200 strings `{prefix}000..199`,
+    /// row `i` pointing at string `ids[i] % 200`.
+    fn coded(ids: Vec<i64>, prefix: &str, views: bool) -> RecordBatch {
+        let text: Vec<String> = (0..200).map(|i| format!("{prefix}{i:03}")).collect();
+        let values: ArrayRef = if views {
+            Arc::new(StringViewArray::from_iter_values(text))
+        } else {
+            Arc::new(StringArray::from(text))
+        };
+        let keys = UInt8Array::from(ids.iter().map(|id| (id % 200) as u8).collect::<Vec<_>>());
+        let names = DictionaryArray::<UInt8Type>::try_new(keys, values).unwrap();
+        batch(vec![
+            ("id", Arc::new(Int64Array::from(ids)) as ArrayRef),
+            ("name", Arc::new(names) as ArrayRef),
+        ])
+    }
+
+    #[test]
+    fn compacting_rows_that_alternate_between_dictionaries_writes_few_batches() {
+        for views in [false, true] {
+            let mut t = LiveTable::new(coded(vec![], "a", views).schema(), "id").unwrap();
+            t.upsert(coded((0..1_000).collect(), "a", views)).unwrap();
+            // Every odd row moves to another dictionary: live rows alternate between batches.
+            t.upsert(coded(
+                (0..1_000).filter(|i| i % 2 == 1).collect(),
+                "b",
+                views,
+            ))
+            .unwrap();
+            for _ in 0..2 {
+                t.compact().unwrap();
+                // The live rows use 200 distinct names (even keys of one dictionary, odd of the
+                // other), which a u8 key indexes: one batch, though the inputs hold 400.
+                assert_eq!(t.batches().len(), 1);
+                for id in [0, 1, 998, 999] {
+                    let at = t.find(&Scalar::Int(id)).unwrap();
+                    let column = t.batches()[at.batch].column(1);
+                    let names = column.as_any_dictionary();
+                    let key = names.normalized_keys()[at.row];
+                    let values = names.values();
+                    let name = match values.as_string_view_opt() {
+                        Some(v) => v.value(key).to_owned(),
+                        None => values.as_string::<i32>().value(key).to_owned(),
+                    };
+                    let prefix = if id % 2 == 1 { "b" } else { "a" };
+                    assert_eq!(name, format!("{prefix}{:03}", id % 200));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn compaction_refuses_rather_than_writing_batches_of_a_few_rows() {
+        // Arrow sizes a dictionary of binary views by all of its inputs' values: 400 here,
+        // whichever rows are read, so no split helps. Below 128 rows compaction gives up.
+        let coded_binary = |ids: Vec<i64>, prefix: u8| {
+            let values = BinaryViewArray::from_iter_values((0..200u8).map(|i| [prefix, i]));
+            let keys = UInt8Array::from(ids.iter().map(|id| (id % 200) as u8).collect::<Vec<_>>());
+            let names = DictionaryArray::<UInt8Type>::try_new(keys, Arc::new(values)).unwrap();
+            batch(vec![
+                ("id", Arc::new(Int64Array::from(ids)) as ArrayRef),
+                ("name", Arc::new(names) as ArrayRef),
+            ])
+        };
+        let options = TableOptions::default().with_auto_compact(false);
+        let schema = coded_binary(vec![], 0).schema();
+        let mut t = LiveTable::with_options(schema, "id", options).unwrap();
+        t.upsert(coded_binary((0..1_000).collect(), 0)).unwrap();
+        t.upsert(coded_binary((0..1_000).filter(|i| i % 2 == 1).collect(), 1))
+            .unwrap();
+        assert!(matches!(t.compact(), Err(DataError::Arrow(_))));
+        assert_eq!(
+            (t.generation(), t.batches().len()),
+            (0, 2),
+            "nothing changed"
+        );
+    }
+
+    #[test]
+    fn compaction_splits_rows_a_narrow_dictionary_key_cannot_index_in_one_batch() {
+        for views in [false, true] {
+            let mut t = LiveTable::new(names(0, views).schema(), "id").unwrap();
+            let sorted = t
+                .add_view(ViewSpec::new().sort_by("name", Order::Descending))
+                .unwrap();
+            t.upsert(names(0, views)).unwrap();
+            t.upsert(names(200, views)).unwrap();
+            // 400 distinct names: no u8-keyed dictionary holds them all.
+            t.compact().unwrap();
+            assert_eq!(t.generation(), 1);
+            assert!(t.batches().len() >= 2);
+            let name = |at: RowRef| {
+                let column = t.batches()[at.batch].column(1);
+                let names = column.as_any_dictionary();
+                let values = names.values();
+                let key = names.normalized_keys()[at.row];
+                match values.as_string_view_opt() {
+                    Some(v) => v.value(key).to_owned(),
+                    None => values.as_string::<i32>().value(key).to_owned(),
+                }
+            };
+            assert_eq!(name(t.find(&Scalar::Int(399)).unwrap()), "n399");
+            assert_eq!(name(t.find(&Scalar::Int(7)).unwrap()), "n007");
+            let view = t.view(sorted).unwrap();
+            assert_eq!(view.len(), 400);
+            assert_eq!(name(view.row(0).unwrap()), "n399");
+            assert_eq!(name(view.row(399).unwrap()), "n000");
+        }
     }
 }
 

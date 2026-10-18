@@ -53,10 +53,20 @@ impl ViewSpec {
 
 /// A sort column bound to its index and reader.
 #[derive(Debug, Clone)]
-struct SortColumn {
+pub(crate) struct SortColumn {
     column: usize,
     read: ValueFn,
     descending: bool,
+}
+
+impl SortColumn {
+    pub(crate) fn ascending(column: usize, read: ValueFn) -> Self {
+        Self {
+            column,
+            read,
+            descending: false,
+        }
+    }
 }
 
 /// A view's compiled spec and its rows.
@@ -69,19 +79,20 @@ pub(crate) struct ViewState {
     member: Vec<bool>,
 }
 
-/// The tables the view reads from: its batches and where each row id lives.
-#[derive(Clone, Copy)]
+/// The tables views and groups read from: its batches and where each row id lives.
+#[derive(Debug, Clone, Copy)]
 pub(crate) struct Rows<'a> {
     pub(crate) batches: &'a [RecordBatch],
     pub(crate) slots: &'a [Option<Slot>],
 }
 
 impl Rows<'_> {
-    fn at(&self, id: RowId) -> RowRef {
+    pub(crate) fn at(&self, id: RowId) -> RowRef {
         match self.slots.get(id as usize) {
             Some(Some(slot)) => slot.row_ref(),
-            // Views drop a row before its slot is freed, so every id they hold is live.
-            _ => unreachable!("a view holds row id {id}, whose slot is free"),
+            // Views and groups drop a row before its slot is freed, so every id they hold is
+            // live.
+            _ => unreachable!("row id {id} is held, but its slot is free"),
         }
     }
 }
@@ -178,7 +189,7 @@ impl ViewState {
 }
 
 /// Row `id`'s view entry: its id and the prefix of its first sort column (0 if unsorted).
-fn entry(sort: &[SortColumn], batches: &[RecordBatch], id: RowId, at: RowRef) -> Entry {
+pub(crate) fn entry(sort: &[SortColumn], batches: &[RecordBatch], id: RowId, at: RowRef) -> Entry {
     let key = sort.first().map_or(0, |first| {
         let value = (first.read)(batches[at.batch].column(first.column).as_ref(), at.row);
         prefix(value, first.descending)
@@ -188,7 +199,7 @@ fn entry(sort: &[SortColumn], batches: &[RecordBatch], id: RowId, at: RowRef) ->
 
 /// Orders entry `other` (a stored row) against `probe` (whose values are at `probe_at`):
 /// by prefix, reading the rows' values only when prefixes tie.
-fn entry_order(
+pub(crate) fn entry_order(
     sort: &[SortColumn],
     rows: Rows<'_>,
     other: Entry,

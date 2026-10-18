@@ -217,6 +217,8 @@ fn errors_say_what_is_wrong() {
         (DataError::UnsupportedKey("price".into()), "price"),
         (DataError::UnsupportedColumn("tags".into()), "tags"),
         (DataError::LiteralMismatch("qty".into()), "qty"),
+        (DataError::NotNumeric("region".into()), "region"),
+        (DataError::DuplicateName("count".into()), "count"),
         (
             DataError::ColumnCount {
                 expected: 2,

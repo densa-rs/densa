@@ -89,7 +89,7 @@ pub(crate) fn value_reader(data_type: &DataType) -> Option<(Kind, ValueFn)> {
     })
 }
 
-fn is_string(data_type: &DataType) -> bool {
+pub(crate) fn is_string(data_type: &DataType) -> bool {
     matches!(
         data_type,
         DataType::Utf8 | DataType::LargeUtf8 | DataType::Utf8View
@@ -138,7 +138,7 @@ where
 
 /// One NaN (positive) and one zero (positive): sorting and filtering then agree that `-0.0`
 /// equals `0.0`, and every NaN sorts after infinity (`0.0 / 0.0` is a negative NaN on x86).
-fn canonical(v: f64) -> f64 {
+pub(crate) fn canonical(v: f64) -> f64 {
     if v.is_nan() {
         f64::NAN
     } else if v == 0.0 {
@@ -318,17 +318,20 @@ fn as_f64(kind: Kind, value: Value<'_>) -> Option<f64> {
     match (kind, value) {
         (_, Value::Int(v)) => Some(v as f64),
         (_, Value::UInt(v)) => Some(v as f64),
-        (Kind::Decimal { scale }, Value::Decimal(v)) => {
-            // Multiply or divide by an exact power of ten (10^n is exact in f64 for n <= 22),
-            // so a decimal equal to a float literal compares equal.
-            let power = 10f64.powi(i32::from(scale.unsigned_abs()));
-            Some(if scale >= 0 {
-                v as f64 / power
-            } else {
-                v as f64 * power
-            })
-        }
+        (Kind::Decimal { scale }, Value::Decimal(v)) => Some(unscale(v as f64, scale)),
         _ => None,
+    }
+}
+
+/// A decimal's unscaled value `v` as the number it stands for.
+pub(crate) fn unscale(v: f64, scale: i8) -> f64 {
+    // Multiply or divide by an exact power of ten (10^n is exact in f64 for n <= 22), so a
+    // decimal equal to a float literal compares equal.
+    let power = 10f64.powi(i32::from(scale.unsigned_abs()));
+    if scale >= 0 {
+        v / power
+    } else {
+        v * power
     }
 }
 

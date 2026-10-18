@@ -57,6 +57,16 @@ impl SortedRows {
         self.blocks.get(block)?.get(rest).map(|entry| entry.id)
     }
 
+    /// The first id. Blocks are never empty, so it heads the first block.
+    pub(crate) fn first(&self) -> Option<RowId> {
+        self.blocks.first()?.first().map(|entry| entry.id)
+    }
+
+    /// The last id.
+    pub(crate) fn last(&self) -> Option<RowId> {
+        self.blocks.last()?.last().map(|entry| entry.id)
+    }
+
     /// Replaces the contents with `entries`, which must already be in order.
     pub(crate) fn rebuild(&mut self, entries: &[Entry]) {
         self.blocks = entries.chunks(BUILD_BLOCK).map(<[Entry]>::to_vec).collect();
@@ -67,7 +77,8 @@ impl SortedRows {
     /// Inserts `entry`; `order(other)` says where `other` sorts relative to it.
     pub(crate) fn insert(&mut self, entry: Entry, order: impl Fn(Entry) -> Ordering) {
         if self.blocks.is_empty() {
-            self.blocks.push(Vec::with_capacity(BUILD_BLOCK));
+            // Grows as needed: groups keep one of these per group, most of them small.
+            self.blocks.push(Vec::new());
             self.rebuild_tree();
         }
         // The first block whose last entry sorts after `entry`; past the end, the last block.
@@ -205,6 +216,8 @@ mod tests {
         let expected: Vec<RowId> = model.iter().map(|&(_, id)| id).collect();
         assert_eq!(ids, expected);
         assert_eq!(rows.get(rows.len()), None);
+        assert_eq!(rows.first(), expected.first().copied());
+        assert_eq!(rows.last(), expected.last().copied());
     }
 
     #[test]
@@ -239,5 +252,7 @@ mod tests {
         assert!(!rows.remove(4, order(4)));
         assert_eq!(rows.len(), 3);
         assert!(!SortedRows::default().remove(1, order(1)));
+        assert_eq!(SortedRows::default().first(), None);
+        assert_eq!(SortedRows::default().last(), None);
     }
 }

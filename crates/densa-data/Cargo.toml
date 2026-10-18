@@ -1,6 +1,6 @@
 [package]
 name = "densa-data"
-description = "Live Arrow tables for densa: keyed upserts and sorted, filtered views kept up to date incrementally"
+description = "Live Arrow tables for densa: keyed upserts, sorted and filtered views and grouped aggregates kept up to date incrementally"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

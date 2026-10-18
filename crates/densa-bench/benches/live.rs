@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use criterion::{criterion_group, BatchSize, Criterion, Throughput};
-use densa_data::{CompareOp, Filter, LiveTable, Order, Scalar, ViewSpec};
+use densa_data::{Aggregate, CompareOp, Filter, GroupSpec, LiveTable, Order, Scalar, ViewSpec};
 
 const ROWS: i64 = 1_000_000;
 const UPDATE_ROWS: usize = 64;
@@ -90,7 +90,38 @@ fn build_view(c: &mut Criterion) {
     });
 }
 
-criterion_group!(benches, update_sorted_view, build_view);
+/// The same updates with aggregates over the whole table too: count, sum, min and max.
+fn update_view_and_groups(c: &mut Criterion) {
+    let mut table = table_with_view();
+    table
+        .add_groups(
+            GroupSpec::new()
+                .aggregate(Aggregate::count())
+                .aggregate(Aggregate::sum("price"))
+                .aggregate(Aggregate::min("price"))
+                .aggregate(Aggregate::max("price")),
+        )
+        .expect("valid groups");
+    let stream = updates(4_096);
+    let mut next = stream.iter().cycle();
+    let mut group = c.benchmark_group("live_table_1m");
+    group.throughput(Throughput::Elements(UPDATE_ROWS as u64));
+    group.bench_function("upsert_64_rows_view_and_aggregates", |b| {
+        b.iter_batched(
+            || next.next().cloned().expect("cycle"),
+            |update| table.upsert(update).expect("same schema"),
+            BatchSize::SmallInput,
+        )
+    });
+    group.finish();
+}
+
+criterion_group!(
+    benches,
+    update_sorted_view,
+    update_view_and_groups,
+    build_view
+);
 
 fn main() {
     use densa_platform::{logical_cpus, pick_performance_cpu, pin_current_thread};

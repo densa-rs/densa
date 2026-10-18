@@ -8,11 +8,16 @@ pub enum DataError {
     UnknownColumn(String),
     /// The key column must hold integers or strings.
     UnsupportedKey(String),
-    /// Views cannot sort or filter this column's data type (lists, structs, binary, ...).
+    /// Views and groups cannot read this column's data type (lists, structs, binary, ...).
     UnsupportedColumn(String),
     /// A filter's value or operation does not fit this column's type (text compared with a
     /// number, `contains` on a number).
     LiteralMismatch(String),
+    /// Sums and means need an integer, decimal or float column; this one holds something
+    /// else (text, booleans, dates, times).
+    NotNumeric(String),
+    /// Two columns of a group spec's result would have this name.
+    DuplicateName(String),
     /// The batch has a different number of columns.
     ColumnCount {
         /// Columns in the table.
@@ -34,7 +39,7 @@ pub enum DataError {
     KeyType,
     /// More than 2^32 live keys, or rows in one batch.
     TooManyRows,
-    /// Arrow could not rebuild the table's batches while compacting.
+    /// Arrow could not build a batch: compacting a table, or assembling groups.
     Arrow(String),
 }
 
@@ -48,12 +53,16 @@ impl fmt::Display for DataError {
             Self::UnsupportedColumn(name) => {
                 write!(
                     f,
-                    "views cannot sort or filter column {name:?} of this type"
+                    "views and groups cannot read column {name:?} of this type"
                 )
             }
             Self::LiteralMismatch(name) => {
                 write!(f, "the filter does not fit the type of column {name:?}")
             }
+            Self::NotNumeric(name) => {
+                write!(f, "column {name:?} is not numeric: it cannot be summed")
+            }
+            Self::DuplicateName(name) => write!(f, "two result columns are named {name:?}"),
             Self::ColumnCount { expected, found } => {
                 write!(f, "the batch has {found} columns, the table {expected}")
             }
@@ -66,9 +75,15 @@ impl fmt::Display for DataError {
             Self::NullKey { row } => write!(f, "row {row} of the batch has a null key"),
             Self::KeyType => f.write_str("the keys are not of the key column's kind"),
             Self::TooManyRows => f.write_str("more than 2^32 live keys, or rows in one batch"),
-            Self::Arrow(message) => write!(f, "compaction failed: {message}"),
+            Self::Arrow(message) => write!(f, "Arrow could not build a batch: {message}"),
         }
     }
 }
 
 impl std::error::Error for DataError {}
+
+impl DataError {
+    pub(crate) fn arrow(error: arrow_schema::ArrowError) -> Self {
+        Self::Arrow(error.to_string())
+    }
+}
