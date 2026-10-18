@@ -43,6 +43,10 @@ fn reading_a_sorted_filtered_view_performs_zero_heap_operations() {
             let first = (frame * 97) % rows.len();
             for index in first..(first + 50).min(rows.len()) {
                 black_box(rows.row(index));
+                // A grid finding its selected record again.
+                let record = rows.record(index).unwrap();
+                black_box(rows.position(record));
+                black_box(table.row_of(record));
             }
         }
     });

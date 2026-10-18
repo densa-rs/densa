@@ -122,6 +122,27 @@ impl SortedRows {
         true
     }
 
+    /// The index of row `id`, found with `order` as for [`insert`](Self::insert); `None` if
+    /// absent.
+    pub(crate) fn position(&self, id: RowId, order: impl Fn(Entry) -> Ordering) -> Option<usize> {
+        let block = self
+            .blocks
+            .partition_point(|b| b.last().is_some_and(|&last| order(last).is_lt()));
+        let entries = self.blocks.get(block)?;
+        let at = entries.partition_point(|&other| order(other).is_lt());
+        (entries.get(at)?.id == id).then(|| self.before(block) + at)
+    }
+
+    /// Entries in the blocks before `block`.
+    fn before(&self, block: usize) -> usize {
+        let (mut i, mut sum) = (block, 0);
+        while i > 0 {
+            sum += self.tree[i];
+            i &= i - 1;
+        }
+        sum
+    }
+
     /// Drops block `block` if empty, or merges it into a neighbor if both fit in one block.
     /// Returns whether the blocks changed.
     fn merge_around(&mut self, block: usize) -> bool {
@@ -215,6 +236,13 @@ mod tests {
         let ids: Vec<RowId> = (0..rows.len()).filter_map(|i| rows.get(i)).collect();
         let expected: Vec<RowId> = model.iter().map(|&(_, id)| id).collect();
         assert_eq!(ids, expected);
+        for (index, &id) in ids.iter().enumerate() {
+            assert_eq!(rows.position(id, order(id)), Some(index), "id {id}");
+        }
+        let absent = (0..5_000)
+            .find(|id| !model.contains(&(key(*id), *id)))
+            .unwrap();
+        assert_eq!(rows.position(absent, order(absent)), None);
         assert_eq!(rows.get(rows.len()), None);
         assert_eq!(rows.first(), expected.first().copied());
         assert_eq!(rows.last(), expected.last().copied());

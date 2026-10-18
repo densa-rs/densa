@@ -1,4 +1,4 @@
-use densa_data::{LiveTable, View, ViewId};
+use densa_data::{LiveTable, RowRef, View, ViewId};
 use densa_grid::{CellStyle, CellText, Color, Column, GridSource, Palette};
 
 use crate::table::{ArrowTable, CellState, TableError};
@@ -72,9 +72,26 @@ impl LiveGrid {
         })
     }
 
+    /// Whether rows have sized the columns (they are sized once, by the first rows).
+    pub(crate) fn is_sized(&self) -> bool {
+        self.mirror.is_sized()
+    }
+
+    /// Whether the formatters match `table`'s batches, so a [`RowRef`] of it reads the
+    /// right values.
+    pub(crate) fn is_synced(&self, table: &LiveTable) -> bool {
+        self.table == (table.instance(), table.generation())
+            && self.mirror.stored_batches() == table.batches().len()
+    }
+
+    /// Writes the value of `column` at `at` (a row of the synced table) into `text`.
+    pub(crate) fn write(&self, at: RowRef, column: usize, text: &mut CellText) -> CellState {
+        self.mirror.write_at(at.batch, at.row, column, text)
+    }
+
     /// Adds formatters for new batches, or rebuilds them after a compaction or for another
     /// table.
-    fn sync(&mut self, table: &LiveTable) {
+    pub(crate) fn sync(&mut self, table: &LiveTable) {
         let current = (table.instance(), table.generation());
         if current != self.table {
             if self.mirror.schema() != table.schema() {

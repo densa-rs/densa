@@ -9,7 +9,7 @@ use arrow_array::{
     Array, ArrayRef, Float64Array, Int32Array, Int64Array, RecordBatch, StringArray,
 };
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use densa_data::{CompareOp, Filter, LiveTable, Order, RowRef, Scalar, ViewId, ViewSpec};
+use densa_data::{CompareOp, Filter, LiveTable, Order, RecordId, RowRef, Scalar, ViewId, ViewSpec};
 
 const STEPS: usize = 3_000;
 const KEYS: u64 = 300;
@@ -181,10 +181,51 @@ fn add_views(table: &mut LiveTable) -> Vec<Checked> {
     ]
 }
 
-fn check(table: &LiveTable, model: &BTreeMap<i64, Row>, views: &[Checked], step: usize) {
+/// Checks every view against the model, and record ids: each live key keeps the record it
+/// got, every record is found where the view shows it, and a deleted key's record is gone.
+fn check(
+    table: &LiveTable,
+    model: &BTreeMap<i64, Row>,
+    views: &[Checked],
+    records: &mut BTreeMap<i64, RecordId>,
+    step: usize,
+) {
     assert_eq!(table.len(), model.len(), "step {step}: live rows");
+    for (key, record) in records.iter() {
+        let now = table.record_of_key(&Scalar::Int(*key));
+        if model.contains_key(key) {
+            assert_eq!(now, Some(*record), "step {step}: key {key} changed record");
+        } else {
+            assert_eq!(now, None, "step {step}: deleted key {key} has a record");
+        }
+    }
+    records.retain(|key, _| model.contains_key(key));
+    for key in model.keys() {
+        let record = table.record_of_key(&Scalar::Int(*key));
+        assert!(
+            record.is_some(),
+            "step {step}: live key {key} has no record"
+        );
+        records.entry(*key).or_insert(record.unwrap());
+    }
     for view in views {
         let rows = table.view(view.id).unwrap();
+        for i in 0..rows.len() {
+            let record = rows.record(i).unwrap();
+            assert_eq!(
+                rows.position(record),
+                Some(i),
+                "step {step}, {}: position",
+                view.name
+            );
+            assert_eq!(
+                table.row_of(record),
+                rows.row(i),
+                "step {step}, {}: row",
+                view.name
+            );
+        }
+        assert_eq!(rows.record(rows.len()), None);
         let shown: Vec<(i64, Row)> = (0..rows.len())
             .map(|i| read(table, rows.row(i).unwrap()))
             .collect();
@@ -221,6 +262,8 @@ fn views_match_a_full_recomputation_after_every_change() {
     let mut table = LiveTable::new(schema(), "id").unwrap();
     let views = add_views(&mut table);
     let mut model: BTreeMap<i64, Row> = BTreeMap::new();
+    let mut records = BTreeMap::new();
+    let mut gone: Vec<RecordId> = Vec::new();
 
     for step in 0..STEPS {
         match rng.below(20) {
@@ -252,11 +295,22 @@ fn views_match_a_full_recomputation_after_every_change() {
                 let mut expected = 0;
                 for key in &keys {
                     expected += usize::from(model.remove(key).is_some());
+                    gone.extend(records.get(key));
                 }
+                // The latest few are enough: storage is reused soon after a delete.
+                let excess = gone.len().saturating_sub(64);
+                gone.drain(..excess);
                 assert_eq!(deleted, expected, "step {step}: deleted count");
             }
             _ => table.compact().unwrap(),
         }
-        check(&table, &model, &views, step);
+        check(&table, &model, &views, &mut records, step);
+        // A deleted key's record is never found again, even once its storage is reused.
+        for record in &gone {
+            assert_eq!(table.row_of(*record), None, "step {step}: deleted record");
+            for view in &views {
+                assert_eq!(table.view(view.id).unwrap().position(*record), None);
+            }
+        }
     }
 }

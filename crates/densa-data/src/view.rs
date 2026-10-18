@@ -153,6 +153,18 @@ impl ViewState {
         self.member[id as usize] = false;
     }
 
+    /// Where live row `id` is in the view, if it is a member.
+    pub(crate) fn position(&self, rows: Rows<'_>, id: RowId) -> Option<usize> {
+        if !self.member.get(id as usize).copied().unwrap_or(false) {
+            return None;
+        }
+        let at = rows.at(id);
+        let probe = entry(&self.sort, rows.batches, id, at);
+        let sort = &self.sort;
+        self.rows
+            .position(id, |other| entry_order(sort, rows, other, probe, at))
+    }
+
     /// Adds row `id` at `at` if it passes the filter.
     pub(crate) fn insert(&mut self, rows: Rows<'_>, id: RowId, at: RowRef) {
         if !self.passes(rows.batches, at) {

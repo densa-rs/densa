@@ -43,10 +43,12 @@ struct Selection {
 /// Only the rows on screen are asked of the model, each frame, and painting allocates nothing
 /// once their characters are cached, however many rows there are. Change the data through
 /// [`model_mut`](Self::model_mut) from an [`Ui::update`](densa_ui::Ui::update) on the grid,
-/// which repaints it.
+/// which repaints it. The grid follows the model's [`GridModel::columns_revision`] and
+/// [`GridModel::generation`] each frame.
 ///
 /// A selection is a row, kept on its record while rows move if the model gives rows keys
-/// ([`GridModel::row_key`]); without keys, sorting clears it. It reports
+/// ([`GridModel::row_key`]) and cleared when its record is removed or filtered out (as in
+/// Qt's proxy models); without keys, sorting clears it. It reports
 /// [`ActionKind::Selected`](densa_ui::ActionKind::Selected) with the row when the user
 /// selects one, [`ActionKind::Submitted`](densa_ui::ActionKind::Submitted) when they activate
 /// it (Enter, a double click), and [`ActionKind::Changed`](densa_ui::ActionKind::Changed) when
@@ -70,6 +72,8 @@ pub struct DataGrid<M> {
     drag: Option<Drag>,
     /// What the last layout used, to rebuild the painter when it changes.
     built: Option<(Size, f32, Palette)>,
+    /// The model's [`GridModel::columns_revision`] and [`GridModel::generation`] last seen.
+    revisions: (u64, u64),
 }
 
 impl<M: GridModel> DataGrid<M> {
@@ -77,6 +81,7 @@ impl<M: GridModel> DataGrid<M> {
     pub fn new(model: M) -> Self {
         let columns = model.columns().to_vec();
         Self {
+            revisions: (model.columns_revision(), model.generation()),
             model,
             columns,
             frozen: 0,
@@ -123,10 +128,7 @@ impl<M: GridModel> DataGrid<M> {
     /// Reads the model's columns again (after it changed them), dropping the user's widths,
     /// and a sort or a drag on a column that is gone.
     pub fn reset_columns(&mut self, cx: &mut EventCx<'_>) {
-        self.columns = self.model.columns().to_vec();
-        let count = self.columns.len();
-        self.drag = None;
-        self.sort = self.sort.filter(|(column, _)| *column < count);
+        self.read_columns();
         self.built = None;
         cx.request_layout();
         cx.request_paint();
@@ -215,6 +217,35 @@ impl<M: GridModel> DataGrid<M> {
             row,
             key: self.model.row_key(row),
         }
+    }
+
+    /// The model's columns again, ending a drag and a sort on a column that is gone.
+    fn read_columns(&mut self) {
+        self.columns = self.model.columns().to_vec();
+        let count = self.columns.len();
+        self.drag = None;
+        self.sort = self.sort.filter(|(column, _)| *column < count);
+    }
+
+    /// Takes in what the model replaced since the last frame: its columns (the painter is
+    /// rebuilt), or all its rows (the selection and scroll start over).
+    fn follow_model(&mut self) {
+        let (columns, generation) = (self.model.columns_revision(), self.model.generation());
+        if columns != self.revisions.0 {
+            self.read_columns();
+            if let Some((size, px, palette)) = self.built {
+                self.build(size, px, palette);
+            }
+        }
+        if generation != self.revisions.1 {
+            self.selected = None;
+            self.sort = None;
+            self.drag = None;
+            self.first_row = 0;
+            self.row_rest = 0.0;
+            self.scroll_x = 0.0;
+        }
+        self.revisions = (columns, generation);
     }
 
     /// Keeps the selection on its record, and the scroll within the rows and columns there
@@ -310,11 +341,13 @@ impl<M: GridModel + 'static> Widget for DataGrid<M> {
         if self.built != Some((size, px, palette)) {
             self.build(size, px, palette);
         }
+        self.follow_model();
         self.clamp();
     }
 
     fn paint(&mut self, cx: &PaintCx<'_>, canvas: &mut Canvas<'_>) {
         self.model.prepare();
+        self.follow_model();
         self.clamp();
         self.paint_grid(cx, canvas);
     }

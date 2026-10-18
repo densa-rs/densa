@@ -998,8 +998,11 @@ dependencies = [
 name = "densa-widgets"
 version = "0.1.0"
 dependencies = [
+ "arrow-array",
  "densa-alloc",
+ "densa-arrow",
  "densa-core",
+ "densa-data",
  "densa-draw",
  "densa-grid",
  "densa-paragraph",

@@ -75,6 +75,7 @@ git clone https://github.com/densa-rs/densa
 cd densa
 cargo run --release -p densa-widgets --example gallery      # widgets in a window
 cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid
+cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
 cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
 cargo run --release -p densa-arrow --example table           # a million-row Arrow table
 cargo run --release -p densa-paragraph --example editor      # editable text
@@ -95,7 +96,7 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 | Crate | Use it for |
 |---|---|
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
-| [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, with typed, allocation-free cell formatting |
+| [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid and the grid widget, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, a data grid widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
@@ -142,9 +143,12 @@ let by_sector = table.add_groups(
 let summary = table.groups(by_sector).unwrap().to_batch()?; // one row per sector
 ```
 
-To show it, `densa_arrow::LiveGrid` turns a view into the grid's data source; the
-[`live` example](crates/densa-arrow/examples/live.rs) does this with 100,000 instruments
-updated continuously.
+To show it in the grid widget, `densa_arrow::LiveModel` wraps the table: a click on a column
+title sorts the view, the app sets a filter, and the selection follows its row as values
+change (every row has a `RecordId` that lasts as long as its key). The
+[`live_table` example](crates/densa-widgets/examples/live_table.rs) does this with 100,000
+instruments, a thousand of them updated every frame; `densa_arrow::LiveGrid` paints a view
+without widgets.
 
 ### Widgets in a window
 
@@ -281,6 +285,7 @@ if reader.update() {
 |---|---|
 | [`densa-widgets` `gallery`](crates/densa-widgets/examples/gallery.rs) | A toolbar, a filterable list in a scroll view beside a details pane in a splitter, Tab between controls; `--light` for the light theme |
 | [`densa-widgets` `dock`](crates/densa-widgets/examples/dock.rs) | Panels in tab groups (drag tabs to join or split groups, the gaps to resize) around a live watchlist grid: click a title to sort, a row to select; `--demo` starts mid-drag |
+| [`densa-widgets` `live_table`](crates/densa-widgets/examples/live_table.rs) | 100,000 instruments in a live table, updated every frame: click a title to sort, type to filter, select a row and it follows its instrument |
 | [`densa-arrow` `live`](crates/densa-arrow/examples/live.rs) | A live table updated continuously, its "top movers" view kept sorted |
 | [`densa-arrow` `table`](crates/densa-arrow/examples/table.rs) | A million-row Arrow table; `--live` appends batches while it is shown |
 | [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |

@@ -6,7 +6,9 @@
 //! (a [`Filter`] and sort columns), which the table keeps up to date incrementally instead of
 //! recomputing it; [`GroupSpec`] does the same for grouped aggregates (count, sum, min, max,
 //! mean). A view's rows are [`RowRef`]s into [`LiveTable::batches`], so a display
-//! layer (such as `densa-arrow`'s grid) reads values straight from the Arrow arrays.
+//! layer (such as `densa-arrow`'s grid) reads values straight from the Arrow arrays. Each
+//! key's row is a [`RecordId`] while the key lives: a selection can follow it through
+//! updates, compactions and re-sorted views ([`View::position`]).
 //!
 //! This crate has no user-interface dependency.
 //!
@@ -51,7 +53,7 @@ pub use arrow_schema;
 pub use error::DataError;
 pub use filter::{CompareOp, Filter, Scalar};
 pub use group::{Aggregate, GroupSpec, Groups};
-pub use table::{Changes, GroupsId, LiveTable, RowRef, TableOptions, View, ViewId};
+pub use table::{Changes, GroupsId, LiveTable, RecordId, RowRef, TableOptions, View, ViewId};
 pub use view::{Order, ViewSpec};
 
 /// A row's internal identity: stable for as long as its key is live.

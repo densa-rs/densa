@@ -147,7 +147,7 @@ impl ArrowTable {
         }
         let readers: Vec<Reader> = batch.columns().iter().cloned().map(Reader::new).collect();
         if !self.sized {
-            self.size_columns(&readers, batch.num_rows());
+            self.size_columns(&readers);
         }
         self.starts.push(self.rows);
         self.rows += batch.num_rows();
@@ -184,7 +184,8 @@ impl ArrowTable {
     }
 
     /// Prints floating-point values of `column` with `decimals` fixed decimal places
-    /// (`None`: the shortest exact form).
+    /// (`None`: the shortest exact form). A column sized by the first rows is sized again
+    /// from them, as now printed.
     ///
     /// # Errors
     /// [`TableError::NoSuchColumn`] if there is no such column.
@@ -194,6 +195,13 @@ impl ArrowTable {
         decimals: Option<usize>,
     ) -> Result<(), TableError> {
         self.format_mut(column)?.decimals = decimals;
+        if let (Some(reader), Some(field)) = (
+            self.batches.first().and_then(|b| b.get(column)),
+            self.schema.fields().get(column),
+        ) {
+            let format = &mut self.formats[column];
+            size_column(format, reader, field.name());
+        }
         Ok(())
     }
 
@@ -287,31 +295,20 @@ impl ArrowTable {
     }
 
     /// Widens each column to its longest value among the first rows (and its title).
-    fn size_columns(&mut self, readers: &[Reader], rows: usize) {
-        let mut text = CellText::new();
+    fn size_columns(&mut self, readers: &[Reader]) {
         for ((reader, format), field) in readers
             .iter()
             .zip(&mut self.formats)
             .zip(self.schema.fields().iter())
         {
-            if format.width_set {
-                continue;
-            }
-            let sampling = Format {
-                max_chars: MAX_SAMPLED_CHARS,
-                ..*format
-            };
-            let mut widest = field.name().chars().count();
-            for row in 0..rows.min(SAMPLE_ROWS) {
-                text.clear();
-                if !reader.is_null(row) {
-                    reader.write(row, &mut text, &sampling);
-                }
-                widest = widest.max(text.as_str().chars().count());
-            }
-            format.max_chars = widest.max(1);
+            size_column(format, reader, field.name());
         }
         self.sized = true;
+    }
+
+    /// Whether rows have sized the columns.
+    pub(crate) fn is_sized(&self) -> bool {
+        self.sized
     }
 
     /// Batches with rows held, in the order pushed.
@@ -331,6 +328,28 @@ impl ArrowTable {
             .get_mut(column)
             .ok_or(TableError::NoSuchColumn(column))
     }
+}
+
+/// Sizes a column to its longest value among the first rows `reader` holds and its title
+/// `title`, unless its width was set.
+fn size_column(format: &mut Format, reader: &Reader, title: &str) {
+    if format.width_set {
+        return;
+    }
+    let sampling = Format {
+        max_chars: MAX_SAMPLED_CHARS,
+        ..*format
+    };
+    let mut text = CellText::new();
+    let mut widest = title.chars().count();
+    for row in 0..reader.len().min(SAMPLE_ROWS) {
+        text.clear();
+        if !reader.is_null(row) {
+            reader.write(row, &mut text, &sampling);
+        }
+        widest = widest.max(text.as_str().chars().count());
+    }
+    format.max_chars = widest.max(1);
 }
 
 /// An [`ArrowTable`] as a grid's data, scrolled to a first row. Cheap to create each frame.

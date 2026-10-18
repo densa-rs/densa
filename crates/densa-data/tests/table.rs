@@ -492,6 +492,20 @@ mod views {
     }
 
     #[test]
+    fn a_removed_views_id_never_names_the_view_added_after_it() {
+        let mut t = table();
+        t.upsert(prices(vec![1, 2], vec![30.0, 10.0])).unwrap();
+        let old = t.add_view(ViewSpec::new()).unwrap();
+        assert!(t.remove_view(old));
+        let new = t
+            .add_view(ViewSpec::new().sort_by("price", Order::Ascending))
+            .unwrap();
+        assert!(t.view(old).is_none());
+        assert!(!t.remove_view(old));
+        assert_eq!(t.view(new).unwrap().len(), 2);
+    }
+
+    #[test]
     fn decimals_timestamps_and_dictionary_strings_sort_and_filter() {
         let regions: DictionaryArray<Int32Type> =
             vec!["west", "east", "north"].into_iter().collect();

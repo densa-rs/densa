@@ -69,9 +69,24 @@ pub trait GridModel {
     }
 
     /// Where the record [`row_key`](Self::row_key) gave `key` for is now, if it is still
-    /// there. Asked once a frame while a row is selected: make it fast for large models.
+    /// shown. Asked once a frame while a row is selected: make it fast for large models.
+    /// `None` (the record was removed, or is filtered out) clears the selection.
     fn row_of_key(&self, key: u64) -> Option<usize> {
         let _ = key;
         None
+    }
+
+    /// Changes whenever [`columns`](Self::columns) changes (another schema, new widths): the
+    /// grid then reads the columns again, dropping widths the user dragged. Checked each
+    /// frame after [`prepare`](Self::prepare).
+    fn columns_revision(&self) -> u64 {
+        0
+    }
+
+    /// Changes when the rows were replaced wholesale (another table), so that keys from
+    /// before mean nothing: the grid then clears its selection and scrolls to the top.
+    /// Checked each frame after [`prepare`](Self::prepare).
+    fn generation(&self) -> u64 {
+        0
     }
 }

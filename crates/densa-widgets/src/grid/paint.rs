@@ -101,6 +101,8 @@ impl<M: GridModel> DataGrid<M> {
         let Some(frame) = self.frame(rect) else {
             return;
         };
+        // The header band across the grid, past the last column.
+        canvas.fill_rect(frame.header, theme.background);
         let scroll_x = self.scroll_x.min(self.max_scroll_x(rect.width())).round();
         let scrolled = self.scrolled_columns(rect.width(), scroll_x, frame.frozen);
         let frozen = 0..self.frozen.min(self.columns.len());

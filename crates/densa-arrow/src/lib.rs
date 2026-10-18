@@ -7,6 +7,10 @@
 //! table of millions of rows costs no more to show than its visible rows, and drawing a
 //! frame allocates nothing.
 //!
+//! For live data, [`LiveModel`] makes a `densa_data::LiveTable` the model of the grid widget
+//! (`densa_widgets::DataGrid`): sorted by a click, filtered by the app, its selection kept on
+//! a row as the row moves. [`LiveGrid`] paints a view of one with `GridPainter` directly.
+//!
 //! ```
 //! use std::sync::Arc;
 //! use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
@@ -37,8 +41,10 @@ pub use arrow_schema;
 
 mod calendar;
 mod live;
+mod model;
 mod reader;
 mod table;
 
 pub use live::{LiveGrid, LiveGridView};
+pub use model::LiveModel;
 pub use table::{ArrowGrid, ArrowTable, CellState, TableError};

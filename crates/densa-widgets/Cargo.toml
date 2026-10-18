@@ -20,7 +20,10 @@ densa-text.workspace = true
 densa-ui.workspace = true
 
 [dev-dependencies]
+arrow-array.workspace = true
 densa-alloc.workspace = true
+densa-arrow.workspace = true
+densa-data.workspace = true
 densa-window.workspace = true
 
 [lints]

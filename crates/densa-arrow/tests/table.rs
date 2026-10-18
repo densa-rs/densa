@@ -434,3 +434,20 @@ mod tables {
         assert_eq!(table.view(10, &palette).rows(), 0);
     }
 }
+
+#[test]
+fn fixed_decimals_size_a_column_again_from_its_first_rows() {
+    let thirds: Vec<f64> = (1..20).map(|i| f64::from(i) / 3.0).collect();
+    let prices = Arc::new(Float64Array::from(thirds)) as ArrayRef;
+    let mut table = ArrowTable::from_batches([batch(vec![("p", prices)])]).unwrap();
+    assert!(
+        table.columns()[0].chars > 10,
+        "shortest exact thirds are long"
+    );
+    table.set_decimals(0, Some(2)).unwrap();
+    assert_eq!(table.columns()[0].chars, 4, "6.33 at most");
+
+    table.set_column_chars(0, 9).unwrap();
+    table.set_decimals(0, Some(1)).unwrap();
+    assert_eq!(table.columns()[0].chars, 9, "a width set stays");
+}

@@ -129,3 +129,39 @@ fn painting_a_live_view_between_changes_performs_zero_heap_operations() {
     let ((), stats) = measure(|| paint(&mut grid, &mut cache));
     assert!(stats.is_zero(), "painting a live view allocated: {stats:?}");
 }
+
+#[test]
+fn frames_of_a_live_model_between_changes_perform_zero_heap_operations() {
+    use densa_grid::{CellText, GridModel, SortOrder};
+
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut table = densa_data::LiveTable::new(batch(0, 1).schema(), "id").unwrap();
+    for start in (0..ROWS).step_by(BATCH as usize) {
+        table.upsert(batch(start, BATCH.min(ROWS - start))).unwrap();
+    }
+    let mut model = densa_arrow::LiveModel::new(table).unwrap();
+    assert!(model.sort(3, SortOrder::Descending));
+    let selected = model.row_key(1_234).unwrap();
+    let palette = Palette::new();
+    let mut text = CellText::new();
+
+    // What a grid widget asks each frame: prepare, find the selection, read visible cells.
+    let mut frame = |model: &mut densa_arrow::LiveModel, frame: usize| {
+        model.prepare();
+        black_box(model.row_of_key(selected));
+        let first = (frame * 7_919) % ROWS as usize;
+        for row in first..(first + 50).min(model.rows()) {
+            for column in 0..model.columns().len() {
+                text.clear();
+                black_box(model.cell(row, column, &mut text, &palette));
+                black_box(model.row_key(row));
+            }
+        }
+    };
+    frame(&mut model, 0); // warm-up: formatters for every batch
+    let ((), stats) = measure(|| (1..1_000).for_each(|f| frame(&mut model, f)));
+    assert!(stats.is_zero(), "a live model frame allocated: {stats:?}");
+}

@@ -117,6 +117,42 @@ pub struct GroupsId {
     index: usize,
 }
 
+/// A record: one key's row for as long as the key is live, through updates, compactions and
+/// view changes. Deleting the key ends the record; inserting the key again starts a new one.
+/// Get one with [`LiveTable::record_of_key`] or [`View::record`], find its row with
+/// [`LiveTable::row_of`] and its place in a view with [`View::position`].
+///
+/// It is a plain number ([`to_bits`](Self::to_bits)), so a widget can keep it as a selection
+/// without borrowing the table. It names a record of the table it came from and of clones
+/// made after; in any other table it may name an unrelated row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct RecordId(u64);
+
+impl RecordId {
+    fn new(id: RowId, reuse: u32) -> Self {
+        Self(u64::from(reuse) << 32 | u64::from(id))
+    }
+
+    /// The record as a number, for storing outside densa-data.
+    #[must_use]
+    pub const fn to_bits(self) -> u64 {
+        self.0
+    }
+
+    /// The record that [`to_bits`](Self::to_bits) gave `bits` for. A number it did not give
+    /// names no record, or an arbitrary one.
+    #[must_use]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    /// The row id, and how many times it had been freed when the record began.
+    fn parts(self) -> (RowId, u32) {
+        // Lossless: the low and high halves.
+        (self.0 as u32, (self.0 >> 32) as u32)
+    }
+}
+
 /// One planned row change: its id, where its values were (if it existed) and are now, and
 /// its key if new.
 type Change<'a> = (RowId, Option<Slot>, Slot, Option<KeyRef<'a>>);
@@ -151,6 +187,9 @@ pub struct LiveTable {
     /// Where each row id's values are; `None` for a free id.
     slots: Vec<Option<Slot>>,
     free: Vec<RowId>,
+    /// How many times each row id was freed (missing: never), so a record of a deleted key
+    /// never names the key that reuses its id.
+    reuses: Vec<u32>,
     /// Stored rows that are no longer live.
     dead: usize,
     /// Each view with the serial of its id.
@@ -177,6 +216,7 @@ impl Clone for LiveTable {
             batches: self.batches.clone(),
             slots: self.slots.clone(),
             free: self.free.clone(),
+            reuses: self.reuses.clone(),
             dead: self.dead,
             views: self.views.clone(),
             groups: self.groups.clone(),
@@ -223,6 +263,7 @@ impl LiveTable {
             batches: Vec::new(),
             slots: Vec::new(),
             free: Vec::new(),
+            reuses: Vec::new(),
             dead: 0,
             views: Vec::new(),
             groups: Vec::new(),
@@ -276,6 +317,23 @@ impl LiveTable {
 
     /// Where the live row with key `key` is.
     pub fn find(&self, key: &Scalar) -> Option<RowRef> {
+        let id = self.key_id(key)?;
+        self.slots[id as usize].map(Slot::row_ref)
+    }
+
+    /// The record of key `key`, if it is live.
+    pub fn record_of_key(&self, key: &Scalar) -> Option<RecordId> {
+        let id = self.key_id(key)?;
+        Some(RecordId::new(id, reuse(&self.reuses, id)))
+    }
+
+    /// Where the row of `record` is, or `None` if its key was deleted.
+    pub fn row_of(&self, record: RecordId) -> Option<RowRef> {
+        live_slot(&self.slots, &self.reuses, record).map(|(_, slot)| slot.row_ref())
+    }
+
+    /// The row id of key `key`, if it is live.
+    fn key_id(&self, key: &Scalar) -> Option<RowId> {
         let key = match (key, &self.keys) {
             (Scalar::Int(k), KeyIndex::Int(_)) => KeyRef::Int(*k),
             (Scalar::Int(k), KeyIndex::UInt(_)) => KeyRef::UInt(u64::try_from(*k).ok()?),
@@ -284,8 +342,7 @@ impl LiveTable {
             (Scalar::Str(k), KeyIndex::Str(_)) => KeyRef::Str(k),
             _ => return None,
         };
-        let id = self.keys.get(key)?;
-        self.slots[id as usize].map(Slot::row_ref)
+        self.keys.get(key)
     }
 
     /// Inserts `batch`'s rows, replacing the rows of keys already present; within the batch
@@ -347,6 +404,11 @@ impl LiveTable {
             }
             self.slots[id as usize] = None;
             self.free.push(id);
+            if self.reuses.len() <= id as usize {
+                self.reuses.resize(id as usize + 1, 0);
+            }
+            // Wrapping: an id freed 2^32 times could give an old record back; harmless odds.
+            self.reuses[id as usize] = self.reuses[id as usize].wrapping_add(1);
             self.dead += 1;
             deleted += 1;
         }
@@ -408,16 +470,12 @@ impl LiveTable {
             batches: &self.batches,
             slots: &self.slots,
         });
-        let serial = next_serial();
-        self.views.push(Some((serial, view)));
-        Ok(ViewId {
-            serial,
-            index: self.views.len() - 1,
-        })
+        let (serial, index) = store(&mut self.views, view);
+        Ok(ViewId { serial, index })
     }
 
-    /// Removes a view; `false` if it was already gone or belongs to another table. Its id is
-    /// not reused.
+    /// Removes a view; `false` if it was already gone or belongs to another table. Its id
+    /// never names another view (its storage may be reused).
     pub fn remove_view(&mut self, id: ViewId) -> bool {
         take(&mut self.views, id.index, id.serial)
     }
@@ -428,7 +486,9 @@ impl LiveTable {
         let state = find(&self.views, id.index, id.serial)?;
         Some(View {
             state,
+            batches: &self.batches,
             slots: &self.slots,
+            reuses: &self.reuses,
         })
     }
 
@@ -445,16 +505,12 @@ impl LiveTable {
             batches: &self.batches,
             slots: &self.slots,
         });
-        let serial = next_serial();
-        self.groups.push(Some((serial, groups)));
-        Ok(GroupsId {
-            serial,
-            index: self.groups.len() - 1,
-        })
+        let (serial, index) = store(&mut self.groups, groups);
+        Ok(GroupsId { serial, index })
     }
 
-    /// Removes grouped aggregates; `false` if already gone or another table's. Their id is
-    /// not reused.
+    /// Removes grouped aggregates; `false` if already gone or another table's. Their id
+    /// never names other aggregates (their storage may be reused).
     pub fn remove_groups(&mut self, id: GroupsId) -> bool {
         take(&mut self.groups, id.index, id.serial)
     }
@@ -674,6 +730,22 @@ fn find<T>(entries: &[Option<(u64, T)>], index: usize, serial: u64) -> Option<&T
     }
 }
 
+/// Stores `entry` under a new serial in the first free place (removed entries leave one),
+/// so a model that replaces its view on every sort keeps one; returns the serial and index.
+fn store<T>(entries: &mut Vec<Option<(u64, T)>>, entry: T) -> (u64, usize) {
+    let serial = next_serial();
+    match entries.iter().position(Option::is_none) {
+        Some(index) => {
+            entries[index] = Some((serial, entry));
+            (serial, index)
+        }
+        None => {
+            entries.push(Some((serial, entry)));
+            (serial, entries.len() - 1)
+        }
+    }
+}
+
 /// Removes the entry at `index` if its serial is `serial`; whether it did.
 fn take<T>(entries: &mut [Option<(u64, T)>], index: usize, serial: u64) -> bool {
     entries
@@ -697,7 +769,9 @@ fn nullable(schema: &Schema) -> SchemaRef {
 #[derive(Debug, Clone, Copy)]
 pub struct View<'a> {
     state: &'a ViewState,
+    batches: &'a [RecordBatch],
     slots: &'a [Option<Slot>],
+    reuses: &'a [u32],
 }
 
 impl View<'_> {
@@ -720,6 +794,35 @@ impl View<'_> {
             .flatten()
             .map(Slot::row_ref)
     }
+
+    /// The record of the row at `index`. `O(log n)`.
+    pub fn record(&self, index: usize) -> Option<RecordId> {
+        let id = self.state.get(index)?;
+        Some(RecordId::new(id, reuse(self.reuses, id)))
+    }
+
+    /// Where `record`'s row is in the view, or `None` if it is not in it (filtered out, or
+    /// its key deleted). `O(log n)`: binary searches comparing the row's sort values.
+    pub fn position(&self, record: RecordId) -> Option<usize> {
+        let (id, _) = live_slot(self.slots, self.reuses, record)?;
+        let rows = Rows {
+            batches: self.batches,
+            slots: self.slots,
+        };
+        self.state.position(rows, id)
+    }
+}
+
+/// How many times row id `id` was freed.
+fn reuse(reuses: &[u32], id: RowId) -> u32 {
+    reuses.get(id as usize).copied().unwrap_or(0)
+}
+
+/// `record`'s row id and slot, if the record's key is still live.
+fn live_slot(slots: &[Option<Slot>], reuses: &[u32], record: RecordId) -> Option<(RowId, Slot)> {
+    let (id, reused) = record.parts();
+    let slot = (*slots.get(id as usize)?)?;
+    (reuse(reuses, id) == reused).then_some((id, slot))
 }
 
 #[cfg(test)]
@@ -732,6 +835,18 @@ mod tests {
 
     fn ids(keys: Vec<i64>) -> RecordBatch {
         RecordBatch::try_from_iter([("id", Arc::new(Int64Array::from(keys)) as ArrayRef)]).unwrap()
+    }
+
+    #[test]
+    fn replacing_a_view_again_and_again_keeps_one_place() {
+        let mut table = LiveTable::new(ids(vec![]).schema(), "id").unwrap();
+        let mut view = table.add_view(ViewSpec::new()).unwrap();
+        for _ in 0..100 {
+            let next = table.add_view(ViewSpec::new()).unwrap();
+            table.remove_view(view);
+            view = next;
+        }
+        assert!(table.views.len() <= 2, "{} places", table.views.len());
     }
 
     #[test]
