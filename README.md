@@ -165,7 +165,9 @@ arrive.
 - **Pin the worker to a performance core.** On this hybrid CPU an unpinned busy-spinning worker
   migrated 446-4,442 times per 5 s and ran at 30-55M ticks/s whenever it landed on an E-core,
   versus 105-116M pinned to a P-core. A process-wide registry gives every auto-pinned worker its
-  own physical core.
+  own physical core, and never the last free one: on a 2-CPU CI runner, busy-spinning workers on
+  every core starved the render loop to 0.4 fps. An auto-placed worker that finds no core of its
+  own runs unpinned *and* at normal priority.
 - **Pinned *and* time-critical.** Pinning decides where the worker runs, not who wins the
   core: next to a busy normal-priority process pinned to the same core
   (`scripts/priority_experiment.ps1`), a normal-priority worker reached 100.8k of 200k ticks/s

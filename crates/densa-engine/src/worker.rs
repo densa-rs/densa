@@ -30,6 +30,11 @@ pub struct WorkerConfig {
     pub pin: Pin,
     /// Scheduling priority of the worker thread. Raise it together with pinning: a pinned
     /// worker at normal priority still time-slices with other threads on its core.
+    ///
+    /// With [`Pin::Auto`] a raised priority applies only if a core was claimed: an
+    /// unpinned busy-spinning thread above normal priority would starve every other thread
+    /// on the machine (seen on a 2-CPU CI runner: the render loop fell to 0.4 fps). With an
+    /// explicit [`Pin::None`] or [`Pin::Cpu`] it is applied as asked.
     pub priority: ThreadPriority,
 }
 
@@ -277,6 +282,17 @@ impl WorkerHandle {
         self.thread.as_ref().and_then(thread_priority)
     }
 
+    /// Changes the worker thread's priority. Raising it above normal on an unpinned worker
+    /// lets its busy loop starve other threads; see [`WorkerConfig::priority`].
+    ///
+    /// # Errors
+    /// [`CpuError`] if the OS refuses or has no priorities (only Windows has them so far),
+    /// or `CpuError::Unsupported` if the worker has stopped.
+    pub fn set_priority(&self, priority: ThreadPriority) -> Result<(), CpuError> {
+        let thread = self.thread.as_ref().ok_or(CpuError::Unsupported)?;
+        set_thread_priority(thread, priority)
+    }
+
     /// Requests that future snapshots start at `first_row` (clamped by the worker).
     pub fn set_viewport(&self, first_row: u32) {
         // ORDERING: Relaxed. A hint with no dependent data; each snapshot records the
@@ -349,7 +365,12 @@ pub fn spawn_worker<const N: usize>(
     let symbols =
         NonZeroU32::new(config.symbols).ok_or(SpawnError::Config(ConfigError::NoSymbols))?;
     let claim = claim_cpu(config.pin);
-    let priority = config.priority;
+    let auto_without_core = config.pin == Pin::Auto && claim.is_none();
+    let priority = if auto_without_core {
+        ThreadPriority::Normal
+    } else {
+        config.priority
+    };
     let worker = Worker {
         generator: TickGenerator::new(symbols, config.seed),
         table: MarketTable::new(config.symbols),

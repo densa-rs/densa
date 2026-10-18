@@ -39,10 +39,18 @@ impl CpuRegistry {
 
     /// Claims the fastest CPU on a physical core that no current claim uses (see
     /// [`pick_performance_cpu_excluding`]). Falls back to slower core classes once the
-    /// fastest are taken; `None` when every core is claimed.
+    /// fastest are taken.
+    ///
+    /// `None` when only one unclaimed physical core is left: automatic placement never takes
+    /// the last one, so the rest of the process and the system (the UI thread, the OS) always
+    /// keep a core. Busy-spinning workers on every core starved a 2-CPU machine's render loop
+    /// to 0.4 fps. Explicit [`claim`](Self::claim)s are not limited.
     #[must_use = "the CPU is released as soon as the claim is dropped"]
     pub fn claim_auto(&self, cpus: &[LogicalCpu]) -> Option<CpuClaim<'_>> {
         let mut claimed = self.lock();
+        if free_cores(cpus, &claimed) <= 1 {
+            return None;
+        }
         let cpu = pick_performance_cpu_excluding(cpus, &claimed)?;
         claimed.push(cpu);
         Some(CpuClaim {
@@ -73,6 +81,17 @@ impl CpuRegistry {
             claimed.swap_remove(position);
         }
     }
+}
+
+/// Physical cores of `cpus` that no claim in `claimed` uses.
+fn free_cores(cpus: &[LogicalCpu], claimed: &[LogicalCpu]) -> usize {
+    let same_core = |a: &LogicalCpu, b: &LogicalCpu| a.id.group == b.id.group && a.core == b.core;
+    cpus.iter()
+        .enumerate()
+        // Count each physical core once: at its first logical CPU.
+        .filter(|(i, c)| !cpus[..*i].iter().any(|earlier| same_core(earlier, c)))
+        .filter(|(_, c)| !claimed.iter().any(|taken| same_core(taken, c)))
+        .count()
 }
 
 /// A claimed CPU; releases the claim when dropped.
