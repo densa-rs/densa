@@ -8,8 +8,8 @@
 //! same generator cost; `generator_fill_1024` measures it alone for subtraction.
 
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
-use densa_data::{Direction, MarketTable, Tick, TickGenerator, ViewportSnapshot};
 use std::hint::black_box;
+use trading_demo::data::{Direction, MarketTable, Tick, TickGenerator, ViewportSnapshot};
 
 fn nz(n: u32) -> std::num::NonZeroU32 {
     std::num::NonZeroU32::new(n).expect("bench symbol counts are non-zero")

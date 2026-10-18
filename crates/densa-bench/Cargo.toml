@@ -9,10 +9,10 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+trading-demo.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true
-densa-data.workspace = true
 densa-platform.workspace = true
 densa-sync.workspace = true
 densa-text.workspace = true

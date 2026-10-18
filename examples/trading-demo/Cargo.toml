@@ -1,0 +1,25 @@
+[package]
+name = "trading-demo"
+description = "A real-time trading grid built with densa: a synthetic feed of 200k ticks/s rendered at the display's refresh rate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+crossbeam-utils.workspace = true
+densa-alloc.workspace = true
+densa-core.workspace = true
+densa-fmt.workspace = true
+densa-platform.workspace = true
+densa-render.workspace = true
+densa-sync.workspace = true
+densa-text.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

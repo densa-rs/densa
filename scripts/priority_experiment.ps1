@@ -10,8 +10,8 @@ param([int]$Cpu = 14, [int]$Seconds = 6, [int]$Runs = 2)
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-cargo build --release -q -p densa-poc
-$exe = (Resolve-Path ".\target\release\densa-poc.exe").Path
+cargo build --release -q -p trading-demo
+$exe = (Resolve-Path ".\target\release\trading-demo.exe").Path
 $neighborOut = Join-Path ([IO.Path]::GetTempPath()) "densa_neighbor_$PID.txt"
 
 function Format-Summary($line) {

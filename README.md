@@ -57,16 +57,16 @@ Home/End; resize the window to re-wrap.
 
 ## Example: a real-time trading grid
 
-`densa-poc` streams a synthetic feed of 200,000 ticks/s into a 10,000-instrument table on a
+`trading-demo` (in `examples/`) streams a synthetic feed of 200,000 ticks/s into a 10,000-instrument table on a
 worker thread and renders the visible rows at the display's refresh rate. Neither thread
 blocks the other, and neither allocates after startup.
 
 ```sh
-cargo run --release -p densa-poc                         # window
-cargo run --release -p densa-poc -- --headless           # no window, prints metrics
-cargo run --release -p densa-poc -- --headless --unbounded --batch 1024
-cargo run --release -p densa-poc -- --list-cpus          # CPU topology and --pin choice
-cargo run --release -p densa-poc -- --help
+cargo run --release -p trading-demo                      # window
+cargo run --release -p trading-demo -- --headless        # no window, prints metrics
+cargo run --release -p trading-demo -- --headless --unbounded --batch 1024
+cargo run --release -p trading-demo -- --list-cpus       # CPU topology and --pin choice
+cargo run --release -p trading-demo -- --help
 ```
 
 Requirements: Rust 1.90+, a GPU with Vulkan, DX12 or Metal for the window. Window controls:
@@ -147,8 +147,9 @@ Every second the demo prints a line like this (the window title shows a summary)
 - **Cells flash briefly.** A changed price highlights its cell for 300 ms; at ~20 changes per
   second per instrument, longer or whole-row highlights would never fade.
 
-The demo's data model (`densa-data`) and worker (`densa-engine`) are application code and are
-not published.
+The demo's data model (`trading_demo::data`) and worker (`trading_demo::engine`) are
+application code, not part of the published crates: every `densa-*` crate is a library, and
+`examples/` holds applications.
 
 ## Development
 

@@ -9,8 +9,8 @@ param([int]$Runs = 3, [int]$Seconds = 5, [int]$ECore = 20)
 $ErrorActionPreference = "Stop"
 Set-Location (Split-Path -Parent $PSScriptRoot)
 
-cargo build --release -q -p densa-poc
-$exe = ".\target\release\densa-poc.exe"
+cargo build --release -q -p trading-demo
+$exe = ".\target\release\trading-demo.exe"
 $placements = [ordered]@{ "os-scheduled" = "none"; "p-core (auto)" = "auto"; "e-core $ECore" = "$ECore" }
 
 foreach ($name in $placements.Keys) {

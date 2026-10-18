@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/*"]
+members = ["crates/*", "examples/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -16,14 +16,14 @@ rust-version = "1.90"
 [workspace.dependencies]
 densa-alloc = { path = "crates/densa-alloc", version = "0.1.0" }
 densa-core = { path = "crates/densa-core", version = "0.1.0" }
-densa-data = { path = "crates/densa-data" }
-densa-engine = { path = "crates/densa-engine" }
 densa-fmt = { path = "crates/densa-fmt", version = "0.1.0" }
 densa-paragraph = { path = "crates/densa-paragraph", version = "0.1.0" }
 densa-platform = { path = "crates/densa-platform", version = "0.1.0" }
 densa-render = { path = "crates/densa-render", version = "0.1.0" }
 densa-sync = { path = "crates/densa-sync", version = "0.1.0" }
 densa-text = { path = "crates/densa-text", version = "0.1.0" }
+# The demo application (not published).
+trading-demo = { path = "examples/trading-demo" }
 
 bytemuck = "1.25.2"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
