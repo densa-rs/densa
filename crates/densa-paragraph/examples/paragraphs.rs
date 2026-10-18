@@ -31,13 +31,14 @@ const DOUBLE_CLICK: Duration = Duration::from_millis(400);
 const DOUBLE_CLICK_SLOP: f32 = 4.0;
 
 const TITLE: &str = "densa paragraphs";
-const INTRO: &str = "Văn bản được shape bằng parley, xuống dòng theo chiều rộng cửa sổ và căn lề; \
-                     mỗi glyph đi qua cùng một atlas với lưới dữ liệu. Kéo cửa sổ để xem các \
-                     đoạn văn tự xuống dòng lại mà không phải shape lại.";
+const INTRO: &str = "Text is shaped by parley, wrapped to the width of the window and aligned; \
+                     every glyph comes from the same atlas as the data grid. Resize the window \
+                     and the lines re-wrap without shaping again.";
+const CENTERED: &str = "Centered lines suit captions and headings.";
 const JUSTIFIED: &str = "Justified text stretches every line but the last to the full width. \
                          Shaping happens once; resizing only re-breaks and re-aligns the lines, \
                          and drawing a laid-out paragraph each frame allocates nothing.";
-const RIGHT: &str = "Right-aligned, in a calmer colour.";
+const RIGHT: &str = "Right-aligned, in a calmer color.";
 
 fn main() -> Result<(), Box<dyn Error>> {
     let seconds = std::env::args()
@@ -151,7 +152,7 @@ impl State {
     fn new(event_loop: &ActiveEventLoop, preselect: bool) -> Result<Self, Box<dyn Error>> {
         let attributes = Window::default_attributes()
             .with_title(TITLE)
-            .with_inner_size(PhysicalSize::new(720, 520));
+            .with_inner_size(PhysicalSize::new(720, 320));
         let window = Arc::new(event_loop.create_window(attributes)?);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
             Box::new(event_loop.owned_display_handle()),
@@ -391,11 +392,12 @@ fn build_paragraphs(width: Option<f32>) -> Result<Vec<Paragraph>, Box<dyn Error>
         .with_size(30.0)
         .with_color(Color::srgb(0x58A6FF))];
     let accent = Color::srgb(0x3FB950);
-    let intro_spans = [Span::new(0.."Văn bản".len()).with_color(accent)];
+    let intro_spans = [Span::new(0.."Text".len()).with_color(accent)];
     Ok(vec![
         system.paragraph(TITLE, &title_style, &title_spans)?,
         system.paragraph(INTRO, &base, &intro_spans)?,
         system.paragraph(JUSTIFIED, &base.clone().with_align(TextAlign::Justify), &[])?,
+        system.paragraph(CENTERED, &base.clone().with_align(TextAlign::Center), &[])?,
         system.paragraph(
             RIGHT,
             &base

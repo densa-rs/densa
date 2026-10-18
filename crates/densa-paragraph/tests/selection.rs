@@ -56,7 +56,7 @@ mod hit_testing {
 
     #[test]
     fn multi_byte_characters_are_never_split() {
-        let text = "Việt Nam";
+        let text = "Ünïcödé façade";
         let p = layout(text, None);
         for step in 0..40 {
             let x = step as f32 * ADVANCE / 4.0;
@@ -171,9 +171,9 @@ mod motions {
 
     #[test]
     fn a_step_crosses_a_whole_character_however_it_is_encoded() {
-        let precomposed = "ệx"; // U+1EC7: 3 bytes
+        let precomposed = "ẃx"; // U+1E83: 3 bytes
         assert_eq!(moved(&layout(precomposed, None), 0, Motion::Right), 3);
-        let decomposed = "e\u{0302}\u{0323}x"; // one grapheme: 1 + 2 + 2 bytes
+        let decomposed = "e\u{0301}\u{0308}x"; // one grapheme: 1 + 2 + 2 bytes
         assert_eq!(moved(&layout(decomposed, None), 0, Motion::Right), 5);
     }
 
@@ -459,7 +459,7 @@ mod right_to_left {
 
     #[test]
     fn logical_motions_step_whole_characters_in_left_to_right_text_too() {
-        let p = layout("ệa", None);
+        let p = layout("ẃa", None);
         let start = TextSelection::caret_at(&p, 0);
         assert_eq!(start.moved(&p, Motion::Next, false).focus(), 3);
         let end = TextSelection::caret_at(&p, 4);

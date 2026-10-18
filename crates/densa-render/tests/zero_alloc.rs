@@ -25,7 +25,7 @@ impl GridSource for Ticking {
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
         let value = (self.frame as f64 * 0.37 + row as f64 * 11.0) % 10_000.0;
         let _ = match column {
-            0 => text.push_str("Ngân hàng"),
+            0 => text.push_str("Café crème"),
             _ => write_fixed(text, value, 2),
         };
         CellStyle {
@@ -54,7 +54,10 @@ fn painting_warm_frames_performs_zero_heap_operations() {
     let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
 
     // Startup: every glyph the frames use, at every subpixel position.
-    assert_eq!(painter.prewarm(&mut cache, "NAMEVLU0123456789.Ngân hà"), 0);
+    assert_eq!(
+        painter.prewarm(&mut cache, "NAMEVLU0123456789.Café crème"),
+        0
+    );
     cache.drain_updates().for_each(drop);
 
     let ((), stats) = measure(|| {

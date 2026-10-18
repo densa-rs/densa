@@ -19,7 +19,7 @@ fn ascii_maps_to_the_fonts_glyph_and_advance() {
 fn non_ascii_characters_map_too() {
     let mut glyphs = map();
     let font = Font::bundled_mono().unwrap();
-    assert_eq!(glyphs.get('ệ').unwrap().id, font.glyph_id('ệ').unwrap());
+    assert_eq!(glyphs.get('ẃ').unwrap().id, font.glyph_id('ẃ').unwrap());
 }
 
 #[test]
@@ -52,5 +52,5 @@ fn non_ascii_memory_is_bounded_and_keeps_answering() {
         glyphs.get(ch);
     }
     assert!(glyphs.cached_chars() <= MAX_CACHED_CHARS);
-    assert_eq!(glyphs.get('ệ').unwrap().id, font.glyph_id('ệ').unwrap());
+    assert_eq!(glyphs.get('ẃ').unwrap().id, font.glyph_id('ẃ').unwrap());
 }

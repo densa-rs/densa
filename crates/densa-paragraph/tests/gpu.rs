@@ -115,7 +115,7 @@ fn wrapped_lines_are_drawn_inside_their_boxes_and_the_width() {
     let style = ParagraphStyle::new(14.0).with_max_width(Some(max_width));
     let mut system = TextSystem::new().unwrap();
     let paragraph = system
-        .paragraph("Tiếng Việt wraps onto several lines here", &style, &[])
+        .paragraph("Ünïcödé text wraps onto several lines here", &style, &[])
         .unwrap();
     assert!(paragraph.lines().len() >= 3);
     let red = render(&device, &queue, &paragraph);

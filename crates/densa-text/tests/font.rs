@@ -14,9 +14,9 @@ fn maps_ascii_characters_to_glyphs() {
 }
 
 #[test]
-fn covers_precomposed_vietnamese() {
+fn covers_accented_latin() {
     let font = mono();
-    for ch in "ệĐữẫơưằỹ".chars() {
+    for ch in "éüßøåçñčřžłőœŵẃẞ€".chars() {
         assert!(font.glyph_id(ch).is_some(), "missing glyph for {ch:?}");
     }
 }
@@ -37,7 +37,7 @@ fn every_glyph_has_the_same_advance_in_a_monospace_font() {
         "600/1000 em at 16 px, got {zero}"
     );
     assert_eq!(advance('W'), zero);
-    assert_eq!(advance('ệ'), zero);
+    assert_eq!(advance('ẃ'), zero);
 }
 
 #[test]

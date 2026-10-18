@@ -6,7 +6,7 @@ use skrifa::instance::{LocationRef, Size};
 use skrifa::{FontRef, MetadataProvider};
 
 /// JetBrains Mono Regular, bundled under the SIL Open Font License 1.1 (`fonts/OFL.txt`).
-/// Monospace (every glyph advances 0.6 em), with precomposed Vietnamese.
+/// Monospace (every glyph advances 0.6 em), with accented Latin letters.
 pub const BUNDLED_MONO: &[u8] = include_bytes!("../fonts/JetBrainsMono-Regular.ttf");
 
 /// Identifies one loaded [`Font`] for the lifetime of the process.

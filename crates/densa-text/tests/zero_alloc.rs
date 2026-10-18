@@ -14,7 +14,7 @@ fn glyph_map_lookups_after_first_use_perform_zero_heap_operations() {
         "counting allocator not installed: test would be vacuous"
     );
     let mut glyphs = GlyphMap::new(Font::bundled_mono().unwrap(), 14.0);
-    let text = "SYM00042 1,234.50 ệĐữ";
+    let text = "SYM00042 1,234.50 €ẃß";
     black_box(glyphs.measure(text)); // first use of the non-ASCII characters caches them
     let ((), stats) = measure(|| {
         for _ in 0..10_000 {
@@ -33,7 +33,7 @@ fn warm_cache_lookups_perform_zero_heap_operations() {
 
     let font = Font::bundled_mono().unwrap();
     let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
-    let text = "0123456789.,- SYM ệĐữ";
+    let text = "0123456789.,- SYM €ẃß";
     let glyphs: Vec<_> = text.chars().filter_map(|c| font.glyph_id(c)).collect();
     let advance = font.advance(glyphs[0], 14.0);
 

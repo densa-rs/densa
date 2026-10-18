@@ -16,9 +16,9 @@ fn drawing_a_paragraph_performs_zero_heap_operations() {
         "counting allocator not installed: test would be vacuous"
     );
     let mut system = TextSystem::new().unwrap();
-    let text = "Tiếng Việt có dấu, wrapped across several lines of a narrow column.";
+    let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
-    let spans = [Span::new(0.."Tiếng Việt".len()).with_color(Color::linear(1.0, 0.5, 0.0, 1.0))];
+    let spans = [Span::new(0.."Crème brûlée".len()).with_color(Color::linear(1.0, 0.5, 0.0, 1.0))];
     let paragraph = system.paragraph(text, &style, &spans).unwrap();
     assert!(paragraph.lines().len() > 2);
 
@@ -56,7 +56,7 @@ fn hit_testing_and_moving_selections_perform_zero_heap_operations() {
         "counting allocator not installed: test would be vacuous"
     );
     let mut system = TextSystem::new().unwrap();
-    let text = "Tiếng Việt có dấu, wrapped across several lines of a narrow column.";
+    let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
     let paragraph = system.paragraph(text, &style, &[]).unwrap();
     let motions = [

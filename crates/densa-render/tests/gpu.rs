@@ -365,7 +365,7 @@ fn writes_whose_pixels_do_not_match_their_size_are_an_error() {
     );
 }
 
-/// One row: a Vietnamese label and a number.
+/// One row: an accented label and a number.
 struct OneRow;
 
 impl GridSource for OneRow {
@@ -374,7 +374,7 @@ impl GridSource for OneRow {
     }
 
     fn cell(&self, _row: usize, column: usize, text: &mut CellText) -> CellStyle {
-        let _ = text.push_str(["Hà", "1234.5"][column]);
+        let _ = text.push_str(["Hé", "1234.5"][column]);
         CellStyle {
             color: Color::srgb(0xFFFFFF),
             background: None,

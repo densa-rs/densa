@@ -7,66 +7,186 @@
 
 <p align="center"><b>Dense by design.</b></p>
 
-Rust libraries for GPU-rendered, real-time interfaces that show a lot of live data: trading
-terminals, monitoring consoles, dashboards, developer tools. densa renders large, fast-changing
-tables and text at the display's refresh rate, hands data between threads without locks, and
-draws every frame without allocating memory.
+<p align="center">
+  <a href="https://github.com/densa-rs/densa/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/densa-rs/densa/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="#license"><img alt="License: MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-2F5BEA"></a>
+  <img alt="Rust 1.90+" src="https://img.shields.io/badge/rust-1.90%2B-2F5BEA">
+  <a href="https://densa.dev"><img alt="Website: densa.dev" src="https://img.shields.io/badge/web-densa.dev-0B1220"></a>
+</p>
 
-> **Status: 0.x, experimental.** APIs will change between releases. Builds and tests on
-> Linux, macOS and Windows. Homepage: <https://densa.dev>.
+Rust libraries for GPU-rendered interfaces that show a lot of live data: trading terminals,
+monitoring consoles, dashboards, developer tools. densa draws large, fast-changing tables and
+text at the display's refresh rate, hands data between threads without locks, and renders
+every frame without allocating memory.
 
-![A trading grid built with densa: 50 of 10,000 live instruments at the display's refresh rate](https://raw.githubusercontent.com/densa-rs/densa/main/docs/screenshot.png)
+<p align="center">
+  <img alt="A data grid of 50 instruments with bid, ask, last and volume columns; changed prices flash green or red" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/screenshot.png" width="300">
+  &nbsp;
+  <img alt="Wrapped, justified, centered and right-aligned paragraphs with the word parley selected" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/paragraphs.png" width="480">
+</p>
+
+> **Status: 0.x, experimental.** APIs will change between releases, and the crates are not on
+> crates.io yet. Builds and tests on Linux, macOS and Windows.
+
+## Highlights
+
+- **No allocation per frame.** Drawing, hit-testing and moving a selection allocate nothing
+  once fonts and glyphs are loaded, and tests prove it with a counting allocator.
+- **No locks between threads.** A wait-free triple buffer hands the newest data from a
+  producer thread to the UI thread; its memory orderings are model-checked with loom.
+- **One draw call per frame** for every rectangle and glyph.
+- **Real text.** Shaping, wrapping, bidirectional text, alignment, selection and keyboard
+  navigation, built on [parley](https://github.com/linebender/parley).
+- **Bounded memory.** The glyph atlas grows to a fixed limit, then reuses the least recently
+  used space, never a glyph drawn in the current frame.
+- **Use only what you need.** Rendering, text and data hand-off are independent crates, and no
+  third-party types appear in densa's APIs.
+
+## Quick start
+
+You need Rust 1.90 or later and a GPU with Vulkan, DX12 or Metal.
+
+```sh
+git clone https://github.com/densa-rs/densa
+cd densa
+cargo run --release -p trading-demo                          # live data grid
+cargo run --release -p densa-paragraph --example paragraphs  # text and selection
+```
+
+To use the crates before they are published, depend on the repository:
+
+```toml
+[dependencies]
+densa-render = { git = "https://github.com/densa-rs/densa" }
+densa-paragraph = { git = "https://github.com/densa-rs/densa" }
+densa-sync = { git = "https://github.com/densa-rs/densa" }
+```
 
 ## Crates
 
 | Crate | Use it for |
 |---|---|
-| `densa-core` | Shared primitives: `Color`, `Point`, `Rect` |
-| `densa-render` | Drawing with wgpu: a `Canvas` that batches rectangles and text into one draw call, and a data grid you fill from your own data (`GridSource`) |
-| `densa-text` | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
-| `densa-paragraph` | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection and keyboard navigation |
-| `densa-sync` | Wait-free triple buffer: hand the latest data from a producer thread to the UI thread without locks |
-| `densa-alloc` | A counting global allocator to prove a code path allocates nothing |
-| `densa-platform` | CPU topology, thread pinning and thread priority (Windows) |
-| `densa-fmt` | Number formatting into stack buffers, without allocating |
+| [`densa-render`](crates/densa-render) | Drawing with wgpu: a `Canvas` that batches rectangles and text into one draw call, and a data grid you fill from your own data (`GridSource`) |
+| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection and keyboard navigation |
+| [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
+| [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect` |
+| [`densa-sync`](crates/densa-sync) | Wait-free triple buffer: hand the latest data from a producer thread to the UI thread without locks |
+| [`densa-platform`](crates/densa-platform) | CPU topology, thread pinning and thread priority (Windows) |
+| [`densa-fmt`](crates/densa-fmt) | Number formatting into stack buffers, without allocating |
+| [`densa-alloc`](crates/densa-alloc) | A counting global allocator to prove a code path allocates nothing |
 
-Rendering, text layout and data hand-off are independent: use only the crates you need. No
-GPU or windowing dependency outside `densa-render`, and no third-party types in densa's APIs.
+Only `densa-render` depends on a GPU or windowing crate.
 
-## Guarantees
+## Usage
 
-- **No allocation per frame.** Drawing the grid or a laid-out paragraph, hit-testing and moving
-  a selection allocate nothing once fonts and glyphs are loaded. Each of these is a test
-  against a counting allocator.
-- **No locks between the data thread and the UI thread.** The triple buffer is wait-free on
-  both sides and model-checked with loom.
-- **One draw call per frame** for all rectangles and glyphs.
-- **Bounded memory for glyphs.** The atlas grows a page at a time up to a limit (4 MiB by
-  default, capped to the GPU's texture size), then reuses the space of the least recently used
-  glyphs, never one drawn in the current frame.
+### A grid over your own data
 
-## Text
+Implement `GridSource` and the grid asks for the visible cells each frame. Cells are
+formatted into a stack buffer, so painting allocates nothing.
 
-```sh
-cargo run --release -p densa-paragraph --example paragraphs
+```rust
+use densa_fmt::write_fixed;
+use densa_render::{CellStyle, CellText, Color, GridSource};
+use std::fmt::Write as _;
+
+/// A monitoring table: one row per sensor.
+struct Sensors<'a> {
+    names: &'a [&'a str],
+    celsius: &'a [f64],
+}
+
+impl GridSource for Sensors<'_> {
+    fn rows(&self) -> usize {
+        self.celsius.len()
+    }
+
+    // Called for every visible cell, every frame.
+    fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
+        let value = self.celsius[row];
+        if column == 0 {
+            let _ = text.write_str(self.names[row]);
+        } else {
+            let _ = write_fixed(text, value, 1);
+        }
+        let hex = if value > 80.0 { 0xF87171 } else { 0xE2E8F0 };
+        CellStyle { color: Color::srgb(hex), background: None }
+    }
+}
 ```
 
-![Wrapped, justified, centered and right-aligned paragraphs with Vietnamese text and a selection](https://raw.githubusercontent.com/densa-rs/densa/main/docs/paragraphs.png)
+`GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuGrid` submits the result.
+[`examples/trading-demo/src/market.rs`](examples/trading-demo/src/market.rs) is a complete
+source with formatting and flashing cells.
 
-Paragraphs are shaped with [parley](https://github.com/linebender/parley), wrapped to a width
-and aligned (start, end, left, center, right, justify); changing the width re-wraps without
-reshaping. `TextSelection` turns clicks into caret positions and gives caret and selection
-rectangles to draw; it moves by character, word and line, in screen order for arrow keys and
-in text order for deletion, so right-to-left text behaves correctly.
+### Paragraphs
 
-In the example: click, drag, shift+click, double- and triple-click, shift/ctrl + arrows,
-Home/End; resize the window to re-wrap.
+```rust
+use densa_paragraph::{ParagraphStyle, TextAlign, TextSystem};
+use densa_render::{Canvas, Color, InstanceBuffer, Point};
+use densa_text::{AtlasConfig, GlyphCache};
+
+// Once per application: fonts, layout scratch space, the glyph atlas.
+let mut text = TextSystem::new()?;
+let mut glyphs = GlyphCache::new(AtlasConfig::default());
+let mut instances = InstanceBuffer::with_capacity(8_192);
+
+// When the text changes: shape, wrap and align.
+let style = ParagraphStyle::new(15.0)
+    .with_color(Color::srgb(0xC9D1D9))
+    .with_align(TextAlign::Justify)
+    .with_max_width(Some(480.0));
+let mut paragraph = text.paragraph("Shaped once, wrapped to any width.", &style, &[])?;
+paragraph.reflow(Some(320.0))?; // new width: re-wrap without reshaping
+
+// Every frame: no allocation.
+let mut canvas = Canvas::begin(&mut glyphs, &mut instances);
+for run in paragraph.runs() {
+    canvas.draw_run(run, Point::new(24.0, 24.0));
+}
+```
+
+`TextSelection` turns clicks into caret positions and gives caret and selection rectangles to
+draw. It moves by character, word and line: in screen order for arrow keys, in text order for
+deletion, so right-to-left text behaves correctly. The
+[`paragraphs` example](crates/densa-paragraph/examples/paragraphs.rs) supports click, drag,
+shift+click, double- and triple-click, shift/ctrl + arrows and Home/End; resize the window to
+re-wrap.
+
+### Handing data to the UI thread
+
+```rust
+use densa_sync::triple_buffer;
+
+let (mut writer, mut reader) = triple_buffer([0.0_f64; 64]);
+
+// Producer thread: fill the back slot, then publish it. Never blocks.
+std::thread::spawn(move || {
+    writer.write(|rows| rows[0] = 101.25);
+    writer.publish();
+});
+
+// UI thread, once per frame: switch to the newest snapshot, if any.
+if reader.update() {
+    reader.read(|rows| draw(rows));
+}
+```
+
+## Guarantees and how they are checked
+
+| Guarantee | Checked by |
+|---|---|
+| Drawing, hit-testing and selection allocate nothing | A counting global allocator in each crate's `tests/zero_alloc.rs` |
+| The triple buffer is free of data races | loom model checking; a mutation script proves every weaker memory ordering fails |
+| Correct pixels | GPU tests render offscreen and read the pixels back, including atlas growth and eviction (on machines with a GPU) |
+| Sound `unsafe` code | A `// SAFETY:` comment on every block (enforced by Clippy); Miri on the concurrency, allocator and platform crates |
+| Supported toolchain | CI checks the build with Rust 1.90 and runs the tests on Linux, macOS and Windows |
 
 ## Example: a real-time trading grid
 
-`trading-demo` (in `examples/`) streams a synthetic feed of 200,000 ticks/s into a 10,000-instrument table on a
-worker thread and renders the visible rows at the display's refresh rate. Neither thread
-blocks the other, and neither allocates after startup.
+`trading-demo` (in [`examples/`](examples/trading-demo)) streams a synthetic feed of 200,000
+ticks per second into a 10,000-instrument table on a worker thread and renders the visible rows
+at the display's refresh rate. Neither thread blocks the other, and neither allocates after
+startup.
 
 ```sh
 cargo run --release -p trading-demo                      # window
@@ -76,8 +196,7 @@ cargo run --release -p trading-demo -- --list-cpus       # CPU topology and --pi
 cargo run --release -p trading-demo -- --help
 ```
 
-Requirements: Rust 1.90+, a GPU with Vulkan, DX12 or Metal for the window. Window controls:
-mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc quits.
+Window controls: mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc quits.
 
 | Option | Default | Meaning |
 |---|---|---|
@@ -94,18 +213,19 @@ mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc quits.
 
 ### Performance
 
-Intel i7-14700KF (8 P-cores + 12 E-cores), RTX 4060 Ti (Vulkan), 1920x1080 @ 99 Hz,
-Windows 11, release build, 10,000 symbols, default settings.
+Intel i7-14700KF (8 performance + 12 efficiency cores), RTX 4060 Ti (Vulkan), 1920×1080 at
+99 Hz, Windows 11, release build, 10,000 instruments, default settings.
 
-| Run | Throughput | Frames | Data-to-screen latency p50 / p99 | Allocations after startup |
+| Run | Throughput | Frames | Data to screen p50 / p99 | Allocations after startup |
 |---|---|---|---|---|
-| Window, 200k ticks/s, V-Sync | 200.0k ticks/s | 99.8 fps (display rate) | 164 us / 328 us | 0 |
-| Headless, 200k ticks/s | 200.0k ticks/s | 120.0 fps | 156 us / 328 us | 0 |
-| Headless, unbounded, batch 1024 | 115.3M ticks/s | 120.0 fps | 47 us / 107 us | 0 |
+| Window, 200k ticks/s, V-Sync | 200.0k ticks/s | 99.8 fps (display rate) | 164 µs / 328 µs | 0 |
+| Headless, 200k ticks/s | 200.0k ticks/s | 120.0 fps | 156 µs / 328 µs | 0 |
+| Headless, unbounded, batch 1024 | 115.3M ticks/s | 120.0 fps | 47 µs / 107 µs | 0 |
 
-Building a 50-row frame takes ~37 us (p50) and ~66 us (p99) on a performance core. Triple
-buffer: publish 4.4 ns, read 10.6 ns. Glyph cache: 2,500 lookups ~20 us. (wgpu allocates
-internally during submit and present; the allocation counts above cover densa's code.)
+Building a 50-row frame takes ~37 µs (p50) and ~66 µs (p99) on a performance core. Triple
+buffer: publish 4.4 ns, read 10.6 ns. Glyph cache: 2,500 lookups in ~20 µs. wgpu allocates
+internally during submit and present; the allocation counts cover densa's code. Benchmarks are
+pinned to performance cores: unpinned runs on hybrid CPUs vary by 2-3×.
 
 ### Reading the metrics
 
@@ -116,15 +236,15 @@ Every second the demo prints a line like this (the window title shows a summary)
 ```
 
 - **snapshot age**: time from the worker publishing data to a frame showing it. In
-  rate-limited mode it is bounded by the batch interval (64 ticks at 200k/s = 320 us); a smaller
-  `--batch` lowers it.
+  rate-limited mode it is bounded by the batch interval (64 ticks at 200k/s = 320 µs); a
+  smaller `--batch` lowers it.
 - **tick age**: time since the newest tick among the visible rows: how fresh the data is. Each
-  of 10,000 symbols updates ~20 times per second.
+  of 10,000 instruments updates ~20 times per second.
 - **heap ops**: heap operations since startup, per thread; 0 for the worker and the painter.
 - **pacer resets**: times the worker fell over 10 ms behind schedule (it was preempted).
   **migrations**: times the OS moved the worker to another CPU.
 
-## How it works
+### How it works
 
 ```text
  worker thread (pinned)                             UI thread
@@ -158,20 +278,14 @@ The demo's data model (`trading_demo::data`) and worker (`trading_demo::engine`)
 application code, not part of the published crates: every `densa-*` crate is a library, and
 `examples/` holds applications.
 
-## Development
+## Platform support
 
-```sh
-cargo test --workspace                       # includes GPU readback and a 2 s window run
-cargo clippy --workspace --all-targets -- -D warnings
-RUSTFLAGS="--cfg loom" cargo test -p densa-sync --release --test loom_triple_buffer
-cargo +nightly miri test --target x86_64-unknown-linux-gnu -p densa-sync -p densa-alloc -p densa-platform
-cargo +1.90 check --workspace --all-targets  # MSRV
-cargo bench -p densa-bench
-```
-
-Set `DENSA_SKIP_GPU_TESTS=1` on machines without a GPU or desktop session. Miri runs against
-the Linux target: with a custom global allocator, Miri reports a false positive in the Windows
-`System` allocator.
+| | Linux | macOS | Windows |
+|---|---|---|---|
+| Rendering (wgpu) | Vulkan | Metal | Vulkan, DX12 |
+| Text, paragraphs, selection | yes | yes | yes |
+| Triple buffer, counting allocator | yes | yes | yes |
+| Thread pinning and priority | not yet | not yet | yes |
 
 ## Limitations
 
@@ -179,14 +293,32 @@ the Linux target: with a custom global allocator, Miri reports a false positive 
   routing or accessibility yet.
 - **Text:** grid cells are single-line, unshaped text. Paragraphs use only the bundled font
   unless the `system-fonts` feature is enabled (no fallback for CJK without it). Not supported
-  yet: inline boxes, variable-font axes, synthetic bold/italic, color emoji, text editing and
-  IME.
+  yet: inline boxes, variable-font axes, synthetic bold and italic, color emoji, text editing
+  and input methods (IME).
 - **Glyphs:** if one frame needs more glyphs than the whole atlas holds, the extra ones appear
   in a later frame; glyphs larger than an atlas page are not drawn.
-- **Threads:** pinning and priority are implemented on Windows only. Pinning is not
-  isolation: next to a busy neighbor a pinned, time-critical worker still stalls about twice
-  per 6 s (max ~30 ms). CPU claims are tracked per process. The UI thread is not pinned.
+- **Threads:** pinning is not isolation. Next to a busy neighbor, a pinned, time-critical
+  worker still stalls about twice per 6 s (max ~30 ms). CPU claims are tracked per process,
+  and the UI thread is not pinned.
 - **The demo's feed is synthetic.** No network ingestion, order book or persistence.
+
+## Development
+
+```sh
+cargo test --workspace                       # includes GPU readback and a 2 s window run
+cargo clippy --workspace --all-targets -- -D warnings
+RUSTFLAGS="--cfg loom" cargo test -p densa-sync --release --test loom_triple_buffer
+cargo +nightly miri test --target x86_64-unknown-linux-gnu -p densa-sync -p densa-alloc -p densa-platform
+cargo +1.90 check --workspace --all-targets  # minimum supported Rust version
+cargo bench -p densa-bench
+```
+
+Set `DENSA_SKIP_GPU_TESTS=1` on machines without a GPU or desktop session. Miri runs against
+the Linux target: with a custom global allocator, Miri reports a false positive in the Windows
+`System` allocator.
+
+Bug reports and pull requests are welcome. Please run the checks above before opening a pull
+request.
 
 ## License
 

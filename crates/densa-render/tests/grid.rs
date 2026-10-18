@@ -189,9 +189,9 @@ mod text {
     }
 
     #[test]
-    fn vietnamese_text_is_drawn() {
+    fn non_ascii_text_is_drawn() {
         let mut p = painter(1);
-        let buf = paint(&mut p, &source(vec![vec!["Việt", ""]]));
+        let buf = paint(&mut p, &source(vec![vec!["Café", ""]]));
         assert_eq!(glyphs_in_row(&p, &buf, 1).len(), 4);
     }
 
