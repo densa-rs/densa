@@ -1,0 +1,26 @@
+[package]
+name = "densa-widgets"
+description = "Standard widgets for densa: labels, buttons, text inputs, scroll views, splitters"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "ui", "widgets", "button", "text-input"]
+categories = ["gui"]
+
+[dependencies]
+densa-core.workspace = true
+densa-draw.workspace = true
+densa-paragraph.workspace = true
+densa-ui.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+densa-text.workspace = true
+densa-window.workspace = true
+
+[lints]
+workspace = true

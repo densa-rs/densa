@@ -1,6 +1,6 @@
 //! Point and Rect: construction, edges, exact tiling, emptiness, NaN.
 
-use densa_core::{Point, Rect};
+use densa_core::{Point, Rect, Size};
 
 #[test]
 fn points_offset_and_convert() {
@@ -77,4 +77,25 @@ fn rects_translate() {
         r.translate(Point::new(10.0, 20.0)),
         Rect::new(11.0, 22.0, 3.0, 4.0)
     );
+}
+
+#[test]
+fn rects_intersect_into_their_overlap() {
+    let a = Rect::new(0.0, 0.0, 10.0, 10.0);
+    let b = Rect::new(5.0, -5.0, 10.0, 10.0);
+    assert_eq!(a.intersect(b), Rect::from_edges(5.0, 0.0, 10.0, 5.0));
+    assert_eq!(a.intersect(Rect::EVERYTHING), a);
+    assert_eq!(Rect::EVERYTHING.intersect(b), b);
+    let apart = a.intersect(Rect::new(20.0, 0.0, 5.0, 5.0));
+    assert!(apart.is_empty() && !apart.contains(Point::new(20.0, 1.0)));
+    let nan = Rect::from_edges(f32::NAN, 0.0, 5.0, 5.0);
+    assert!(a.intersect(nan).is_empty() && nan.intersect(a).is_empty());
+}
+
+#[test]
+fn rects_report_their_origin_and_size() {
+    let r = Rect::new(1.0, 2.0, 3.0, 4.0);
+    assert_eq!(r.origin(), Point::new(1.0, 2.0));
+    assert_eq!(r.size(), Size::new(3.0, 4.0));
+    assert_eq!(Size::ZERO, Size::new(0.0, 0.0));
 }

@@ -127,6 +127,58 @@ impl Rect {
     pub fn to_xywh(self) -> [f32; 4] {
         [self.x0, self.y0, self.width(), self.height()]
     }
+
+    /// The top-left corner.
+    pub fn origin(&self) -> Point {
+        Point::new(self.x0, self.y0)
+    }
+
+    /// Width and height.
+    pub fn size(&self) -> Size {
+        Size::new(self.width(), self.height())
+    }
+
+    /// The area both rectangles cover; empty if they do not overlap or either is empty.
+    #[must_use]
+    pub fn intersect(self, other: Self) -> Self {
+        if self.is_empty() || other.is_empty() {
+            return Self::default();
+        }
+        Self {
+            x0: self.x0.max(other.x0),
+            y0: self.y0.max(other.y0),
+            x1: self.x1.min(other.x1),
+            y1: self.y1.min(other.y1),
+        }
+    }
+
+    /// Every point: what a clip that clips nothing is.
+    pub const EVERYTHING: Self = Self {
+        x0: f32::NEG_INFINITY,
+        y0: f32::NEG_INFINITY,
+        x1: f32::INFINITY,
+        y1: f32::INFINITY,
+    };
+}
+
+/// A width and a height in pixels.
+#[repr(C)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Size {
+    /// Horizontal extent.
+    pub width: f32,
+    /// Vertical extent.
+    pub height: f32,
+}
+
+impl Size {
+    /// No extent.
+    pub const ZERO: Self = Self::new(0.0, 0.0);
+
+    /// `width` x `height`.
+    pub const fn new(width: f32, height: f32) -> Self {
+        Self { width, height }
+    }
 }
 
 /// `(a, b)` in ascending order; a NaN keeps its place instead of being dropped.

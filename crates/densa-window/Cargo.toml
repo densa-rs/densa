@@ -1,0 +1,26 @@
+[package]
+name = "densa-window"
+description = "Runs a densa interface in a native window: winit input in, one wgpu draw call per frame out"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "window", "wgpu", "winit", "ui"]
+categories = ["gui"]
+
+[dependencies]
+densa-core.workspace = true
+densa-draw.workspace = true
+densa-paragraph.workspace = true
+densa-render.workspace = true
+densa-text.workspace = true
+densa-ui.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+
+[lints]
+workspace = true

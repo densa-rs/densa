@@ -1,0 +1,25 @@
+[package]
+name = "densa-ui"
+description = "The widget layer of densa: a retained widget tree with flexbox layout, pointer and keyboard events, focus and themes, independent of any window or GPU API"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "ui", "widgets", "layout", "no-alloc"]
+categories = ["gui"]
+
+[dependencies]
+densa-core.workspace = true
+densa-draw.workspace = true
+densa-paragraph.workspace = true
+taffy.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+densa-text.workspace = true
+
+[lints]
+workspace = true

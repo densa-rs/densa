@@ -21,12 +21,15 @@ Every `densa-*` crate in `crates/` is a library; applications live in `examples/
 
 | Crate | Role |
 |---|---|
-| `densa-core` | Shared primitives (`Color`, `Point`, `Rect`); no dependencies |
+| `densa-core` | Shared primitives (`Color`, `Point`, `Rect`, `Size`); no dependencies |
 | `densa-text` | Fonts, rasterization, the glyph atlas |
 | `densa-paragraph` | Shaped paragraphs, selection, `TextEditor` (on parley) |
-| `densa-draw` | The GPU-free display list: `Canvas`, `InstanceBuffer` |
+| `densa-draw` | The GPU-free display list: `Canvas` (with clipping), `InstanceBuffer` |
+| `densa-ui` | The widget tree: layout (flexbox, via taffy), events, focus, themes |
+| `densa-widgets` | Labels, buttons, text inputs, scroll views, splitters, panels |
 | `densa-grid` | The data grid widget over a `GridSource` |
 | `densa-render` | wgpu: draws a frame's instances in one call |
+| `densa-window` | Runs a `Ui` in a winit window, drawing with `densa-render` |
 | `densa-data` | Live Arrow tables, views and grouped aggregates |
 | `densa-arrow` | Arrow tables and live views in the grid |
 | `densa-sync` | Lock-free hand-off between threads (triple buffer) |
@@ -37,16 +40,18 @@ Every `densa-*` crate in `crates/` is a library; applications live in `examples/
 
 Rules that keep it that way:
 
-- **Dependencies point down.** Apps use `densa-arrow` → `densa-grid` → `densa-draw` →
-  `densa-text` → `densa-core`; `densa-paragraph` → `densa-text`; `densa-render` →
-  `densa-draw`. Only `densa-render` depends on a GPU or window crate.
+- **Dependencies point down.** Apps use `densa-window` → `densa-widgets` → `densa-ui` →
+  `densa-draw` and `densa-paragraph` → `densa-text` → `densa-core`; `densa-arrow` →
+  `densa-grid` → `densa-draw`; `densa-render` → `densa-draw`. Only `densa-render` and
+  `densa-window` depend on a GPU or window crate, so everything below them runs, and is
+  tested, headless.
 - **No domain in the libraries.** A library crate that needs a market, a symbol or a price is
   wrong; generic APIs (`GridSource`, `Column`, `CellStyle`) let applications bring their
   domain. Domain code belongs in `examples/`.
-- **Third-party types stay inside.** Public APIs use densa's own types (wrap parley, wgpu or
-  skrifa types); Apache Arrow types are the one exception, by design.
+- **Third-party types stay inside.** Public APIs use densa's own types (wrap parley, taffy,
+  winit, wgpu or skrifa types); Apache Arrow types are the one exception, by design.
 - **Pinned dependencies:** wgpu 30, winit 0.30, parley 0.12 with skrifa 0.44 (one font parser
-  in the tree). Not used on purpose: tokio, `rand`, glyphon. Propose new dependencies in an
+  in the tree), taffy 0.15 (flexbox only). Not used on purpose: tokio, `rand`, glyphon. Propose new dependencies in an
   issue.
 
 ## What densa expects of code

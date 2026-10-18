@@ -7,4 +7,4 @@ mod color;
 mod geometry;
 
 pub use color::Color;
-pub use geometry::{Point, Rect};
+pub use geometry::{Point, Rect, Size};

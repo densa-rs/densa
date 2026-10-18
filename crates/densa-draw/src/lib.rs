@@ -11,6 +11,6 @@
 mod canvas;
 mod instance;
 
-pub use canvas::Canvas;
-pub use densa_core::{Color, Point, Rect};
+pub use canvas::{Canvas, CanvasState};
+pub use densa_core::{Color, Point, Rect, Size};
 pub use instance::{Instance, InstanceBuffer};
