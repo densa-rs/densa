@@ -17,8 +17,8 @@ use crate::{Affinity, Motion, Paragraph, TextSelection, TextSystem};
 /// [`set_composition`](Self::set_composition) (an empty preedit removes it) and the committed
 /// text to [`insert`](Self::insert); underline [`for_each_composition_rect`] and report
 /// [`ime_area`](Self::ime_area) to the window so the candidate list appears next to the text.
-/// Typing replaces an active preedit, deleting removes it, and moving the caret keeps it as
-/// ordinary text.
+/// Typing replaces an active preedit, deleting cancels it (restoring any selection it
+/// replaced), and moving the caret keeps it as ordinary text.
 ///
 /// Not yet supported: undo and redo, styled spans, a maximum length.
 ///
@@ -29,9 +29,24 @@ pub struct TextEditor {
     style: ParagraphStyle,
     paragraph: Paragraph,
     selection: TextSelection,
-    composition: Option<Range<usize>>,
+    composition: Option<Composition>,
     shows_caret: bool,
 }
+
+/// Preedit text an input method is composing.
+#[derive(Debug, Clone)]
+struct Composition {
+    /// Byte range of the preedit text.
+    range: Range<usize>,
+    /// The selected text the preedit replaced, put back if the input method cancels.
+    replaced: String,
+}
+
+/// Characters after which the caret belongs to the next line: the hard line breaks of
+/// Unicode's line breaking algorithm (UAX #14 classes BK, CR, LF and NL).
+const LINE_BREAKS: [char; 7] = [
+    '\n', '\r', '\u{0B}', '\u{0C}', '\u{85}', '\u{2028}', '\u{2029}',
+];
 
 impl TextEditor {
     /// An editor holding `text` set in `style`, with the caret at the end.
@@ -83,7 +98,7 @@ impl TextEditor {
 
     /// The byte range of the preedit text an input method is composing, if any.
     pub fn composition(&self) -> Option<Range<usize>> {
-        self.composition.clone()
+        self.composition.as_ref().map(|c| c.range.clone())
     }
 
     /// Whether to draw the caret: an input method can hide it while it composes.
@@ -112,20 +127,24 @@ impl TextEditor {
     /// # Errors
     /// [`ParagraphError::UnreadableFont`] if a font chosen for the new text cannot be read.
     pub fn insert(&mut self, system: &mut TextSystem, text: &str) -> Result<(), ParagraphError> {
-        let range = self
-            .composition
-            .clone()
-            .unwrap_or_else(|| self.selection.range());
+        let range = self.composition().unwrap_or_else(|| self.selection.range());
         let caret = range.start + text.len();
         // After a line break the caret belongs to the new line; otherwise it stays at the
         // end of the line it typed on, even where that line wraps.
-        let affinity = if text.ends_with(['\n', '\r', '\u{2028}', '\u{2029}']) {
+        let affinity = if text.ends_with(LINE_BREAKS) {
             Affinity::Downstream
         } else {
             Affinity::Upstream
         };
         self.replace(system, range, text, |p| {
-            TextSelection::caret_with(p, caret, affinity)
+            let at = TextSelection::caret_with(p, caret, affinity);
+            // A caret inside a character snaps to its start: typing a letter before a
+            // combining accent forms one character, and the caret belongs after it.
+            if at.focus() < caret {
+                at.moved(p, Motion::Next, false)
+            } else {
+                at
+            }
         })?;
         self.composition = None;
         self.shows_caret = true;
@@ -202,8 +221,8 @@ impl TextEditor {
 
     /// Shows an input method's preedit `text` in place of the selection (or of the previous
     /// preedit), with the input method's `cursor` (a byte range within `text`) selected, or
-    /// the caret hidden for `None`. An empty `text` removes the preedit and puts the caret
-    /// where it was.
+    /// the caret hidden for `None`. An empty `text` removes the preedit and restores what it
+    /// replaced: the selected text, selected again, or the caret where it was.
     ///
     /// # Errors
     /// [`ParagraphError::InvalidRange`] if `cursor` is reversed, outside `text` or splits a
@@ -221,16 +240,19 @@ impl TextEditor {
         if text.is_empty() {
             return self.cancel_composition(system);
         }
-        let range = self
-            .composition
-            .clone()
-            .unwrap_or_else(|| self.selection.range());
+        let (range, replaced) = match &self.composition {
+            Some(composition) => (composition.range.clone(), composition.replaced.clone()),
+            None => (self.selection.range(), self.selected_text().to_owned()),
+        };
         let start = range.start;
         let selected = cursor.clone().unwrap_or(0..0);
         self.replace(system, range, text, |p| {
             TextSelection::from_range(p, start + selected.start, start + selected.end)
         })?;
-        self.composition = Some(start..start + text.len());
+        self.composition = Some(Composition {
+            range: start..start + text.len(),
+            replaced,
+        });
         self.shows_caret = cursor.is_some();
         Ok(())
     }
@@ -238,7 +260,7 @@ impl TextEditor {
     /// Calls `f` with each rectangle covering the preedit text (one per line it spans),
     /// relative to the paragraph's top-left corner: draw an underline along their bottoms.
     pub fn for_each_composition_rect(&self, f: impl FnMut(Rect)) {
-        if let Some(range) = &self.composition {
+        if let Some(range) = self.composition() {
             TextSelection::from_range(&self.paragraph, range.start, range.end)
                 .for_each_rect(&self.paragraph, f);
         }
@@ -267,11 +289,13 @@ impl TextEditor {
         self.selection.moved(&self.paragraph, motion, true).range()
     }
 
-    /// Removes the preedit text, the caret where it began.
+    /// Removes the preedit text and puts back what it replaced, selected.
     fn cancel_composition(&mut self, system: &mut TextSystem) -> Result<(), ParagraphError> {
-        if let Some(range) = self.composition.clone() {
-            let caret = range.start;
-            self.replace(system, range, "", |p| TextSelection::caret_at(p, caret))?;
+        if let Some(Composition { range, replaced }) = self.composition.clone() {
+            let (start, end) = (range.start, range.start + replaced.len());
+            self.replace(system, range, &replaced, |p| {
+                TextSelection::from_range(p, start, end)
+            })?;
         }
         self.end_composition();
         Ok(())

@@ -85,6 +85,24 @@ mod inserting {
     }
 
     #[test]
+    fn every_hard_line_break_moves_the_caret_to_the_next_line() {
+        for line_break in ["\u{0B}", "\u{0C}", "\u{85}", "\u{2028}"] {
+            let (mut s, mut e) = editor_at("abcd", 2);
+            e.insert(&mut s, line_break).unwrap();
+            let affinity = e.selection().focus_affinity();
+            assert_eq!(affinity, Affinity::Downstream, "{line_break:?}");
+        }
+    }
+
+    #[test]
+    fn typing_a_letter_before_a_combining_accent_puts_the_caret_after_both() {
+        let (mut s, mut e) = editor_at("\u{0301}", 0);
+        e.insert(&mut s, "e").unwrap();
+        assert_eq!(e.text(), "e\u{0301}");
+        assert_eq!(e.selection().range(), 3..3);
+    }
+
+    #[test]
     fn a_newline_at_the_end_puts_the_caret_on_the_new_empty_line() {
         let (mut s, mut e) = editor("ab");
         e.insert(&mut s, "\n").unwrap();
@@ -310,6 +328,29 @@ mod composition {
         e.set_composition(&mut s, "hi", Some(2..2)).unwrap();
         assert_eq!(e.text(), "hi world");
         assert_eq!(e.composition(), Some(0..2));
+    }
+
+    #[test]
+    fn cancelling_a_preedit_restores_the_selection_it_replaced() {
+        let (mut s, mut e) = editor("hello world");
+        e.set_selection(TextSelection::from_range(e.paragraph(), 0, 5));
+        e.set_composition(&mut s, "hi", Some(2..2)).unwrap();
+        e.set_composition(&mut s, "h", Some(1..1)).unwrap();
+        e.set_composition(&mut s, "", None).unwrap();
+        assert_eq!(e.text(), "hello world");
+        assert_eq!(e.selection().range(), 0..5);
+    }
+
+    #[test]
+    fn committing_over_a_selection_replaces_it() {
+        // winit sends an empty preedit right before every commit.
+        let (mut s, mut e) = editor("hello world");
+        e.set_selection(TextSelection::from_range(e.paragraph(), 0, 5));
+        e.set_composition(&mut s, "hi", Some(2..2)).unwrap();
+        e.set_composition(&mut s, "", None).unwrap();
+        e.insert(&mut s, "hey").unwrap();
+        assert_eq!(e.text(), "hey world");
+        assert_eq!(e.selection().range(), 3..3);
     }
 
     #[test]

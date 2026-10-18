@@ -1,6 +1,6 @@
 [package]
 name = "densa-arrow"
-description = "Apache Arrow tables in densa's GPU data grid: typed, allocation-free cell formatting"
+description = "Apache Arrow tables in densa's data grid: typed, allocation-free cell formatting"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -13,12 +13,15 @@ categories = ["gui", "visualization"]
 
 [dependencies]
 arrow-array.workspace = true
+arrow-buffer.workspace = true
 arrow-schema.workspace = true
 densa-fmt.workspace = true
-densa-render.workspace = true
+densa-grid.workspace = true
 
 [dev-dependencies]
 densa-alloc.workspace = true
+densa-draw.workspace = true
+densa-render.workspace = true
 densa-text.workspace = true
 pollster.workspace = true
 wgpu.workspace = true

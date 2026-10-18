@@ -11,7 +11,7 @@ use arrow_array::{
 };
 use arrow_schema::{DataType, Field, Schema};
 use densa_arrow::{ArrowTable, CellState, TableError};
-use densa_render::{Align, CellText, GridSource, Palette};
+use densa_grid::{Align, CellText, GridSource, Palette};
 
 fn batch(columns: Vec<(&str, ArrayRef)>) -> RecordBatch {
     RecordBatch::try_from_iter(columns).unwrap()
@@ -152,6 +152,54 @@ mod values {
     }
 
     #[test]
+    fn values_a_cell_cannot_show_become_a_hash_never_a_partial_value() {
+        let floats: ArrayRef = Arc::new(Float64Array::from(vec![1e300, f64::NAN, f64::INFINITY]));
+        let mut table = ArrowTable::from_batches([batch(vec![("c", floats)])]).unwrap();
+        let mut text = CellText::new();
+        assert_eq!(table.write_cell(0, 0, &mut text), CellState::Invalid);
+        assert_eq!(text.as_str(), "#");
+
+        table.set_decimals(0, Some(2)).unwrap();
+        text.clear();
+        assert_eq!(table.write_cell(1, 0, &mut text), CellState::Value);
+        assert_eq!(text.as_str(), "NaN");
+        text.clear();
+        table.write_cell(2, 0, &mut text);
+        assert_eq!(text.as_str(), "inf");
+    }
+
+    #[test]
+    fn a_time_of_day_outside_a_day_is_invalid() {
+        let time = arrow_array::Time32SecondArray::from(vec![-1, 86_400]);
+        assert_eq!(texts(Arc::new(time)), ["#", "#"]);
+    }
+
+    #[test]
+    fn zero_with_a_negative_decimal_scale_is_plain_zero() {
+        let array = Decimal128Array::from(vec![0])
+            .with_precision_and_scale(10, -3)
+            .unwrap();
+        assert_eq!(texts(Arc::new(array)), ["0"]);
+    }
+
+    #[test]
+    fn years_before_year_zero_keep_four_digits_after_the_sign() {
+        let date = Date32Array::from(vec![-719_529]); // the day before 0000-01-01
+        assert_eq!(texts(Arc::new(date)), ["-0001-12-31"]);
+    }
+
+    #[test]
+    fn a_null_typed_column_shows_null() {
+        let table = ArrowTable::from_batches([batch(vec![(
+            "c",
+            Arc::new(arrow_array::NullArray::new(2)) as ArrayRef,
+        )])])
+        .unwrap();
+        let mut text = CellText::new();
+        assert_eq!(table.write_cell(1, 0, &mut text), CellState::Null);
+    }
+
+    #[test]
     fn unsupported_types_print_a_marker() {
         let list = arrow_array::ListArray::from_iter_primitive::<arrow_array::types::Int32Type, _, _>(
             vec![Some(vec![Some(1)])],
@@ -234,6 +282,32 @@ mod tables {
             })
         );
         assert_eq!(table.rows(), 1);
+    }
+
+    #[test]
+    fn a_width_set_before_the_first_rows_is_kept() {
+        let mut table = ArrowTable::new(ints(vec![]).schema());
+        table.set_column_chars(0, 12).unwrap();
+        table.push(ints(vec![1])).unwrap();
+        assert_eq!(table.columns()[0].chars, 12);
+    }
+
+    #[test]
+    fn widths_are_clamped_to_what_a_cell_can_hold() {
+        let mut table = ArrowTable::from_batches([ints(vec![1])]).unwrap();
+        table.set_column_chars(0, usize::MAX).unwrap();
+        assert_eq!(table.columns()[0].chars as usize, densa_grid::CELL_BYTES);
+        table.set_column_chars(0, 0).unwrap();
+        assert_eq!(table.columns()[0].chars, 1);
+    }
+
+    #[test]
+    fn a_view_scrolled_past_any_row_shows_nothing_without_overflowing() {
+        let table = ArrowTable::from_batches([ints(vec![1])]).unwrap();
+        let view = table.view(usize::MAX, &Palette::new());
+        let mut text = CellText::new();
+        view.cell(5, 0, &mut text);
+        assert!(text.is_empty());
     }
 
     #[test]

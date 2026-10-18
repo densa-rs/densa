@@ -1,9 +1,7 @@
 //! Generic grid painting: layout from font metrics, alignment, overflow, styles, capacity.
 
-use densa_render::{
-    Align, Canvas, CellStyle, CellText, Color, Column, GridPainter, GridSource, Instance,
-    InstanceBuffer, Palette,
-};
+use densa_draw::{Canvas, Instance, InstanceBuffer};
+use densa_grid::{Align, CellStyle, CellText, Color, Column, GridPainter, GridSource, Palette};
 use densa_text::{AtlasConfig, Font, GlyphCache};
 
 const PX: f32 = 14.0;

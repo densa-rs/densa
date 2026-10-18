@@ -3,7 +3,7 @@
 //! [`TextSystem`] (fonts plus layout scratch space, one per application) turns text and a
 //! [`ParagraphStyle`], with optional [`Span`]s, into a [`Paragraph`]: shaped by parley,
 //! broken into lines at a maximum width and aligned. A paragraph hands its glyphs out as
-//! `densa_text::GlyphRun`s, which a renderer draws (densa-render's `Canvas::draw_run`), so
+//! `densa_text::GlyphRun`s, which a renderer draws (densa-draw's `Canvas::draw_run`), so
 //! layout and rendering stay independent of each other.
 //!
 //! [`TextSelection`] adds what editing needs on top: hit-testing a point to a text position,

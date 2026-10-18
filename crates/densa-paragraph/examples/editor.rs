@@ -9,8 +9,10 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::{Color, Palette, Point, Rect};
 use densa_paragraph::{Motion, ParagraphStyle, TextEditor, TextSelection, TextSystem};
-use densa_render::{Canvas, Color, GpuGrid, InstanceBuffer, Palette, Point, Rect};
+use densa_render::GpuRenderer;
 use densa_text::{AtlasConfig, GlyphCache};
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -123,7 +125,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     view_format: wgpu::TextureFormat,
-    gpu: GpuGrid,
+    gpu: GpuRenderer,
     cache: GlyphCache,
     instances: InstanceBuffer,
     system: TextSystem,
@@ -167,8 +169,8 @@ impl State {
         surface.configure(&device, &config);
 
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
-        cache.limit_side(GpuGrid::max_atlas_side(&device))?;
-        let gpu = GpuGrid::new(&device, view_format, MAX_INSTANCES);
+        cache.limit_side(GpuRenderer::max_atlas_side(&device))?;
+        let gpu = GpuRenderer::new(&device, view_format, MAX_INSTANCES);
         let mut system = TextSystem::new()?;
         let style = ParagraphStyle::new(16.0)
             .with_color(Color::srgb(0xC9D1D9))

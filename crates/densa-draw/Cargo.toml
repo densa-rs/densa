@@ -1,0 +1,22 @@
+[package]
+name = "densa-draw"
+description = "GPU-independent display list for densa: a Canvas that batches rectangles and glyphs into instances"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "graphics", "canvas", "text", "no-alloc"]
+categories = ["gui", "graphics"]
+
+[dependencies]
+bytemuck = { workspace = true, features = ["derive"] }
+densa-core.workspace = true
+densa-text.workspace = true
+
+[dev-dependencies]
+
+[lints]
+workspace = true

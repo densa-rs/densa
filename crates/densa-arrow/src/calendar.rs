@@ -2,12 +2,13 @@
 
 use std::fmt::Write as _;
 
-use densa_render::CellText;
+use densa_grid::CellText;
 
 pub(crate) const SECONDS_PER_DAY: i64 = 86_400;
 
 /// Year, month (1-12) and day (1-31) of `days` since 1970-01-01, proleptic Gregorian
-/// (Howard Hinnant's `civil_from_days`, exact for every `i64` day count this crate sees).
+/// (Howard Hinnant's `civil_from_days`). Exact for any `days` within a few hundred billion
+/// years of the epoch, which covers every Arrow date and timestamp.
 pub(crate) fn civil_from_days(days: i64) -> (i64, u32, u32) {
     let z = days + 719_468;
     let era = z.div_euclid(146_097);
@@ -27,10 +28,13 @@ pub(crate) fn civil_from_days(days: i64) -> (i64, u32, u32) {
     (year, month, day)
 }
 
-/// `YYYY-MM-DD` for `days` since the epoch.
+/// `YYYY-MM-DD` for `days` since the epoch. Years before year 0 take a minus sign and keep
+/// four digits, as ISO 8601 writes them (`-0001`).
 pub(crate) fn write_date(text: &mut CellText, days: i64) -> std::fmt::Result {
     let (year, month, day) = civil_from_days(days);
-    write!(text, "{year:04}-{month:02}-{day:02}")
+    let sign = if year < 0 { "-" } else { "" };
+    let digits = year.unsigned_abs();
+    write!(text, "{sign}{digits:04}-{month:02}-{day:02}")
 }
 
 /// `HH:MM:SS` for `seconds` since midnight (`0..86_400`), then `.` and `fraction` padded to

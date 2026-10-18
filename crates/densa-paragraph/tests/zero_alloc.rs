@@ -1,10 +1,10 @@
 //! Proves drawing a laid-out paragraph every frame never touches the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
+use densa_draw::{Canvas, InstanceBuffer};
 use densa_paragraph::{
     Color, Motion, ParagraphStyle, Point, Span, TextEditor, TextSelection, TextSystem,
 };
-use densa_render::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
 use std::hint::black_box;
 

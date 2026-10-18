@@ -1,11 +1,9 @@
 //! Proves painting warm frames never touches the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
+use densa_draw::{Canvas, InstanceBuffer};
 use densa_fmt::write_fixed;
-use densa_render::{
-    Align, Canvas, CellStyle, CellText, Color, Column, GridPainter, GridSource, InstanceBuffer,
-    Palette,
-};
+use densa_grid::{Align, CellStyle, CellText, Color, Column, GridPainter, GridSource, Palette};
 use densa_text::{AtlasConfig, Font, GlyphCache};
 use std::hint::black_box;
 

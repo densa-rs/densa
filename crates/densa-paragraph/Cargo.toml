@@ -23,6 +23,8 @@ rustc-hash.workspace = true
 
 [dev-dependencies]
 densa-alloc.workspace = true
+densa-draw.workspace = true
+densa-grid.workspace = true
 densa-render.workspace = true
 pollster.workspace = true
 winit.workspace = true

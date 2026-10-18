@@ -1,6 +1,6 @@
 //! Instance layout and the fixed-capacity buffer.
 
-use densa_render::{Color, Instance, InstanceBuffer};
+use densa_draw::{Color, Instance, InstanceBuffer};
 
 #[test]
 fn instance_layout_matches_the_shader() {

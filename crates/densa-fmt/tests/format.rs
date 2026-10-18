@@ -168,3 +168,15 @@ fn errors_have_readable_messages() {
     );
     assert_eq!(FmtError::NotFinite.to_string(), "value is NaN or infinite");
 }
+
+#[test]
+fn truncate_shortens_on_character_boundaries_only() {
+    let mut buf = FmtBuf::<16>::new();
+    buf.push_str("aé!").unwrap(); // 'é' is bytes 1..3
+    buf.truncate(2);
+    assert_eq!(buf.as_str(), "aé!", "inside a character: unchanged");
+    buf.truncate(10);
+    assert_eq!(buf.as_str(), "aé!", "longer than the text: unchanged");
+    buf.truncate(3);
+    assert_eq!(buf.as_str(), "aé");
+}

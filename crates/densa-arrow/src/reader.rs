@@ -13,9 +13,10 @@ use arrow_array::types::{
     TimestampSecondType, UInt16Type, UInt32Type, UInt64Type, UInt8Type,
 };
 use arrow_array::{Array, ArrayRef, OffsetSizeTrait};
+use arrow_buffer::NullBuffer;
 use arrow_schema::{DataType, TimeUnit};
 use densa_fmt::write_fixed;
-use densa_render::CellText;
+use densa_grid::CellText;
 
 use crate::calendar::{write_date, write_time, write_timestamp, SECONDS_PER_DAY};
 
@@ -26,18 +27,24 @@ pub(crate) struct Format {
     pub(crate) decimals: Option<usize>,
     /// Text longer than this many characters is cut, ending in `…`.
     pub(crate) max_chars: usize,
+    /// Whether `max_chars` was set by the application, so the first rows must not resize it.
+    pub(crate) width_set: bool,
 }
 
-/// Formats the value at a row; `false` if the type has no formatter or the text is too long
-/// for a cell.
+/// Formats the value at a row; `false` if the type has no formatter, the value is invalid or
+/// the text is too long for a cell (what was written is then partial).
 type WriteFn = fn(&Reader, usize, &mut CellText, &Format) -> bool;
 
 /// Reads one dictionary key as an index into the dictionary's values.
 type KeyFn = fn(&dyn Array, usize) -> Option<usize>;
 
 /// A column of one batch, ready to format.
+#[derive(Clone)]
 pub(crate) struct Reader {
     array: ArrayRef,
+    /// Logical nulls, computed once: they include null dictionary values and the nulls of
+    /// types without a validity buffer (`Null`, run-end encoded, unions).
+    nulls: Option<NullBuffer>,
     write: WriteFn,
     /// For a dictionary column: how to read a key, and the values' own reader.
     dictionary: Option<(KeyFn, Box<Reader>)>,
@@ -68,6 +75,7 @@ impl Reader {
             writer(array.data_type())
         };
         Self {
+            nulls: array.logical_nulls(),
             array,
             write: write.unwrap_or(write_unsupported),
             supported: write.is_some(),
@@ -86,13 +94,7 @@ impl Reader {
 
     /// Whether the value at `row` is null (for a dictionary: its key or its value).
     pub(crate) fn is_null(&self, row: usize) -> bool {
-        if self.array.is_null(row) {
-            return true;
-        }
-        match &self.dictionary {
-            Some((key, values)) => key(&*self.array, row).is_none_or(|k| values.is_null(k)),
-            None => false,
-        }
+        self.nulls.as_ref().is_some_and(|nulls| nulls.is_null(row))
     }
 
     /// Appends the value at `row` to `text`; `false` if it could not be formatted.
@@ -188,10 +190,12 @@ where
         return false;
     };
     let value = array.value(row);
+    // Lossless: f16 and f32 widen exactly to f64.
+    let wide: f64 = value.into();
     match format.decimals {
-        // Lossless: f16 and f32 widen exactly to f64.
-        Some(decimals) => write_fixed(text, value.into(), decimals).is_ok(),
-        None => write!(text, "{value}").is_ok(),
+        Some(decimals) if wide.is_finite() => write_fixed(text, wide, decimals).is_ok(),
+        // NaN and infinities print as `NaN`, `inf` and `-inf` whatever the decimals.
+        _ => write!(text, "{value}").is_ok(),
     }
 }
 
@@ -224,8 +228,13 @@ fn write_decimal_whole(reader: &Reader, row: usize, text: &mut CellText, _: &For
     let Some(array) = reader.array.as_primitive_opt::<Decimal128Type>() else {
         return false;
     };
-    let zeros = usize::from(array.scale().unsigned_abs());
-    write!(text, "{}{:0>zeros$}", array.value(row), "").is_ok()
+    let value = array.value(row);
+    let zeros = if value == 0 {
+        0
+    } else {
+        usize::from(array.scale().unsigned_abs())
+    };
+    write!(text, "{value}{:0>zeros$}", "").is_ok()
 }
 
 fn write_string<O: OffsetSizeTrait>(
@@ -251,7 +260,7 @@ fn write_string_view(reader: &Reader, row: usize, text: &mut CellText, format: &
 /// followed by `…`.
 fn write_cut(text: &mut CellText, value: &str, max_chars: usize) -> bool {
     const ELLIPSIS: &str = "…";
-    let room = densa_render::CELL_BYTES - text.len();
+    let room = densa_grid::CELL_BYTES - text.len();
     if value.len() <= room && value.chars().count() <= max_chars {
         return text.push_str(value).is_ok();
     }
@@ -340,7 +349,8 @@ where
     };
     let value: i64 = array.value(row).into();
     let (seconds, fraction) = (value.div_euclid(PER_SECOND), value.rem_euclid(PER_SECOND));
-    write_time(text, seconds, fraction, DIGITS).is_ok()
+    // A time of day outside one day is invalid data: no clock time to show.
+    (0..SECONDS_PER_DAY).contains(&seconds) && write_time(text, seconds, fraction, DIGITS).is_ok()
 }
 
 /// A duration with its unit: `s`, `ms`, `us` or `ns` for `UNIT` 0 to 3.

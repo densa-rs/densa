@@ -1,6 +1,6 @@
 [package]
 name = "densa-render"
-description = "wgpu renderer for densa: a Canvas for every painter, one instanced draw call and a generic data grid"
+description = "wgpu renderer for densa: draws a frame's instances in one instanced draw call, with a growing glyph atlas"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,18 +8,18 @@ homepage.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 readme.workspace = true
-keywords = ["wgpu", "gpu", "grid", "renderer", "gui"]
+keywords = ["wgpu", "gpu", "renderer", "gui", "graphics"]
 categories = ["gui", "rendering", "graphics"]
 
 [dependencies]
-densa-core.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }
-densa-fmt.workspace = true
+densa-core.workspace = true
+densa-draw.workspace = true
 densa-text.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
-densa-alloc.workspace = true
+densa-grid.workspace = true
 pollster.workspace = true
 
 [lints]

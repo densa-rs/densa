@@ -1,7 +1,9 @@
-use crate::{Align, Canvas, Column, GridLayout, Palette};
 use densa_core::{Color, Point, Rect};
+use densa_draw::Canvas;
 use densa_fmt::FmtBuf;
 use densa_text::{Font, GlyphCache, GlyphMap, SUBPIXEL_STEPS};
+
+use crate::{Align, Column, GridLayout, Palette};
 
 /// Bytes a cell's text may take. [`FmtBuf`] appends are all-or-nothing, so a write that
 /// does not fit leaves the cell as it was (blank if nothing was written yet), not truncated.

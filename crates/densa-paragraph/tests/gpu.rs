@@ -3,8 +3,9 @@
 //! Needs a GPU adapter. Set `DENSA_SKIP_GPU_TESTS=1` on machines without one; otherwise a
 //! missing adapter is a failure, not a silent pass.
 
+use densa_draw::{Canvas, InstanceBuffer};
 use densa_paragraph::{Color, Paragraph, ParagraphStyle, Point, TextAlign, TextSystem};
-use densa_render::{Canvas, GpuGrid, InstanceBuffer};
+use densa_render::GpuRenderer;
 use densa_text::{AtlasConfig, GlyphCache};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -40,7 +41,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, paragraph: &Paragraph) -> 
         canvas.draw_run(run, ORIGIN);
     }
 
-    let mut grid = GpuGrid::new(device, FORMAT, instances.capacity().max(1));
+    let mut grid = GpuRenderer::new(device, FORMAT, instances.capacity().max(1));
     grid.apply_atlas_updates(device, queue, cache.drain_updates())
         .unwrap();
     let target = device.create_texture(&wgpu::TextureDescriptor {

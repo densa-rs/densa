@@ -14,7 +14,9 @@ use arrow_array::{
     RecordBatch, StringArray, TimestampMillisecondArray,
 };
 use densa_arrow::ArrowTable;
-use densa_render::{Canvas, GpuGrid, GridPainter, InstanceBuffer, Palette};
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::{GridPainter, Palette};
+use densa_render::GpuRenderer;
 use densa_text::{AtlasConfig, Font, GlyphCache};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -171,7 +173,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     view_format: wgpu::TextureFormat,
-    gpu: GpuGrid,
+    gpu: GpuRenderer,
     cache: GlyphCache,
     instances: InstanceBuffer,
     painter: GridPainter,
@@ -219,11 +221,11 @@ impl State {
         }
         surface.configure(&device, &config);
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
-        cache.limit_side(GpuGrid::max_atlas_side(&device))?;
+        cache.limit_side(GpuRenderer::max_atlas_side(&device))?;
         Ok(Self {
             window,
             surface,
-            gpu: GpuGrid::new(&device, view_format, MAX_INSTANCES),
+            gpu: GpuRenderer::new(&device, view_format, MAX_INSTANCES),
             device,
             queue,
             config,

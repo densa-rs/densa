@@ -3,7 +3,7 @@ use densa_core::Color;
 /// Grid colors (dark theme). Built once at startup.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
-    /// Window background (what `GpuGrid::render` clears to).
+    /// Window background (what `GpuRenderer::render` clears to).
     pub background: Color,
     /// Header row bar.
     pub header_background: Color,

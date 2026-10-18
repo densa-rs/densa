@@ -1,29 +1,13 @@
-//! wgpu renderer for dense data grids.
+//! wgpu renderer for densa.
 //!
-//! Domain-agnostic: an app describes its columns and implements [`GridSource`]; the
-//! renderer does layout, text and drawing. Split into a GPU-free half and a thin GPU half
-//! so most logic is testable without a GPU:
-//!
-//! - [`GridPainter`] turns a [`GridSource`] into [`Instance`]s: layout from font metrics,
-//!   alignment, overflow, cell styles and glyphs from a cached atlas (`densa_text`).
-//!   Allocation-free per frame once the frame's glyphs are cached.
-//! - [`GpuGrid`] keeps the glyph atlas texture in sync with the painter's updates and draws
-//!   every instance with one instanced draw call: each quad is either a solid rectangle or
-//!   a glyph sampled from the atlas.
+//! [`GpuRenderer`] draws a frame's `densa_draw::Instance`s, as built by a `Canvas` from any
+//! painter (grids, paragraphs, your own), with one instanced draw call: each quad is a solid
+//! rectangle or a glyph sampled from the atlas. It keeps the atlas texture in step with the
+//! glyph cache's updates, growing it on the GPU as the cache grows.
 
 mod atlas;
-mod canvas;
-mod color;
 mod gpu;
-mod grid;
-mod instance;
-mod layout;
 
 pub use atlas::AtlasError;
-pub use canvas::Canvas;
-pub use color::Palette;
-pub use densa_core::{Color, Point, Rect};
-pub use gpu::GpuGrid;
-pub use grid::{CellStyle, CellText, GridPainter, GridSource, CELL_BYTES};
-pub use instance::{Instance, InstanceBuffer};
-pub use layout::{Align, Column, GridLayout};
+pub use densa_core::Color;
+pub use gpu::GpuRenderer;

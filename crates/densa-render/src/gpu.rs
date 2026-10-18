@@ -1,7 +1,7 @@
 use crate::atlas::{AtlasError, GpuAtlas};
-use crate::Instance;
 use bytemuck::{Pod, Zeroable};
 use densa_core::Color;
+use densa_draw::Instance;
 use densa_text::AtlasUpdate;
 use std::mem::size_of;
 
@@ -14,11 +14,11 @@ struct Globals {
 
 /// GPU resources for drawing a frame of [`Instance`]s in one draw call.
 ///
-/// Everything is created up front; per frame only [`GpuGrid::apply_atlas_updates`] (work
-/// only when new glyphs appeared), [`GpuGrid::prepare`] (two buffer writes) and
-/// [`GpuGrid::render`] (one pass, one draw) run.
+/// Everything is created up front; per frame only [`GpuRenderer::apply_atlas_updates`] (work
+/// only when new glyphs appeared), [`GpuRenderer::prepare`] (two buffer writes) and
+/// [`GpuRenderer::render`] (one pass, one draw) run.
 #[derive(Debug)]
-pub struct GpuGrid {
+pub struct GpuRenderer {
     pipeline: wgpu::RenderPipeline,
     bind_group_layout: wgpu::BindGroupLayout,
     bind_group: wgpu::BindGroup,
@@ -33,9 +33,9 @@ pub struct GpuGrid {
     capacity: usize,
 }
 
-impl GpuGrid {
-    /// A grid drawing up to `capacity` instances. Its glyph atlas starts empty and follows
-    /// the glyph cache through [`GpuGrid::apply_atlas_updates`].
+impl GpuRenderer {
+    /// A renderer drawing up to `capacity` instances. Its glyph atlas starts empty and follows
+    /// the glyph cache through [`GpuRenderer::apply_atlas_updates`].
     ///
     /// `format` must match the color target `render` will draw into; use an sRGB format
     /// (or an sRGB view of the surface) so linear shader colors display correctly.
@@ -78,19 +78,19 @@ impl GpuGrid {
         }
     }
 
-    /// Instances the GPU buffer holds; more are clipped by [`GpuGrid::prepare`].
+    /// Instances the GPU buffer holds; more are clipped by [`GpuRenderer::prepare`].
     pub fn capacity(&self) -> usize {
         self.capacity
     }
 
     /// The largest atlas side `device` supports; pass it to
-    /// `GridPainter::limit_atlas_side` so the cache never outgrows the device.
+    /// `GlyphCache::limit_side` so the cache never outgrows the device.
     pub fn max_atlas_side(device: &wgpu::Device) -> u32 {
         device.limits().max_texture_dimension_2d
     }
 
     /// The atlas failure latched by [`apply_atlas_updates`](Self::apply_atlas_updates), if
-    /// any: then the grid draws nothing until it is recreated.
+    /// any: then the renderer draws nothing until it is recreated.
     pub fn atlas_error(&self) -> Option<AtlasError> {
         self.failed
     }
@@ -100,7 +100,7 @@ impl GpuGrid {
         self.atlas.size()
     }
 
-    /// Applies the glyph cache's atlas changes in order (`GridPainter::drain_updates`):
+    /// Applies the glyph cache's atlas changes in order (`GlyphCache::drain_updates`):
     /// grows the texture, keeping its texels, and copies new glyphs in. Returns how many
     /// glyph writes were applied.
     ///
@@ -108,7 +108,7 @@ impl GpuGrid {
     /// [`AtlasError`] if the texture can no longer mirror the cache (too large for the device,
     /// or a malformed update). The error is latched: later updates are not applied, every
     /// later call returns it, and [`prepare`](Self::prepare) draws nothing, since glyphs
-    /// would sample the wrong texels. Recreate the grid and its painter's cache to recover.
+    /// would sample the wrong texels. Recreate the renderer and the glyph cache to recover.
     pub fn apply_atlas_updates(
         &mut self,
         device: &wgpu::Device,
@@ -168,7 +168,7 @@ impl GpuGrid {
             a: f64::from(clear.a),
         };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("densa grid"),
+            label: Some("densa instances"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                 view: target,
                 depth_slice: None,
@@ -262,7 +262,7 @@ fn pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-        label: Some("densa grid shader"),
+        label: Some("densa shader"),
         source: wgpu::ShaderSource::Wgsl(include_str!("shader.wgsl").into()),
     });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -273,7 +273,7 @@ fn pipeline(
     const ATTRIBUTES: [wgpu::VertexAttribute; 3] =
         wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4];
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("densa grid pipeline"),
+        label: Some("densa pipeline"),
         layout: Some(&pipeline_layout),
         vertex: wgpu::VertexState {
             module: &shader,

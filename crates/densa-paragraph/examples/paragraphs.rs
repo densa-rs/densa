@@ -10,10 +10,12 @@ use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::{Color, Palette, Point};
 use densa_paragraph::{
     Motion, Paragraph, ParagraphStyle, Span, TextAlign, TextSelection, TextSystem,
 };
-use densa_render::{Canvas, Color, GpuGrid, InstanceBuffer, Palette, Point};
+use densa_render::GpuRenderer;
 use densa_text::{AtlasConfig, GlyphCache};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -132,7 +134,7 @@ struct State {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     view_format: wgpu::TextureFormat,
-    gpu: GpuGrid,
+    gpu: GpuRenderer,
     cache: GlyphCache,
     instances: InstanceBuffer,
     paragraphs: Vec<Paragraph>,
@@ -176,8 +178,8 @@ impl State {
         surface.configure(&device, &config);
 
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
-        cache.limit_side(GpuGrid::max_atlas_side(&device))?;
-        let gpu = GpuGrid::new(&device, view_format, MAX_INSTANCES);
+        cache.limit_side(GpuRenderer::max_atlas_side(&device))?;
+        let gpu = GpuRenderer::new(&device, view_format, MAX_INSTANCES);
         let paragraphs = build_paragraphs(text_width(size.width))?;
         let selection = preselect.then(|| {
             let intro = &paragraphs[1];

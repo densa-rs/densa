@@ -73,6 +73,14 @@ impl<const N: usize> FmtBuf<N> {
             .expect("FmtBuf only ever appends whole `str` values, so it is valid UTF-8")
     }
 
+    /// Shortens the text to its first `len` bytes, for example to undo a partial write.
+    /// Does nothing if `len` is not shorter than the text or would split a character.
+    pub fn truncate(&mut self, len: usize) {
+        if len < self.len && self.as_str().is_char_boundary(len) {
+            self.len = len;
+        }
+    }
+
     /// Appends `s` entirely, or nothing at all if it does not fit.
     pub fn push_str(&mut self, s: &str) -> Result<(), FmtError> {
         let end = self.len + s.len();

@@ -7,7 +7,7 @@ use densa_text::{quantize_x, Font, GlyphCache, GlyphId, GlyphRun};
 /// [`Canvas::begin`] starts the frame on both the instance list and the glyph cache, so the
 /// cache's "used this frame" protection spans every painter of the frame: a glyph drawn by
 /// one painter cannot be evicted by the next. One glyph cache serves every painter of a
-/// frame loop and its updates feed one GPU atlas (`GpuGrid::apply_atlas_updates`).
+/// frame loop and its updates feed one GPU atlas (`densa_render::GpuRenderer`).
 ///
 /// Allocation-free once the frame's glyphs are cached.
 #[derive(Debug)]

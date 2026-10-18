@@ -2,7 +2,7 @@ use std::fmt;
 
 use arrow_array::RecordBatch;
 use arrow_schema::SchemaRef;
-use densa_render::{Align, CellStyle, CellText, Color, Column, GridSource, Palette};
+use densa_grid::{Align, CellStyle, CellText, Color, Column, GridSource, Palette, CELL_BYTES};
 
 use crate::reader::{is_numeric, Format, Reader};
 
@@ -23,6 +23,9 @@ pub enum CellState {
     Null,
     /// `?`, for a type this crate does not format (lists, structs, maps, ...).
     Unsupported,
+    /// `#`, for a value that cannot be shown: longer than a cell holds (as `1e300` without
+    /// fixed decimals), or invalid (a decimal scale beyond 38, a time of day outside a day).
+    Invalid,
     /// Nothing: the row or column does not exist.
     OutOfRange,
 }
@@ -76,7 +79,10 @@ impl std::error::Error for TableError {}
 /// `Utf8View`), dictionaries of those, dates, times, timestamps (with a time zone: in UTC,
 /// marked `Z`) and durations. Other types (lists, structs, maps, binary, intervals) show
 /// `?`.
-#[derive(Debug)]
+///
+/// A batch is accepted when its columns have the table's data types in order; field names,
+/// nullability and metadata may differ. A timestamp's time zone is part of its data type.
+#[derive(Debug, Clone)]
 pub struct ArrowTable {
     schema: SchemaRef,
     /// Each non-empty batch's columns.
@@ -99,6 +105,7 @@ impl ArrowTable {
             .map(|field| Format {
                 decimals: None,
                 max_chars: field.name().chars().count().max(DEFAULT_CHARS),
+                width_set: false,
             })
             .collect();
         Self {
@@ -128,7 +135,8 @@ impl ArrowTable {
     }
 
     /// Appends `batch`'s rows. The first rows to arrive size the columns (their titles and
-    /// up to the first 1,000 values, at most 40 characters).
+    /// up to the first 1,000 values, at most 40 characters), except columns sized with
+    /// [`set_column_chars`](Self::set_column_chars).
     ///
     /// # Errors
     /// A column error if `batch` has other columns or data types; the table is unchanged.
@@ -169,8 +177,8 @@ impl ArrowTable {
                 } else {
                     Align::Left
                 };
-                // Lossless: widths are at most a few hundred characters.
-                Column::new(field.name().clone(), format.max_chars as u32, align)
+                let chars = u32::try_from(format.max_chars).unwrap_or(u32::MAX);
+                Column::new(field.name().clone(), chars, align)
             })
             .collect()
     }
@@ -189,17 +197,21 @@ impl ArrowTable {
         Ok(())
     }
 
-    /// Sets `column` to `chars` characters wide: [`columns`](Self::columns) reports it, and
-    /// longer text is cut to fit, ending in `…`.
+    /// Sets `column` to `chars` characters wide (1 to [`CELL_BYTES`], the most a cell can
+    /// hold): [`columns`](Self::columns) reports it, longer text is cut to fit ending in
+    /// `…`, and the first rows to arrive no longer size it.
     ///
     /// # Errors
     /// [`TableError::NoSuchColumn`] if there is no such column.
     pub fn set_column_chars(&mut self, column: usize, chars: usize) -> Result<(), TableError> {
-        self.format_mut(column)?.max_chars = chars.max(1);
+        let format = self.format_mut(column)?;
+        format.max_chars = chars.clamp(1, CELL_BYTES);
+        format.width_set = true;
         Ok(())
     }
 
-    /// Writes the value at `row` of `column` into `text`. Never allocates.
+    /// Appends the value at `row` of `column` to `text`, or a placeholder (see
+    /// [`CellState`]), never a partial value. Never allocates.
     pub fn write_cell(&self, row: usize, column: usize, text: &mut CellText) -> CellState {
         let (Some(reader), Some(format)) = (self.reader(row, column), self.formats.get(column))
         else {
@@ -215,8 +227,14 @@ impl ArrowTable {
             reader.write(local, text, format);
             return CellState::Unsupported;
         }
-        reader.write(local, text, format);
-        CellState::Value
+        let mark = text.len();
+        if reader.write(local, text, format) {
+            return CellState::Value;
+        }
+        text.truncate(mark);
+        // A cell always has room for one byte.
+        let _ = text.push_str("#");
+        CellState::Invalid
     }
 
     /// A [`GridSource`] showing the table from `first_row` (scrolled), in `palette`'s
@@ -257,9 +275,12 @@ impl ArrowTable {
             .zip(&mut self.formats)
             .zip(self.schema.fields().iter())
         {
+            if format.width_set {
+                continue;
+            }
             let sampling = Format {
-                decimals: format.decimals,
                 max_chars: MAX_SAMPLED_CHARS,
+                ..*format
             };
             let mut widest = field.name().chars().count();
             for row in 0..rows.min(SAMPLE_ROWS) {
@@ -307,7 +328,9 @@ impl GridSource for ArrowGrid<'_> {
     }
 
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
-        let state = self.table.write_cell(self.first_row + row, column, text);
+        let state = self
+            .table
+            .write_cell(self.first_row.saturating_add(row), column, text);
         let color = if state == CellState::Value {
             self.text
         } else {

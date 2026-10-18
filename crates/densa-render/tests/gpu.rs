@@ -4,10 +4,9 @@
 //! Needs a GPU adapter. Set `DENSA_SKIP_GPU_TESTS=1` on machines without one; otherwise a
 //! missing adapter is a failure, not a silent pass.
 
-use densa_render::{
-    Align, AtlasError, Canvas, CellStyle, CellText, Color, Column, GpuGrid, GridPainter,
-    GridSource, Instance, InstanceBuffer, Palette,
-};
+use densa_draw::{Canvas, Instance, InstanceBuffer};
+use densa_grid::{Align, CellStyle, CellText, Color, Column, GridPainter, GridSource, Palette};
+use densa_render::{AtlasError, GpuRenderer};
 use densa_text::{AtlasConfig, AtlasUpdate, Font, GlyphCache, GlyphUpload};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
@@ -70,7 +69,7 @@ impl Pixels {
 fn render_with(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    grid: &GpuGrid,
+    grid: &GpuRenderer,
     size: (u32, u32),
     instances: &[Instance],
 ) -> Pixels {
@@ -130,7 +129,7 @@ fn render_with(
 
 /// Draws `instances` into a `W` x `H` target with a fresh grid and an empty atlas.
 fn render(device: &wgpu::Device, queue: &wgpu::Queue, instances: &[Instance]) -> Pixels {
-    let grid = GpuGrid::new(device, FORMAT, 64);
+    let grid = GpuRenderer::new(device, FORMAT, 64);
     render_with(device, queue, &grid, (W, H), instances)
 }
 
@@ -189,7 +188,7 @@ fn written_coverage_is_sampled_texel_for_pixel() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     let written = grid
         .apply_atlas_updates(&device, &queue, [resize(ATLAS, ATLAS), block(8, 4, 4, 2)])
         .unwrap();
@@ -213,7 +212,7 @@ fn growing_the_atlas_keeps_existing_texels_in_place() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     grid.apply_atlas_updates(&device, &queue, [resize(ATLAS, ATLAS), block(8, 4, 4, 2)])
         .unwrap();
     grid.apply_atlas_updates(
@@ -241,7 +240,7 @@ fn smaller_resizes_keep_the_texture_and_its_texels() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     grid.apply_atlas_updates(
         &device,
         &queue,
@@ -268,7 +267,7 @@ fn interleaved_resizes_and_writes_in_one_batch_all_land() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     let batch = [
         resize(ATLAS, ATLAS),
         block(8, 4, 4, 2),
@@ -300,9 +299,9 @@ fn atlases_beyond_the_device_limit_are_an_error() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let limit = GpuGrid::max_atlas_side(&device);
+    let limit = GpuRenderer::max_atlas_side(&device);
     assert_eq!(limit, device.limits().max_texture_dimension_2d);
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     let err = grid
         .apply_atlas_updates(&device, &queue, [resize(64, limit + 1)])
         .unwrap_err();
@@ -314,7 +313,7 @@ fn an_atlas_failure_is_latched_and_the_grid_stops_drawing() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     let err = grid
         .apply_atlas_updates(
             &device,
@@ -348,7 +347,7 @@ fn writes_whose_pixels_do_not_match_their_size_are_an_error() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let mut grid = GpuGrid::new(&device, FORMAT, 64);
+    let mut grid = GpuRenderer::new(&device, FORMAT, 64);
     let short = AtlasUpdate::Write(GlyphUpload {
         x: 0,
         y: 0,
@@ -398,7 +397,7 @@ fn painted_text_shows_up_as_ink_inside_its_cells() {
     let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
     painter.paint(&OneRow, &mut Canvas::begin(&mut cache, &mut instances));
 
-    let mut grid = GpuGrid::new(&device, FORMAT, layout.max_instances());
+    let mut grid = GpuRenderer::new(&device, FORMAT, layout.max_instances());
     let written = grid
         .apply_atlas_updates(&device, &queue, cache.drain_updates())
         .unwrap();
@@ -450,7 +449,7 @@ fn text_drawn_after_the_atlas_grew_mid_frame_still_lands_in_its_cells() {
     assert!(cache.atlas_extent().1 > 32, "the frame must grow the atlas");
     assert_eq!(cache.stats().dropped, 0);
 
-    let mut grid = GpuGrid::new(&device, FORMAT, layout.max_instances());
+    let mut grid = GpuRenderer::new(&device, FORMAT, layout.max_instances());
     grid.apply_atlas_updates(&device, &queue, cache.drain_updates())
         .unwrap();
     assert_eq!(grid.atlas_size(), cache.atlas_extent());
@@ -494,7 +493,7 @@ fn instances_beyond_gpu_capacity_are_clipped_not_overrun() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let grid = GpuGrid::new(&device, FORMAT, 2);
+    let grid = GpuRenderer::new(&device, FORMAT, 2);
     let quad = Instance::solid([0.0; 4], Color::WHITE);
     assert_eq!(grid.prepare(&queue, (W, H), &[quad; 5]), 2);
     assert_eq!(grid.capacity(), 2);

@@ -11,7 +11,8 @@ use arrow_array::{
 };
 use criterion::{criterion_group, Criterion};
 use densa_arrow::ArrowTable;
-use densa_render::{Canvas, GridPainter, InstanceBuffer, Palette};
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::{GridPainter, Palette};
 use densa_text::{AtlasConfig, Font, GlyphCache};
 use std::hint::black_box;
 

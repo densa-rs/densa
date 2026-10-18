@@ -1,6 +1,7 @@
 //! The market grid: columns, number formats, placeholders, direction colors, flashes.
 
-use densa_render::{Canvas, CellStyle, CellText, GridSource, InstanceBuffer, Palette};
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::{CellStyle, CellText, GridSource, Palette};
 use densa_text::{AtlasConfig, GlyphCache};
 use trading_demo::data::{Direction, RowSnapshot, ViewportSnapshot};
 use trading_demo::{

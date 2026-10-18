@@ -1,7 +1,7 @@
 //! Windowed mode: winit event loop + wgpu surface, presenting with V-Sync (FIFO).
 //!
 //! Glue only: frame content comes from `GridPainter` (unit-tested, allocation-free) and
-//! drawing from `GpuGrid` (GPU-tested). This module wires events, timing and reporting.
+//! drawing from `GpuRenderer` (GPU-tested). This module wires events, timing and reporting.
 
 use crate::data::ViewportSnapshot;
 use crate::engine::{
@@ -15,8 +15,10 @@ use crate::report::{
 use crate::scroll::{wheel_rows, Scroll, ScrollAction};
 use crate::{Args, VIEWPORT_ROWS};
 use densa_alloc::{measure, AllocStats};
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::GridPainter;
 use densa_platform::logical_cpus;
-use densa_render::{Canvas, GpuGrid, GridPainter, InstanceBuffer};
+use densa_render::GpuRenderer;
 use densa_sync::Reader;
 use densa_text::{AtlasConfig, GlyphCache};
 use std::error::Error;
@@ -155,7 +157,7 @@ struct Session {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     view_format: wgpu::TextureFormat,
-    gpu: GpuGrid,
+    gpu: GpuRenderer,
     painter: GridPainter,
     cache: GlyphCache,
     instances: InstanceBuffer,
@@ -212,8 +214,8 @@ impl Session {
         }
         surface.configure(&device, &config);
         // Grow the glyph atlas only as far as this GPU's textures go.
-        cache.limit_side(GpuGrid::max_atlas_side(&device))?;
-        let gpu = GpuGrid::new(&device, view_format, layout.max_instances());
+        cache.limit_side(GpuRenderer::max_atlas_side(&device))?;
+        let gpu = GpuRenderer::new(&device, view_format, layout.max_instances());
 
         let mut worker_config = args.worker.clone();
         worker_config.pin = worker_pin(args.pin)?;

@@ -9,8 +9,9 @@ use crate::report::{
 };
 use crate::Args;
 use densa_alloc::measure;
+use densa_draw::{Canvas, InstanceBuffer};
+use densa_grid::GridPainter;
 use densa_platform::logical_cpus;
-use densa_render::{Canvas, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use densa_text::{AtlasConfig, GlyphCache};
 use std::error::Error;

@@ -6,7 +6,7 @@
 use crate::data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_core::Color;
 use densa_fmt::{write_fixed, write_grouped};
-use densa_render::{Align, CellStyle, CellText, Column, GridPainter, GridSource, Palette};
+use densa_grid::{Align, CellStyle, CellText, Column, GridPainter, GridSource, Palette};
 use densa_text::{Font, GlyphCache};
 use std::error::Error;
 use std::fmt::Write as _;

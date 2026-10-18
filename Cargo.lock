@@ -536,9 +536,12 @@ name = "densa-arrow"
 version = "0.1.0"
 dependencies = [
  "arrow-array",
+ "arrow-buffer",
  "arrow-schema",
  "densa-alloc",
+ "densa-draw",
  "densa-fmt",
+ "densa-grid",
  "densa-render",
  "densa-text",
  "pollster",
@@ -553,8 +556,9 @@ dependencies = [
  "arrow-array",
  "criterion",
  "densa-arrow",
+ "densa-draw",
+ "densa-grid",
  "densa-platform",
- "densa-render",
  "densa-sync",
  "densa-text",
  "trading-demo",
@@ -565,10 +569,30 @@ name = "densa-core"
 version = "0.1.0"
 
 [[package]]
+name = "densa-draw"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "densa-core",
+ "densa-text",
+]
+
+[[package]]
 name = "densa-fmt"
 version = "0.1.0"
 dependencies = [
  "densa-alloc",
+]
+
+[[package]]
+name = "densa-grid"
+version = "0.1.0"
+dependencies = [
+ "densa-alloc",
+ "densa-core",
+ "densa-draw",
+ "densa-fmt",
+ "densa-text",
 ]
 
 [[package]]
@@ -577,6 +601,8 @@ version = "0.1.0"
 dependencies = [
  "densa-alloc",
  "densa-core",
+ "densa-draw",
+ "densa-grid",
  "densa-render",
  "densa-text",
  "parley",
@@ -598,9 +624,9 @@ name = "densa-render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
- "densa-alloc",
  "densa-core",
- "densa-fmt",
+ "densa-draw",
+ "densa-grid",
  "densa-text",
  "pollster",
  "wgpu",
@@ -2683,7 +2709,9 @@ dependencies = [
  "crossbeam-utils",
  "densa-alloc",
  "densa-core",
+ "densa-draw",
  "densa-fmt",
+ "densa-grid",
  "densa-platform",
  "densa-render",
  "densa-sync",

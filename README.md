@@ -61,7 +61,10 @@ To use the crates before they are published, depend on the repository:
 
 ```toml
 [dependencies]
+densa-draw = { git = "https://github.com/densa-rs/densa" }
+densa-grid = { git = "https://github.com/densa-rs/densa" }
 densa-render = { git = "https://github.com/densa-rs/densa" }
+densa-arrow = { git = "https://github.com/densa-rs/densa" }
 densa-paragraph = { git = "https://github.com/densa-rs/densa" }
 densa-sync = { git = "https://github.com/densa-rs/densa" }
 ```
@@ -70,7 +73,9 @@ densa-sync = { git = "https://github.com/densa-rs/densa" }
 
 | Crate | Use it for |
 |---|---|
-| [`densa-render`](crates/densa-render) | Drawing with wgpu: a `Canvas` that batches rectangles and text into one draw call, and a data grid you fill from your own data (`GridSource`) |
+| [`densa-grid`](crates/densa-grid) | A data grid you fill from your own data (`GridSource`): column layout, alignment, cell styles, allocation-free painting |
+| [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs into instances, independent of any GPU API |
+| [`densa-render`](crates/densa-render) | Drawing with wgpu: a frame's instances in one draw call, with a glyph atlas that grows on the GPU |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection, keyboard navigation, and editing with input methods (IME) |
 | [`densa-arrow`](crates/densa-arrow) | Apache Arrow record batches in the data grid: typed, allocation-free cell formatting, appending batches while shown |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
@@ -80,8 +85,8 @@ densa-sync = { git = "https://github.com/densa-rs/densa" }
 | [`densa-fmt`](crates/densa-fmt) | Number formatting into stack buffers, without allocating |
 | [`densa-alloc`](crates/densa-alloc) | A counting global allocator to prove a code path allocates nothing |
 
-Only `densa-render`, and `densa-arrow` through it, depend on a GPU crate; text, paragraphs,
-data hand-off and formatting do not.
+Only `densa-render` depends on a GPU or windowing crate: grids, Arrow tables, text and
+paragraphs build a GPU-free display list, testable without a GPU.
 
 ## Usage
 
@@ -92,7 +97,7 @@ formatted into a stack buffer, so painting allocates nothing.
 
 ```rust
 use densa_fmt::write_fixed;
-use densa_render::{CellStyle, CellText, Color, GridSource};
+use densa_grid::{CellStyle, CellText, Color, GridSource};
 use std::fmt::Write as _;
 
 /// A monitoring table: one row per sensor.
@@ -120,7 +125,7 @@ impl GridSource for Sensors<'_> {
 }
 ```
 
-`GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuGrid` submits the result.
+`GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuRenderer` draws the result.
 [`examples/trading-demo/src/market.rs`](examples/trading-demo/src/market.rs) is a complete
 source with formatting and flashing cells.
 
@@ -128,7 +133,7 @@ source with formatting and flashing cells.
 
 ```rust
 use densa_arrow::ArrowTable;
-use densa_render::{GridPainter, Palette};
+use densa_grid::{GridPainter, Palette};
 
 let mut table = ArrowTable::from_batches(batches)?; // Vec<RecordBatch>, shared not copied
 table.set_decimals(3, Some(2))?; // fixed decimals for a float column
@@ -153,7 +158,7 @@ million-row table and, with `--live`, appends a batch every 100 ms.
 
 ```rust
 use densa_paragraph::{ParagraphStyle, TextAlign, TextSystem};
-use densa_render::{Canvas, Color, InstanceBuffer, Point};
+use densa_draw::{Canvas, Color, InstanceBuffer, Point};
 use densa_text::{AtlasConfig, GlyphCache};
 
 // Once per application: fonts, layout scratch space, the glyph atlas.
@@ -303,7 +308,7 @@ Every second the demo prints a line like this (the window title shows a summary)
  ┌──────────────────────────────┐                   ┌─────────────────────────────┐
  │ feed  ─▶  table (one row per  │   triple buffer   │ read latest snapshot        │
  │           instrument)         │ ─────────────────▶│ GridPainter ─▶ Canvas       │
- │ copy visible rows, publish    │  visible rows     │ GpuGrid: one draw call      │
+ │ copy visible rows, publish    │  visible rows     │ GpuRenderer: one draw call  │
  │                               │◀──── viewport ────│ (scrolling sets viewport)   │
  └──────────────────────────────┘                   └─────────────────────────────┘
 ```

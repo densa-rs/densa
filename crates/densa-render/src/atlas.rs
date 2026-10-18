@@ -4,7 +4,7 @@ use std::fmt;
 /// Why the GPU atlas could not follow the glyph cache.
 ///
 /// Every variant means the texture no longer mirrors the cache (a bug or an unsupported
-/// device). `GpuGrid` latches the first one: it then draws nothing and keeps returning it.
+/// device). `GpuRenderer` latches the first one: it then draws nothing and keeps returning it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum AtlasError {
