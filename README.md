@@ -14,86 +14,111 @@
   <a href="https://densa.dev"><img alt="Website: densa.dev" src="https://img.shields.io/badge/web-densa.dev-0B1220"></a>
 </p>
 
-Rust libraries for GPU-rendered interfaces that show a lot of live data: trading terminals,
-monitoring consoles, dashboards, developer tools. densa draws large, fast-changing tables and
-text at the display's refresh rate, hands data between threads without locks, and renders
-every frame without allocating memory.
-
-<p align="center">
-  <img alt="A data grid of 50 instruments with bid, ask, last and volume columns; changed prices flash green or red" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/screenshot.png" width="300">
-  &nbsp;
-  <img alt="Wrapped, justified, centered and right-aligned paragraphs with the word parley selected" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/paragraphs.png" width="480">
-</p>
+densa is a Rust toolkit for applications that show a lot of live data: trading terminals,
+monitoring consoles, operational dashboards, developer tools. It keeps live data in order as
+it changes, and draws it on the GPU at the display's refresh rate, from the data stream to
+the pixel.
 
 > **Status: 0.x, experimental.** APIs will change between releases, and the crates are not on
 > crates.io yet. Builds and tests on Linux, macOS and Windows.
 
+## Architecture
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/densa-rs/densa/main/docs/architecture-dark.svg">
+    <img alt="densa's crates in three lanes: data (Arrow sources, densa-data, densa-arrow), interface (densa-grid, densa-paragraph, densa-draw, densa-text, densa-render, the GPU) and runtime (densa-sync, densa-platform, densa-fmt, densa-alloc), all on densa-core" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/architecture.svg" width="900">
+  </picture>
+</p>
+
+- **Data.** Arrow record batches from files, streams or query engines go into live tables;
+  views sort and filter them, and follow every change incrementally.
+- **Interface.** Widgets (a data grid, paragraphs of text) draw into a display list that is
+  independent of any GPU API; `densa-render` draws a whole frame in one call with wgpu.
+- **Runtime.** Hand data between threads without locks, place threads on the right cores,
+  format numbers without allocating, and prove that frames never allocate.
+
+Each crate is usable on its own, and only `densa-render` depends on a GPU or windowing crate.
+
 ## Highlights
 
-- **No allocation per frame.** Drawing, hit-testing and moving a selection allocate nothing
-  once fonts and glyphs are loaded, and tests prove it with a counting allocator.
-- **No locks between threads.** A wait-free triple buffer hands the newest data from a
-  producer thread to the UI thread; its memory orderings are model-checked with loom.
-- **One draw call per frame** for every rectangle and glyph.
-- **Real text.** Shaping, wrapping, bidirectional text, alignment, selection, editing and
-  input methods (IME), built on [parley](https://github.com/linebender/parley).
-- **Bounded memory.** The glyph atlas grows to a fixed limit, then reuses the least recently
-  used space, never a glyph drawn in the current frame.
-- **Apache Arrow native.** Show record batches from Parquet, DataFusion, DuckDB or a stream
-  directly: arrays are shared, not copied, and a million-row table draws a frame in ~52 µs.
-- **Use only what you need.** Rendering, text and data hand-off are independent crates, and no
-  third-party types appear in densa's APIs.
+- **Live tables.** Upsert Arrow batches by key; sorted, filtered views are kept up to date
+  as rows change instead of being recomputed.
+- **Arrow from end to end.** Batches are shared, never copied, from the source to the
+  screen; a grid over millions of rows costs only its visible rows.
+- **No allocation per frame.** Drawing, scrolling, hit-testing and moving a caret allocate
+  nothing once fonts and glyphs are loaded; tests prove it with a counting allocator.
+- **No locks between threads.** A wait-free triple buffer hands the newest data to the UI
+  thread; its memory orderings are model-checked with loom.
+- **Real text.** Shaping, wrapping, bidirectional text, selection, editing and input methods
+  (IME), built on [parley](https://github.com/linebender/parley).
+- **One draw call per frame**, with a glyph atlas whose memory is bounded.
 
 ## Quick start
 
-You need Rust 1.90 or later and a GPU with Vulkan, DX12 or Metal.
+You need Rust 1.90 or later and a GPU with Vulkan, Metal or DirectX 12.
 
 ```sh
 git clone https://github.com/densa-rs/densa
 cd densa
-cargo run --release -p trading-demo                          # live data grid
-cargo run --release -p densa-paragraph --example paragraphs  # text and selection
+cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
+cargo run --release -p densa-arrow --example table           # a million-row Arrow table
 cargo run --release -p densa-paragraph --example editor      # editable text
-cargo run --release -p densa-arrow --example table -- --live  # a million-row Arrow table
+cargo run --release -p trading-demo                          # a streaming market grid
 ```
 
 To use the crates before they are published, depend on the repository:
 
 ```toml
 [dependencies]
-densa-draw = { git = "https://github.com/densa-rs/densa" }
-densa-grid = { git = "https://github.com/densa-rs/densa" }
-densa-render = { git = "https://github.com/densa-rs/densa" }
+densa-data = { git = "https://github.com/densa-rs/densa" }
 densa-arrow = { git = "https://github.com/densa-rs/densa" }
-densa-paragraph = { git = "https://github.com/densa-rs/densa" }
-densa-sync = { git = "https://github.com/densa-rs/densa" }
+densa-render = { git = "https://github.com/densa-rs/densa" }
 ```
 
 ## Crates
 
 | Crate | Use it for |
 |---|---|
-| [`densa-grid`](crates/densa-grid) | A data grid you fill from your own data (`GridSource`): column layout, alignment, cell styles, allocation-free painting |
-| [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs into instances, independent of any GPU API |
-| [`densa-render`](crates/densa-render) | Drawing with wgpu: a frame's instances in one draw call, with a glyph atlas that grows on the GPU |
-| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection, keyboard navigation, and editing with input methods (IME) |
-| [`densa-arrow`](crates/densa-arrow) | Apache Arrow record batches in the data grid: typed, allocation-free cell formatting, appending batches while shown |
-| [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
-| [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect` |
-| [`densa-sync`](crates/densa-sync) | Wait-free triple buffer: hand the latest data from a producer thread to the UI thread without locks |
-| [`densa-platform`](crates/densa-platform) | CPU topology, thread pinning and thread priority (Windows) |
+| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views kept up to date incrementally |
+| [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, with typed, allocation-free cell formatting |
+| [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridSource`): columns, alignment, cell styles |
+| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
+| [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that fits the GPU's limits |
+| [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs, independent of any GPU API |
+| [`densa-render`](crates/densa-render) | Drawing a display list with wgpu in one draw call |
+| [`densa-sync`](crates/densa-sync) | A wait-free triple buffer: the latest data from a producer thread to the UI thread |
+| [`densa-platform`](crates/densa-platform) | CPU topology, thread placement and priority (Windows today) |
 | [`densa-fmt`](crates/densa-fmt) | Number formatting into stack buffers, without allocating |
-| [`densa-alloc`](crates/densa-alloc) | A counting global allocator to prove a code path allocates nothing |
-
-Only `densa-render` depends on a GPU or windowing crate: grids, Arrow tables, text and
-paragraphs build a GPU-free display list, testable without a GPU.
+| [`densa-alloc`](crates/densa-alloc) | A counting global allocator, to prove a code path allocates nothing |
+| [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect` |
 
 ## Usage
 
-### A grid over your own data
+### A live table and a sorted view
 
-Implement `GridSource` and the grid asks for the visible cells each frame. Cells are
-formatted into a stack buffer, so painting allocates nothing.
+```rust
+use densa_data::{CompareOp, Filter, LiveTable, Order, Scalar, ViewSpec};
+
+let mut table = LiveTable::new(schema, "symbol")?; // keyed by the `symbol` column
+let movers = table.add_view(
+    ViewSpec::new()
+        .filter(Filter::compare("volume", CompareOp::Gt, Scalar::Int(1_000)))
+        .sort_by("change_pct", Order::Descending),
+)?;
+
+table.upsert(ticks)?; // a RecordBatch: new symbols insert, known ones update
+table.delete(&delisted)?; // an array of keys
+
+let view = table.view(movers).unwrap(); // in order, after every change
+let top = view.row(0); // where the row's values are in table.batches()
+```
+
+To show it, `densa_arrow::LiveGrid` turns a view into the grid's data source; the
+[`live` example](crates/densa-arrow/examples/live.rs) does this with 100,000 instruments
+updated continuously.
+
+### A grid over your own data
 
 ```rust
 use densa_fmt::write_fixed;
@@ -126,87 +151,29 @@ impl GridSource for Sensors<'_> {
 ```
 
 `GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuRenderer` draws the result.
-[`examples/trading-demo/src/market.rs`](examples/trading-demo/src/market.rs) is a complete
-source with formatting and flashing cells.
 
-### Apache Arrow tables
+### Text
 
 ```rust
-use densa_arrow::ArrowTable;
-use densa_grid::{GridPainter, Palette};
+use densa_paragraph::{Motion, ParagraphStyle, TextAlign, TextEditor, TextSystem};
 
-let mut table = ArrowTable::from_batches(batches)?; // Vec<RecordBatch>, shared not copied
-table.set_decimals(3, Some(2))?; // fixed decimals for a float column
-let mut painter = GridPainter::new(table.columns(), 40, font, 13.0, Palette::new());
+let mut text = TextSystem::new()?; // fonts and layout scratch space, once per application
 
-// Every frame: a view scrolled to the first visible row. No allocation.
-painter.paint(&table.view(first_row, &palette), &mut canvas);
-
-// Streaming: append batches while the table is shown.
-table.push(next_batch)?;
-```
-
-Columns are titled by field name, sized from the first rows and aligned by type. Integers,
-floats, decimals, strings (including dictionaries and views), booleans, dates, times,
-timestamps and durations are formatted without allocating; other types show `?`, and nulls
-show a dimmed `null`. The [`table` example](crates/densa-arrow/examples/table.rs) scrolls a
-million-row table and, with `--live`, appends a batch every 100 ms.
-
-<p align="center"><img alt="A million-row Arrow table of orders: id, customer, region, unit price, total, time placed and paid flag" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="560"></p>
-
-### Paragraphs
-
-```rust
-use densa_paragraph::{ParagraphStyle, TextAlign, TextSystem};
-use densa_draw::{Canvas, Color, InstanceBuffer, Point};
-use densa_text::{AtlasConfig, GlyphCache};
-
-// Once per application: fonts, layout scratch space, the glyph atlas.
-let mut text = TextSystem::new()?;
-let mut glyphs = GlyphCache::new(AtlasConfig::default());
-let mut instances = InstanceBuffer::with_capacity(8_192);
-
-// When the text changes: shape, wrap and align.
-let style = ParagraphStyle::new(15.0)
-    .with_color(Color::srgb(0xC9D1D9))
-    .with_align(TextAlign::Justify)
-    .with_max_width(Some(480.0));
+// A paragraph: shaped once, re-wrapped to any width without shaping again.
+let style = ParagraphStyle::new(15.0).with_align(TextAlign::Justify).with_max_width(Some(480.0));
 let mut paragraph = text.paragraph("Shaped once, wrapped to any width.", &style, &[])?;
-paragraph.reflow(Some(320.0))?; // new width: re-wrap without reshaping
+paragraph.reflow(Some(320.0))?;
 
-// Every frame: no allocation.
-let mut canvas = Canvas::begin(&mut glyphs, &mut instances);
-for run in paragraph.runs() {
-    canvas.draw_run(run, Point::new(24.0, 24.0));
-}
-```
-
-`TextSelection` turns clicks into caret positions and gives caret and selection rectangles to
-draw. It moves by character, word and line: in screen order for arrow keys, in text order for
-deletion, so right-to-left text behaves correctly. The
-[`paragraphs` example](crates/densa-paragraph/examples/paragraphs.rs) supports click, drag,
-shift+click, double- and triple-click, shift/ctrl + arrows and Home/End; resize the window to
-re-wrap.
-
-### Editable text
-
-```rust
-use densa_paragraph::{Motion, ParagraphStyle, TextEditor, TextSystem};
-
-let mut text = TextSystem::new()?;
+// Editable text: typing, deletion by character or word, input-method composition.
 let mut editor = TextEditor::new(&mut text, "Hello", ParagraphStyle::new(15.0))?;
-editor.insert(&mut text, ", brave world")?; // typed, pasted or committed by an input method
+editor.insert(&mut text, ", brave world")?;
 editor.delete(&mut text, Motion::PreviousWord)?; // ctrl+Backspace
-editor.move_caret(Motion::TextStart, false); // moving the caret never allocates
 ```
 
-`TextEditor` keeps the text, its layout and the selection in step. Backspace removes one
-character (a combining accent comes off its letter; an emoji or line break goes whole), and
-`delete` takes any motion: by word, to the line start, forward. For input methods, pass
-winit's `Ime::Preedit` to `set_composition` and `Ime::Commit` to `insert`, underline
-`for_each_composition_rect`, and give `ime_area` to `Window::set_ime_cursor_area` so the
-candidate window opens next to the text. The
-[`editor` example](crates/densa-paragraph/examples/editor.rs) does all of this.
+`TextSelection` turns clicks into caret positions and moves by character, word and line, in
+screen order for arrow keys and in text order for deletion, so right-to-left text behaves.
+See the [`paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) and
+[`editor`](crates/densa-paragraph/examples/editor.rs) examples.
 
 ### Handing data to the UI thread
 
@@ -227,142 +194,62 @@ if reader.update() {
 }
 ```
 
+## Examples
+
+<p align="center">
+  <img alt="A live table of instruments sorted by percent change" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/live-table.png" width="260">
+  &nbsp;
+  <img alt="A million-row Arrow table of orders" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="380">
+</p>
+<p align="center">
+  <img alt="Wrapped, justified, centered and right-aligned paragraphs with a selection" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/paragraphs.png" width="560">
+</p>
+
+| Example | Shows |
+|---|---|
+| [`densa-arrow` `live`](crates/densa-arrow/examples/live.rs) | A live table updated continuously, its "top movers" view kept sorted |
+| [`densa-arrow` `table`](crates/densa-arrow/examples/table.rs) | A million-row Arrow table; `--live` appends batches while it is shown |
+| [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |
+| [`densa-paragraph` `editor`](crates/densa-paragraph/examples/editor.rs) | Editable text with input methods |
+| [`trading-demo`](examples/trading-demo) | A streaming market grid: a pinned worker thread, a triple buffer and the grid |
+
 ## Guarantees and how they are checked
 
 | Guarantee | Checked by |
 |---|---|
+| Live views equal a full recomputation | A model-based test checks every view after each of thousands of random upserts, deletes and compactions |
 | Drawing, hit-testing and selection allocate nothing | A counting global allocator in each crate's `tests/zero_alloc.rs` |
 | The triple buffer is free of data races | loom model checking; a mutation script proves every weaker memory ordering fails |
-| Correct pixels | GPU tests render offscreen and read the pixels back, including atlas growth and eviction (on machines with a GPU) |
+| Correct pixels | GPU tests render offscreen and read the pixels back (on machines with a GPU) |
 | Sound `unsafe` code | A `// SAFETY:` comment on every block (enforced by Clippy); Miri on the concurrency, allocator and platform crates |
-| Supported toolchain | CI checks the build with Rust 1.90 and runs the tests on Linux, macOS and Windows |
-
-## Example: a real-time trading grid
-
-`trading-demo` (in [`examples/`](examples/trading-demo)) streams a synthetic feed of 200,000
-ticks per second into a 10,000-instrument table on a worker thread and renders the visible rows
-at the display's refresh rate. Neither thread blocks the other, and neither allocates after
-startup.
-
-```sh
-cargo run --release -p trading-demo                      # window
-cargo run --release -p trading-demo -- --headless        # no window, prints metrics
-cargo run --release -p trading-demo -- --headless --unbounded --batch 1024
-cargo run --release -p trading-demo -- --list-cpus       # CPU topology and --pin choice
-cargo run --release -p trading-demo -- --help
-```
-
-Window controls: mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc quits.
-
-| Option | Default | Meaning |
-|---|---|---|
-| `--headless` | off | Run the same frame loop without a window |
-| `--seconds N` | 10 headless, until closed in a window | Run time |
-| `--rate N` / `--unbounded` | 200000 | Target ticks per second, or as fast as possible |
-| `--symbols N` | 10000 | Number of instruments |
-| `--batch N` | 64 | Ticks per worker iteration |
-| `--publish-interval-us N` | 100 | Minimum time between snapshot publishes |
-| `--fps N` | 120 | Frame rate of the headless loop |
-| `--pin auto\|none\|N` | auto | Worker placement |
-| `--priority normal\|above\|high\|critical` | critical on Windows, normal elsewhere | Worker thread priority (Windows only) |
-| `--seed N` | 1 | Seed of the synthetic feed |
-
-### Performance
-
-Intel i7-14700KF (8 performance + 12 efficiency cores), RTX 4060 Ti (Vulkan), 1920×1080 at
-99 Hz, Windows 11, release build, 10,000 instruments, default settings.
-
-| Run | Throughput | Frames | Data to screen p50 / p99 | Allocations after startup |
-|---|---|---|---|---|
-| Window, 200k ticks/s, V-Sync | 200.0k ticks/s | 99.8 fps (display rate) | 164 µs / 328 µs | 0 |
-| Headless, 200k ticks/s | 200.0k ticks/s | 120.0 fps | 156 µs / 328 µs | 0 |
-| Headless, unbounded, batch 1024 | 115.3M ticks/s | 120.0 fps | 47 µs / 107 µs | 0 |
-
-Building a 50-row frame takes ~37 µs (p50) and ~66 µs (p99) on a performance core. Triple
-buffer: publish 4.4 ns, read 10.6 ns. Glyph cache: 2,500 lookups in ~20 µs. A 50-row frame
-of a million-row Arrow table (6 columns, scrolled to a new place each frame): ~52 µs. wgpu allocates
-internally during submit and present; the allocation counts cover densa's code. Benchmarks are
-pinned to performance cores: unpinned runs on hybrid CPUs vary by 2-3×.
-
-### Reading the metrics
-
-Every second the demo prints a line like this (the window title shows a summary):
-
-```text
-[  3s] 100 fps | paint p50 37.1us p99 65.5us | frame interval p50 10.49ms ... | snapshot age p50 155.6us p99 319.2us ...
-```
-
-- **snapshot age**: time from the worker publishing data to a frame showing it. In
-  rate-limited mode it is bounded by the batch interval (64 ticks at 200k/s = 320 µs); a
-  smaller `--batch` lowers it.
-- **tick age**: time since the newest tick among the visible rows: how fresh the data is. Each
-  of 10,000 instruments updates ~20 times per second.
-- **heap ops**: heap operations since startup, per thread; 0 for the worker and the painter.
-- **pacer resets**: times the worker fell over 10 ms behind schedule (it was preempted).
-  **migrations**: times the OS moved the worker to another CPU.
-
-### How it works
-
-```text
- worker thread (pinned)                             UI thread
- ┌──────────────────────────────┐                   ┌─────────────────────────────┐
- │ feed  ─▶  table (one row per  │   triple buffer   │ read latest snapshot        │
- │           instrument)         │ ─────────────────▶│ GridPainter ─▶ Canvas       │
- │ copy visible rows, publish    │  visible rows     │ GpuRenderer: one draw call  │
- │                               │◀──── viewport ────│ (scrolling sets viewport)   │
- └──────────────────────────────┘                   └─────────────────────────────┘
-```
-
-- **Only the visible rows cross threads.** The worker keeps the whole table; each publish
-  copies the ~50 rows on screen (~3 KB instead of ~480 KB), and the UI thread tells it which
-  rows through an atomic.
-- **Both triple-buffer swaps use `AcqRel`**, which covers the reader releasing a slot the
-  writer reuses. Every weaker ordering fails the loom model.
-- **Rows are stored as structs, not columns.** A tick touches one row: one or two cache lines
-  instead of one per column. At 1M instruments this runs 39M ticks/s against 23M.
-- **The worker is pinned to its own performance core**, at time-critical priority on Windows.
-  Pinned, it runs 105-116M ticks/s; unpinned on a hybrid CPU it migrates thousands of times
-  and drops to 30-55M on efficiency cores. Next to a busy neighbor on the same core, only
-  time-critical priority keeps latency p99 under 1 ms. Automatic placement never takes the
-  machine's last free core, and a worker without a core of its own runs at normal priority, so
-  the UI always has a core.
-- **Text is rasterized once per glyph** (at 4 subpixel positions) into the atlas and drawn as
-  textured quads; the demo prepares its character set at startup.
-- **Cells flash briefly.** A changed price highlights its cell for 300 ms; at ~20 changes per
-  second per instrument, longer or whole-row highlights would never fade.
-
-The demo's data model (`trading_demo::data`) and worker (`trading_demo::engine`) are
-application code, not part of the published crates: every `densa-*` crate is a library, and
-`examples/` holds applications.
+| Tests that catch bugs | Deliberate bugs (mutants) must make the tests fail |
 
 ## Platform support
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Rendering (wgpu) | Vulkan | Metal | Vulkan, DX12 |
-| Text, paragraphs, selection | yes | yes | yes |
-| Triple buffer, counting allocator | yes | yes | yes |
-| Thread pinning and priority | not yet | not yet | yes |
+| Rendering (wgpu) | Vulkan | Metal | Vulkan, DirectX 12 |
+| Text, paragraphs, editing | yes | yes | yes |
+| Live tables, grid, triple buffer | yes | yes | yes |
+| Thread placement and priority | not yet | not yet | yes |
 
 ## Limitations
 
-- **Widgets:** a data grid, selectable paragraphs and editable text. No layout system, event
-  routing, focus handling or accessibility yet; text editing has no undo, redo or clipboard
-  yet (applications can call `selected_text` and `insert`).
+- **Widgets:** a data grid, paragraphs and editable text. No layout system, event routing,
+  focus handling or accessibility yet; text editing has no undo, redo or clipboard yet.
+- **Live data:** views sort and filter; grouping, aggregates and time windows are not there
+  yet. A table is used from one thread at a time.
 - **Text:** grid cells are single-line, unshaped text. Paragraphs use only the bundled font
-  unless the `system-fonts` feature is enabled (no fallback for CJK without it). Not supported
-  yet: inline boxes, variable-font axes, synthetic bold and italic, color emoji.
-- **Glyphs:** if one frame needs more glyphs than the whole atlas holds, the extra ones appear
-  in a later frame; glyphs larger than an atlas page are not drawn.
-- **Threads:** pinning is not isolation. Next to a busy neighbor, a pinned, time-critical
-  worker still stalls about twice per 6 s (max ~30 ms). CPU claims are tracked per process,
-  and the UI thread is not pinned.
-- **The demo's feed is synthetic.** No network ingestion, order book or persistence.
+  unless the `system-fonts` feature is enabled. Not supported yet: inline boxes,
+  variable-font axes, synthetic bold and italic, color emoji.
+- **Threads:** placement and priority are implemented on Windows only.
+
+The [roadmap](https://densa.dev/vision) lists what comes next.
 
 ## Development
 
 ```sh
-cargo test --workspace                       # includes GPU readback and a 2 s window run
+cargo test --workspace                       # includes GPU readback and a short window run
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTFLAGS="--cfg loom" cargo test -p densa-sync --release --test loom_triple_buffer
 cargo +nightly miri test --target x86_64-unknown-linux-gnu -p densa-sync -p densa-alloc -p densa-platform
