@@ -1,4 +1,11 @@
-# densa
+<h1 align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/densa-rs/densa/main/docs/brand/densa-logo-dark.svg">
+    <img alt="densa" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/brand/densa-logo.svg" width="320">
+  </picture>
+</h1>
+
+<p align="center"><b>Dense by design.</b></p>
 
 Rust libraries for GPU-rendered, real-time interfaces that show a lot of live data: trading
 terminals, monitoring consoles, dashboards, developer tools. densa renders large, fast-changing
