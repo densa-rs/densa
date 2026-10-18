@@ -86,7 +86,7 @@ impl Text {
     pub(crate) fn fit(&mut self, cx: &mut LayoutCx<'_>, width: f32, color: Color) {
         let wrap = self.wrap;
         if let Some(paragraph) = self.shape(cx, color) {
-            let _ = paragraph.reflow(Some(width.max(0.0)).filter(|_| wrap));
+            let _ = paragraph.reflow(wrap.then_some(width.max(0.0)));
         }
     }
 
