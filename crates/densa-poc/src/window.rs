@@ -4,7 +4,9 @@
 //! drawing from `GpuGrid` (GPU-tested). This module wires events, timing and reporting.
 
 use crate::pinning::{describe_pin, worker_pin};
-use crate::report::{format_cpu, format_duration_ns as dur, format_latency, format_rate as rate};
+use crate::report::{
+    format_cpu, format_duration_ns as dur, format_latency, format_priority, format_rate as rate,
+};
 use crate::scroll::{wheel_rows, Scroll, ScrollAction};
 use crate::{Args, VIEWPORT_ROWS};
 use densa_alloc::{measure, AllocStats};
@@ -215,6 +217,10 @@ impl Session {
             worker.pinned_cpu(),
             args.pin,
             &logical_cpus().unwrap_or_default(),
+        );
+        let pin_note = format!(
+            "{pin_note}, priority {}",
+            format_priority(worker.priority())
         );
 
         let info = adapter.get_info();

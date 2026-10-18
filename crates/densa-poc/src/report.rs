@@ -2,7 +2,7 @@
 //! these helpers may allocate. Output is ASCII-only ("us", not "µs") for any console.
 
 use densa_engine::LatencySummary;
-use densa_platform::CpuId;
+use densa_platform::{CpuId, ThreadPriority};
 
 /// `p50 45.2us p99 1.25ms max 3.50ms`.
 pub fn format_latency(s: &LatencySummary) -> String {
@@ -12,6 +12,17 @@ pub fn format_latency(s: &LatencySummary) -> String {
         format_duration_ns(s.p99),
         format_duration_ns(s.max)
     )
+}
+
+/// The `--priority` word for a level, or `?` where the OS cannot report it.
+pub fn format_priority(priority: Option<ThreadPriority>) -> &'static str {
+    match priority {
+        Some(ThreadPriority::Normal) => "normal",
+        Some(ThreadPriority::AboveNormal) => "above",
+        Some(ThreadPriority::Highest) => "high",
+        Some(ThreadPriority::TimeCritical) => "critical",
+        None => "?",
+    }
 }
 
 /// `14`, or `?` where the OS cannot report the CPU.
@@ -69,6 +80,16 @@ mod tests {
             })),
             "14"
         );
+    }
+
+    #[test]
+    fn priority_words_match_the_cli_flag() {
+        assert_eq!(format_priority(Some(ThreadPriority::Highest)), "high");
+        assert_eq!(
+            format_priority(Some(ThreadPriority::TimeCritical)),
+            "critical"
+        );
+        assert_eq!(format_priority(None), "?");
     }
 
     #[test]

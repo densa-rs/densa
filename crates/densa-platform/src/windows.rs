@@ -1,6 +1,6 @@
 //! Win32 implementation: CPU Sets for topology, group affinity for pinning.
 
-use crate::{CpuError, CpuId, LogicalCpu};
+use crate::{CpuError, CpuId, LogicalCpu, ThreadPriority};
 use std::mem::size_of;
 use std::os::windows::io::AsRawHandle;
 use std::ptr::null_mut;
@@ -10,7 +10,9 @@ use windows_sys::Win32::System::SystemInformation::{
     CpuSetInformation, GetSystemCpuSetInformation, GROUP_AFFINITY, SYSTEM_CPU_SET_INFORMATION,
 };
 use windows_sys::Win32::System::Threading::{
-    GetCurrentProcess, GetCurrentProcessorNumberEx, GetCurrentThread, SetThreadGroupAffinity,
+    GetCurrentProcess, GetCurrentProcessorNumberEx, GetCurrentThread, GetThreadPriority,
+    SetThreadGroupAffinity, SetThreadPriority, THREAD_PRIORITY_ABOVE_NORMAL,
+    THREAD_PRIORITY_HIGHEST, THREAD_PRIORITY_NORMAL, THREAD_PRIORITY_TIME_CRITICAL,
 };
 
 fn last_error(call: &'static str) -> CpuError {
@@ -115,6 +117,69 @@ pub(crate) fn pin_thread<T>(
 ) -> Result<(), CpuError> {
     // The JoinHandle owns the thread handle and keeps it open until joined.
     pin_handle(thread.as_raw_handle(), cpu)
+}
+
+/// `GetThreadPriority`'s failure value (`THREAD_PRIORITY_ERROR_RETURN`, i.e. `MAXLONG`),
+/// which windows-sys does not export.
+const PRIORITY_ERROR_RETURN: i32 = i32::MAX;
+
+fn to_os_priority(priority: ThreadPriority) -> i32 {
+    match priority {
+        ThreadPriority::Normal => THREAD_PRIORITY_NORMAL,
+        ThreadPriority::AboveNormal => THREAD_PRIORITY_ABOVE_NORMAL,
+        ThreadPriority::Highest => THREAD_PRIORITY_HIGHEST,
+        ThreadPriority::TimeCritical => THREAD_PRIORITY_TIME_CRITICAL,
+    }
+}
+
+fn from_os_priority(raw: i32) -> Option<ThreadPriority> {
+    match raw {
+        THREAD_PRIORITY_NORMAL => Some(ThreadPriority::Normal),
+        THREAD_PRIORITY_ABOVE_NORMAL => Some(ThreadPriority::AboveNormal),
+        THREAD_PRIORITY_HIGHEST => Some(ThreadPriority::Highest),
+        THREAD_PRIORITY_TIME_CRITICAL => Some(ThreadPriority::TimeCritical),
+        _ => None, // Error return, or a level this API does not model (e.g. below normal).
+    }
+}
+
+fn set_priority(thread: HANDLE, priority: ThreadPriority) -> Result<(), CpuError> {
+    // SAFETY: `thread` is a live thread handle (or the current-thread pseudo-handle) for
+    // the duration of the call, and the priority is one of the documented constants.
+    let ok = unsafe { SetThreadPriority(thread, to_os_priority(priority)) };
+    if ok == 0 {
+        return Err(last_error("SetThreadPriority"));
+    }
+    Ok(())
+}
+
+fn get_priority(thread: HANDLE) -> Option<ThreadPriority> {
+    // SAFETY: `thread` is a live thread handle (or the current-thread pseudo-handle) for
+    // the duration of the call.
+    let raw = unsafe { GetThreadPriority(thread) };
+    (raw != PRIORITY_ERROR_RETURN)
+        .then_some(raw)
+        .and_then(from_os_priority)
+}
+
+pub(crate) fn set_thread_priority<T>(
+    thread: &std::thread::JoinHandle<T>,
+    priority: ThreadPriority,
+) -> Result<(), CpuError> {
+    set_priority(thread.as_raw_handle(), priority)
+}
+
+pub(crate) fn set_current_thread_priority(priority: ThreadPriority) -> Result<(), CpuError> {
+    // SAFETY: GetCurrentThread returns a pseudo-handle; it cannot fail and needs no close.
+    set_priority(unsafe { GetCurrentThread() }, priority)
+}
+
+pub(crate) fn thread_priority<T>(thread: &std::thread::JoinHandle<T>) -> Option<ThreadPriority> {
+    get_priority(thread.as_raw_handle())
+}
+
+pub(crate) fn current_thread_priority() -> Option<ThreadPriority> {
+    // SAFETY: GetCurrentThread returns a pseudo-handle; it cannot fail and needs no close.
+    get_priority(unsafe { GetCurrentThread() })
 }
 
 #[inline]

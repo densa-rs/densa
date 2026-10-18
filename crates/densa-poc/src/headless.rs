@@ -1,5 +1,7 @@
 use crate::pinning::{describe_pin, worker_pin};
-use crate::report::{format_cpu, format_duration_ns as dur, format_latency, format_rate as rate};
+use crate::report::{
+    format_cpu, format_duration_ns as dur, format_latency, format_priority, format_rate as rate,
+};
 use crate::Args;
 use densa_alloc::measure;
 use densa_data::ViewportSnapshot;
@@ -55,6 +57,10 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
         worker.pinned_cpu(),
         args.pin,
         &logical_cpus().unwrap_or_default(),
+    );
+    let pin_note = format!(
+        "{pin_note}, priority {}",
+        format_priority(worker.priority())
     );
     writeln!(
         out,

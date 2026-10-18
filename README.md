@@ -18,8 +18,8 @@ The PoC proves two properties end to end, with measurements rather than claims:
 ## Results
 
 Intel i7-14700KF (8 P-cores + 12 E-cores), RTX 4060 Ti (Vulkan), 1920x1080 @ 99 Hz,
-Windows 11, release build, 10,000 symbols, worker pinned to a P-core. Numbers are from the
-summary line each run prints.
+Windows 11, release build, 10,000 symbols, worker pinned to a P-core at time-critical
+priority (the defaults). Numbers are from the summary line each run prints.
 
 | Run | Throughput | Frames | Snapshot age p50 / p99 | Heap ops after startup |
 |---|---|---|---|---|
@@ -59,6 +59,7 @@ Window controls: mouse wheel, Up/Down, PageUp/PageDown, Home/End scroll; Esc qui
 | `--publish-interval-us N` | 100 | Minimum time between snapshot publishes |
 | `--fps N` | 120 | Frame rate of the headless loop |
 | `--pin auto\|none\|N` | auto | Worker placement (see below) |
+| `--priority normal\|above\|high\|critical` | critical | Worker thread priority (see below) |
 | `--seed N` | 1 | Seed of the synthetic feed |
 
 ### Reading the metrics
@@ -122,6 +123,12 @@ depend on GPU or windowing crates.
   migrated 446-4,442 times per 5 s and ran at 30-55M ticks/s whenever it landed on an E-core,
   versus 105-116M pinned to a P-core. A process-wide registry gives every auto-pinned worker its
   own physical core.
+- **Pinned *and* time-critical.** Pinning decides where the worker runs, not who wins the
+  core: next to a busy normal-priority process pinned to the same core
+  (`scripts/priority_experiment.ps1`), a normal-priority worker reached 100.8k of 200k ticks/s
+  with snapshot age p99 32.5 ms; `above`/`high` only reached ~170k with p99 ~30 ms; only
+  `critical` held 198k with p99 under 1 ms. The demo defaults to it (`--priority normal` opts
+  out); the library default stays `Normal`.
 - **One draw call.** Every quad is a solid rectangle or a glyph from an 8x8 bitmap-font atlas,
   drawn as instances. Building them is GPU-free code with unit tests; the GPU half is verified
   by rendering offscreen and reading pixels back.
@@ -140,6 +147,7 @@ cargo +1.90 check --workspace --all-targets  # MSRV
 cargo bench -p densa-bench
 powershell -File scripts/ordering_mutants.ps1
 powershell -File scripts/pinning_experiment.ps1
+powershell -File scripts/priority_experiment.ps1
 ```
 
 Set `DENSA_SKIP_GPU_TESTS=1` on machines without a GPU or desktop session.
@@ -151,9 +159,10 @@ calls are covered by tests that watch threads actually move between CPUs.
 
 ## Limitations
 
-- **Pinning is not isolation.** Other processes can still preempt the worker's core; under
-  background load a run showed 1-14 pacer resets and snapshot-age spikes up to 17 ms. Raising
-  the worker's thread priority is the next step.
+- **No core isolation.** A time-critical pinned worker mostly wins its core, but next to a
+  busy neighbor it still stalled about twice per 6 s (max ~30 ms), plausibly Windows' boosting
+  of starved threads to the same priority. Reserving a core (Windows CPU Sets for the other
+  processes, `isolcpus` on Linux) is the remaining step.
 - **CPU pinning is Windows-only**; elsewhere `--pin auto` runs unpinned and says so.
 - **The CPU claim registry is per process**: two densa processes may still pick the same core.
 - **Text is an 8x8 ASCII bitmap font.** A shaped, proportional font with a glyph cache

@@ -135,6 +135,57 @@ pub fn pin_thread<T>(thread: &std::thread::JoinHandle<T>, cpu: LogicalCpu) -> Re
     os::pin_thread(thread, cpu)
 }
 
+/// Scheduling priority of a thread, relative to its process's priority class.
+///
+/// Pinning decides *where* a thread runs; priority decides who wins when another thread
+/// wants the same core. A pinned busy-spinning worker at `Normal` time-slices with any other
+/// normal thread scheduled there and can stall for a full quantum (10+ ms).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ThreadPriority {
+    /// The OS default.
+    #[default]
+    Normal,
+    /// One step above normal.
+    AboveNormal,
+    /// The highest non-critical level: preempts normal threads of every normal process.
+    Highest,
+    /// Above every non-realtime thread. Starves anything else scheduled on the same core,
+    /// so only for a thread pinned to a core it effectively owns.
+    TimeCritical,
+}
+
+/// Sets the priority of another thread through its join handle.
+///
+/// # Errors
+///
+/// [`CpuError::Os`] if the OS rejects the request; [`CpuError::Unsupported`] off Windows.
+pub fn set_thread_priority<T>(
+    thread: &std::thread::JoinHandle<T>,
+    priority: ThreadPriority,
+) -> Result<(), CpuError> {
+    os::set_thread_priority(thread, priority)
+}
+
+/// Sets the priority of the calling thread.
+///
+/// # Errors
+///
+/// [`CpuError::Os`] if the OS rejects the request; [`CpuError::Unsupported`] off Windows.
+pub fn set_current_thread_priority(priority: ThreadPriority) -> Result<(), CpuError> {
+    os::set_current_thread_priority(priority)
+}
+
+/// The OS's current priority for another thread, or `None` if it cannot be read or is a
+/// level this enum does not model. A system call: not for hot loops.
+pub fn thread_priority<T>(thread: &std::thread::JoinHandle<T>) -> Option<ThreadPriority> {
+    os::thread_priority(thread)
+}
+
+/// The OS's current priority for the calling thread (see [`thread_priority`]).
+pub fn current_thread_priority() -> Option<ThreadPriority> {
+    os::current_thread_priority()
+}
+
 /// The logical processor the calling thread is running on right now.
 ///
 /// Cheap (no syscall on Windows x64) and allocation-free, so it is safe to call per batch.

@@ -3,7 +3,8 @@ use crossbeam_utils::CachePadded;
 use densa_alloc::thread_stats;
 use densa_data::{MarketTable, Tick, TickGenerator, ViewportSnapshot};
 use densa_platform::{
-    cpu_registry, current_cpu, logical_cpus, pin_thread, CpuClaim, CpuError, CpuId, LogicalCpu,
+    cpu_registry, current_cpu, logical_cpus, pin_thread, set_thread_priority, thread_priority,
+    CpuClaim, CpuError, CpuId, LogicalCpu, ThreadPriority,
 };
 use densa_sync::{triple_buffer, Reader, Writer};
 use std::fmt;
@@ -27,6 +28,9 @@ pub struct WorkerConfig {
     pub publish_interval_ns: u64,
     /// Where to run the worker thread.
     pub pin: Pin,
+    /// Scheduling priority of the worker thread. Raise it together with pinning: a pinned
+    /// worker at normal priority still time-slices with other threads on its core.
+    pub priority: ThreadPriority,
 }
 
 /// Placement policy for the worker thread.
@@ -52,6 +56,7 @@ impl Default for WorkerConfig {
             rate: Some(200_000),
             publish_interval_ns: 100_000,
             pin: Pin::None,
+            priority: ThreadPriority::Normal,
         }
     }
 }
@@ -108,6 +113,8 @@ pub enum SpawnError {
     Thread(std::io::Error),
     /// Pinning to `WorkerConfig::pin` failed; the worker was stopped.
     Pin(CpuError),
+    /// Setting `WorkerConfig::priority` failed; the worker was stopped.
+    Priority(CpuError),
 }
 
 impl fmt::Display for SpawnError {
@@ -116,6 +123,7 @@ impl fmt::Display for SpawnError {
             Self::Config(e) => write!(f, "invalid worker config: {e}"),
             Self::Thread(e) => write!(f, "failed to spawn worker thread: {e}"),
             Self::Pin(e) => write!(f, "failed to pin worker thread: {e}"),
+            Self::Priority(e) => write!(f, "failed to set worker thread priority: {e}"),
         }
     }
 }
@@ -125,7 +133,7 @@ impl std::error::Error for SpawnError {
         match self {
             Self::Config(e) => Some(e),
             Self::Thread(e) => Some(e),
-            Self::Pin(e) => Some(e),
+            Self::Pin(e) | Self::Priority(e) => Some(e),
         }
     }
 }
@@ -263,6 +271,12 @@ impl WorkerHandle {
         self.claim.as_ref().map(CpuClaim::cpu)
     }
 
+    /// The worker thread's priority as the OS reports it now (a system call), or `None`
+    /// if it cannot be read on this platform or the worker has stopped.
+    pub fn priority(&self) -> Option<ThreadPriority> {
+        self.thread.as_ref().and_then(thread_priority)
+    }
+
     /// Requests that future snapshots start at `first_row` (clamped by the worker).
     pub fn set_viewport(&self, first_row: u32) {
         // ORDERING: Relaxed. A hint with no dependent data; each snapshot records the
@@ -335,6 +349,7 @@ pub fn spawn_worker<const N: usize>(
     let symbols =
         NonZeroU32::new(config.symbols).ok_or(SpawnError::Config(ConfigError::NoSymbols))?;
     let claim = claim_cpu(config.pin);
+    let priority = config.priority;
     let worker = Worker {
         generator: TickGenerator::new(symbols, config.seed),
         table: MarketTable::new(config.symbols),
@@ -360,6 +375,12 @@ pub fn spawn_worker<const N: usize>(
         if let Err(e) = pin_thread(thread, cpu) {
             drop(handle); // Stops the worker and releases the claim.
             return Err(SpawnError::Pin(e));
+        }
+    }
+    if let (Some(thread), true) = (&handle.thread, priority != ThreadPriority::Normal) {
+        if let Err(e) = set_thread_priority(thread, priority) {
+            drop(handle);
+            return Err(SpawnError::Priority(e));
         }
     }
     Ok((handle, reader))

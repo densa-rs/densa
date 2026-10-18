@@ -1,5 +1,6 @@
 use crate::PinRequest;
 use densa_engine::WorkerConfig;
+use densa_platform::ThreadPriority;
 use std::fmt;
 
 /// `--help` text.
@@ -23,6 +24,8 @@ Options:
   --seed <N>                 Random seed of the synthetic feed [default: 1]
   --pin <auto|none|CPU>      Pin the worker thread: `auto` picks a performance core,
                              `none` leaves placement to the OS [default: auto]
+  --priority <LEVEL>         Worker thread priority: normal, above, high or critical
+                             [default: critical]
   --list-cpus                Print the CPU topology (core kinds, --pin choice) and exit
   -h, --help                 Print this help
 ";
@@ -84,7 +87,13 @@ impl Args {
             help: false,
             seconds: None,
             fps: 120,
-            worker: WorkerConfig::default(),
+            worker: WorkerConfig {
+                // Pinning alone still time-slices with other threads on the core; next to
+                // a busy neighbor only time-critical kept snapshot age p99 under 1 ms
+                // (scripts/priority_experiment.ps1). The library default stays Normal.
+                priority: ThreadPriority::TimeCritical,
+                ..WorkerConfig::default()
+            },
             // On hybrid CPUs an unpinned busy-spinning worker migrates hundreds of times
             // per second and runs 2-4x slower whenever it lands on an efficiency core
             // (scripts/pinning_experiment.ps1).
@@ -106,6 +115,7 @@ impl Args {
                 "--unbounded" => unbounded = true,
                 "--list-cpus" => parsed.list_cpus = true,
                 "--pin" => parsed.pin = parse_pin(&value()?)?,
+                "--priority" => parsed.worker.priority = parse_priority(&value()?)?,
                 "--seconds" => parsed.seconds = Some(parse_u64(&arg, &value()?)?),
                 "--rate" => rate = Some(parse_u64(&arg, &value()?)?),
                 "--symbols" => parsed.worker.symbols = parse_bounded(&arg, &value()?)?,
@@ -153,6 +163,18 @@ fn parse_pin(raw: &str) -> Result<PinRequest, ArgsError> {
                 "`--pin` expects `auto`, `none` or a CPU index (0-255), got `{raw}`"
             ))
         }),
+    }
+}
+
+fn parse_priority(raw: &str) -> Result<ThreadPriority, ArgsError> {
+    match raw {
+        "normal" => Ok(ThreadPriority::Normal),
+        "above" => Ok(ThreadPriority::AboveNormal),
+        "high" => Ok(ThreadPriority::Highest),
+        "critical" => Ok(ThreadPriority::TimeCritical),
+        _ => Err(error(format!(
+            "`--priority` expects `normal`, `above`, `high` or `critical`, got `{raw}`"
+        ))),
     }
 }
 

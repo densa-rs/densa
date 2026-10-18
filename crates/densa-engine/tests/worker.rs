@@ -16,6 +16,7 @@ fn config(rate: Option<u64>) -> WorkerConfig {
         rate,
         publish_interval_ns: 0,
         pin: Pin::None,
+        priority: densa_platform::ThreadPriority::Normal,
     }
 }
 
@@ -35,6 +36,28 @@ fn pinned_worker_stays_on_its_cpu() {
     assert_eq!(metrics.last_cpu, Some(target.id), "{metrics:?}");
     // At most the one hop from wherever the thread started onto the target.
     assert!(metrics.cpu_migrations <= 1, "{metrics:?}");
+}
+
+#[cfg(windows)]
+#[test]
+fn worker_runs_at_the_requested_priority() {
+    use densa_platform::ThreadPriority;
+    let cfg = WorkerConfig {
+        priority: ThreadPriority::Highest,
+        ..config(None)
+    };
+    let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
+    assert_eq!(handle.priority(), Some(ThreadPriority::Highest));
+    handle.stop().unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+fn worker_defaults_to_normal_priority() {
+    use densa_platform::ThreadPriority;
+    let (handle, _reader) = spawn_worker::<ROWS>(config(None), Clock::new()).unwrap();
+    assert_eq!(handle.priority(), Some(ThreadPriority::Normal));
+    handle.stop().unwrap();
 }
 
 #[cfg(windows)]

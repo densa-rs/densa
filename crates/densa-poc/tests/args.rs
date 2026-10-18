@@ -37,6 +37,43 @@ fn pin_option_variants() {
     );
 }
 
+mod priority_option {
+    use super::*;
+    use densa_platform::ThreadPriority;
+
+    #[test]
+    fn accepts_every_level() {
+        let levels = [
+            ("normal", ThreadPriority::Normal),
+            ("above", ThreadPriority::AboveNormal),
+            ("high", ThreadPriority::Highest),
+            ("critical", ThreadPriority::TimeCritical),
+        ];
+        for (flag, expected) in levels {
+            let args = parse(&["--priority", flag]).unwrap();
+            assert_eq!(args.worker.priority, expected, "--priority {flag}");
+        }
+    }
+
+    #[test]
+    fn defaults_to_time_critical_for_the_pinned_worker() {
+        // scripts/priority_experiment.ps1: next to a busy normal-priority neighbor on the
+        // same core, only time-critical kept snapshot age p99 under 1 ms (normal: 32 ms).
+        assert_eq!(
+            parse(&[]).unwrap().worker.priority,
+            ThreadPriority::TimeCritical
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_levels_with_the_valid_choices() {
+        assert_eq!(
+            parse(&["--priority", "max"]).unwrap_err(),
+            "`--priority` expects `normal`, `above`, `high` or `critical`, got `max`"
+        );
+    }
+}
+
 #[test]
 fn list_cpus_flag() {
     assert!(parse(&["--list-cpus"]).unwrap().list_cpus);
@@ -225,6 +262,7 @@ fn usage_mentions_every_option() {
         "--fps",
         "--seed",
         "--pin",
+        "--priority",
         "--list-cpus",
         "--help",
     ] {
