@@ -356,9 +356,6 @@ impl GridSource for ArrowGrid<'_> {
         } else {
             self.dim
         };
-        CellStyle {
-            color,
-            background: None,
-        }
+        CellStyle::new(color)
     }
 }

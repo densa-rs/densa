@@ -3,6 +3,7 @@ use std::borrow::Cow;
 
 /// Horizontal alignment of text within a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Align {
     /// Flush with the column's left edge (labels).
     Left,
@@ -10,8 +11,10 @@ pub enum Align {
     Right,
 }
 
-/// A grid column: header title, width in characters, alignment.
+/// A grid column: header title, width in characters, alignment. Made with
+/// [`Column::new`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Column {
     /// Header text.
     pub title: Cow<'static, str>,

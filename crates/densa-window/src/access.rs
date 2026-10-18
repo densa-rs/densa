@@ -84,6 +84,10 @@ fn role(role: Role) -> KitRole {
         Role::TabList => KitRole::TabList,
         Role::Tab => KitRole::Tab,
         Role::TabPanel => KitRole::TabPanel,
+        Role::Table => KitRole::Table,
+        Role::Row => KitRole::Row,
+        Role::ColumnHeader => KitRole::ColumnHeader,
+        Role::Cell => KitRole::Cell,
         _ => KitRole::GenericContainer,
     }
 }
@@ -261,6 +265,10 @@ mod tests {
             (Role::TabList, KitRole::TabList),
             (Role::Tab, KitRole::Tab),
             (Role::TabPanel, KitRole::TabPanel),
+            (Role::Table, KitRole::Table),
+            (Role::Row, KitRole::Row),
+            (Role::ColumnHeader, KitRole::ColumnHeader),
+            (Role::Cell, KitRole::Cell),
         ];
         for (densa, kit) in roles {
             assert_eq!(role(densa), kit);

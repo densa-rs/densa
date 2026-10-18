@@ -1,17 +1,20 @@
 //! A docking workspace: panels in tab groups that you rearrange by dragging their tabs onto
-//! other groups or near their edges, and resize by dragging the gaps.
+//! other groups or near their edges, and resize by dragging the gaps. The watchlist is a live
+//! data grid of simulated instruments: click a title to sort, a row to select it.
 //!
 //! `cargo run --release -p densa-widgets --example dock` (`--light` for the light theme,
 //! `--seconds N` to close after N seconds, `--demo` to start with a tab being dragged).
 
 use std::error::Error;
+use std::fmt::Write as _;
 use std::time::{Duration, Instant};
 
 use densa_core::Point;
+use densa_grid::{Align as Side, CellStyle, CellText, Column, GridModel, Palette, SortOrder};
 use densa_ui::{
     Action, ActionKind, Align, PointerButton, PointerEvent, PointerKind, Style, Theme, Ui, WidgetId,
 };
-use densa_widgets::{DockArea, DockAt, DockPanel, DockSide, Label, Panel, ScrollView};
+use densa_widgets::{DataGrid, DockArea, DockAt, DockPanel, DockSide, Label, Panel, ScrollView};
 use densa_window::{App, Host, WindowOptions};
 
 /// Instruments in the watchlist.
@@ -19,12 +22,150 @@ const NAMES: [&str; 12] = [
     "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "ASML", "AMD", "INTC", "ORCL",
 ];
 
+/// Instruments in the live watchlist.
+const INSTRUMENTS: usize = 2_000;
+/// Price changes per frame.
+const TICKS_PER_FRAME: usize = 20;
+/// How long a changed price stays lit, in seconds.
+const FLASH: f32 = 0.3;
+
 struct Workspace {
     light: bool,
     demo: bool,
     close_at: Option<Instant>,
+    started: Instant,
     dock: Option<WidgetId>,
     status: Option<WidgetId>,
+    watchlist: Option<WidgetId>,
+}
+
+/// One simulated instrument.
+struct Quote {
+    symbol: String,
+    open: f64,
+    last: f64,
+    volume: u64,
+    /// When the price last changed, in seconds, and whether it rose.
+    changed: (f32, bool),
+}
+
+/// Simulated instruments whose prices walk at random: a grid model.
+struct Market {
+    columns: Vec<Column>,
+    quotes: Vec<Quote>,
+    seed: u64,
+    now: f32,
+}
+
+impl Market {
+    fn new() -> Self {
+        let quotes = (0..INSTRUMENTS)
+            .map(|i| {
+                let name = NAMES[i % NAMES.len()];
+                let open = 20.0 + (i * 37 % 900) as f64 + (i * 13 % 100) as f64 / 100.0;
+                Quote {
+                    symbol: format!("{name}.{:04}", i / NAMES.len()),
+                    open,
+                    last: open,
+                    volume: (i as u64 * 7_919) % 90_000 + 1_000,
+                    changed: (f32::NEG_INFINITY, true),
+                }
+            })
+            .collect();
+        Self {
+            columns: vec![
+                Column::new("Symbol", 10, Side::Left),
+                Column::new("Last", 9, Side::Right),
+                Column::new("Chg %", 7, Side::Right),
+                Column::new("Volume", 9, Side::Right),
+                Column::new("Open", 9, Side::Right),
+            ],
+            quotes,
+            seed: 0x9E37_79B9_7F4A_7C15,
+            now: 0.0,
+        }
+    }
+
+    /// The next pseudo-random number (wyrand).
+    fn next(&mut self) -> u64 {
+        self.seed = self.seed.wrapping_add(0xa076_1d64_78bd_642f);
+        let t = u128::from(self.seed) * u128::from(self.seed ^ 0xe703_7ed1_a0b4_28db);
+        (t as u64) ^ ((t >> 64) as u64)
+    }
+
+    /// Moves `count` prices a tick up or down at time `now`.
+    fn tick(&mut self, now: f32, count: usize) {
+        self.now = now;
+        for _ in 0..count {
+            let r = self.next();
+            let i = (r % self.quotes.len() as u64) as usize;
+            let up = r & (1 << 40) != 0;
+            let quote = &mut self.quotes[i];
+            let step = (quote.last * 0.0005).max(0.01);
+            quote.last = (quote.last + if up { step } else { -step }).max(0.01);
+            quote.volume += 1 + (r >> 50) % 500;
+            quote.changed = (now, up);
+        }
+    }
+}
+
+impl GridModel for Market {
+    fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    fn rows(&self) -> usize {
+        self.quotes.len()
+    }
+
+    fn cell(&self, row: usize, column: usize, text: &mut CellText, palette: &Palette) -> CellStyle {
+        let quote = &self.quotes[row];
+        let change = (quote.last / quote.open - 1.0) * 100.0;
+        // Below the shown precision: unchanged, not "-0.00".
+        let change = if change.abs() < 0.005 { 0.0 } else { change };
+        let direction = match change {
+            c if c > 0.0 => palette.positive,
+            c if c < 0.0 => palette.negative,
+            _ => palette.text,
+        };
+        let _ = match column {
+            0 => text.write_str(&quote.symbol),
+            1 => write!(text, "{:.2}", quote.last),
+            2 if change == 0.0 => text.write_str("0.00"),
+            2 => write!(text, "{change:+.2}"),
+            3 => write!(text, "{}", quote.volume),
+            _ => write!(text, "{:.2}", quote.open),
+        };
+        let (when, up) = quote.changed;
+        let lit = column == 1 && self.now - when < FLASH;
+        let flash = if up {
+            palette.positive
+        } else {
+            palette.negative
+        }
+        .with_alpha(0.35);
+        CellStyle::new(if column == 2 { direction } else { palette.text })
+            .with_background(lit.then_some(flash))
+    }
+
+    fn sort(&mut self, column: usize, order: SortOrder) -> bool {
+        let key = |q: &Quote| match column {
+            1 => q.last,
+            2 => q.last / q.open,
+            3 => q.volume as f64,
+            4 => q.open,
+            _ => 0.0,
+        };
+        if column == 0 {
+            self.quotes.sort_by(|a, b| a.symbol.cmp(&b.symbol));
+        } else {
+            self.quotes.sort_by(|a, b| key(a).total_cmp(&key(b)));
+        }
+        if order == SortOrder::Descending {
+            self.quotes.reverse();
+        }
+        true
+    }
 }
 
 /// A panel holding a scrolling list of `rows`, keyed by its title in lower case.
@@ -79,7 +220,10 @@ impl App for Workspace {
         }
         let root = ui.root();
         let dock = ui.add(root, DockArea::new(), DockArea::style().padding(0.0))?;
-        let watch = list_panel(ui, dock, "Watchlist", DockAt::First, (0..60).map(quote))?;
+        let spec = DockPanel::new("Watchlist").with_key("watchlist");
+        let watch = DockArea::add_panel(ui, dock, Panel::new(), spec, DockAt::First)?;
+        let grid = DataGrid::new(Market::new()).with_frozen_columns(1);
+        self.watchlist = Some(ui.add(watch, grid, DataGrid::<Market>::style())?);
         let about = "Drag a tab along its bar to reorder, onto another group to join it, or \
                      near a group's edge to split the group. Drag the gaps between groups to \
                      resize them. Painting and dragging tabs allocate nothing.";
@@ -116,6 +260,19 @@ impl App for Workspace {
         let (Some(dock), Some(status)) = (self.dock, self.status) else {
             return;
         };
+        if Some(action.source) == self.watchlist {
+            if let ActionKind::Selected(row) = action.kind {
+                let symbol = ui
+                    .widget::<DataGrid<Market>>(action.source)
+                    .and_then(|g| g.model().quotes.get(row))
+                    .map(|q| q.symbol.clone())
+                    .unwrap_or_default();
+                ui.update::<Label, _>(status, |label, cx| {
+                    label.set_text(cx, format!("Selected {symbol}"))
+                });
+            }
+            return;
+        }
         if action.source != dock {
             return;
         }
@@ -135,6 +292,12 @@ impl App for Workspace {
     }
 
     fn frame(&mut self, ui: &mut Ui, host: &mut Host<'_>) -> bool {
+        if let Some(grid) = self.watchlist {
+            let now = self.started.elapsed().as_secs_f32();
+            ui.update::<DataGrid<Market>, _>(grid, |grid, cx| {
+                grid.model_mut(cx).tick(now, TICKS_PER_FRAME);
+            });
+        }
         if std::mem::take(&mut self.demo) {
             // The Screener tab held over the right of the Log group, once the window has its
             // size (it has none yet in `build`).
@@ -144,14 +307,12 @@ impl App for Workspace {
                 ui.pointer(PointerEvent::new(PointerKind::Move, to));
             }
         }
-        match self.close_at {
-            Some(at) if Instant::now() >= at => {
-                host.close();
-                false
-            }
-            Some(_) => true,
-            None => false,
+        if self.close_at.is_some_and(|at| Instant::now() >= at) {
+            host.close();
+            return false;
         }
+        // The prices keep moving: paint every frame.
+        true
     }
 }
 
@@ -190,8 +351,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         light,
         demo,
         close_at: seconds.map(|s| Instant::now() + Duration::from_secs(s)),
+        started: Instant::now(),
         dock: None,
         status: None,
+        watchlist: None,
     };
     densa_window::run(
         WindowOptions::new("densa dock").with_size(1200.0, 760.0),

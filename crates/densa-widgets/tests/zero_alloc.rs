@@ -293,3 +293,103 @@ fn warm_up(ui: &mut Ui, frame: &mut impl FnMut(&mut Ui)) {
     frame(ui);
     ui.actions().for_each(drop);
 }
+
+/// A large model formatting numbers into the cell buffer.
+struct Ticks(Vec<densa_grid::Column>);
+
+impl densa_grid::GridModel for Ticks {
+    fn columns(&self) -> &[densa_grid::Column] {
+        &self.0
+    }
+
+    fn rows(&self) -> usize {
+        100_000
+    }
+
+    fn cell(
+        &self,
+        row: usize,
+        column: usize,
+        text: &mut densa_grid::CellText,
+        _: &densa_grid::Palette,
+    ) -> densa_grid::CellStyle {
+        use std::fmt::Write as _;
+        let _ = match column {
+            0 => write!(text, "S{row:05}"),
+            _ => write!(
+                text,
+                "{:.2}",
+                (row * 37 % 1000) as f64 / 10.0 + column as f64
+            ),
+        };
+        densa_grid::CellStyle::new(densa_core::Color::WHITE)
+    }
+}
+
+#[test]
+fn grid_frames_scrolling_and_selection_perform_zero_heap_operations() {
+    assert!(is_active(), "counting allocator not installed");
+    use densa_grid::{Align, Column};
+    let columns = (0..8)
+        .map(|i| Column::new(if i == 0 { "Symbol" } else { "Value" }, 10, Align::Right))
+        .collect();
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(600.0, 500.0));
+    let grid = densa_widgets::DataGrid::new(Ticks(columns)).with_frozen_columns(1);
+    let grid = ui
+        .add(ui.root(), grid, densa_widgets::DataGrid::<Ticks>::style())
+        .unwrap();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(65_536);
+    let mut frame = |ui: &mut Ui| {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    };
+    let wheel = |dx: f32, dy: f32| PointerKind::Scroll(ScrollDelta::Lines(dx, dy));
+    let down = KeyEvent::down(Key::Named(NamedKey::ArrowDown));
+    // Warm up: every digit and letter drawn, a click to focus and select, both scrolls.
+    send(&mut ui, DOWN, 300.0, 200.0);
+    send(
+        &mut ui,
+        PointerKind::Up(PointerButton::Primary),
+        300.0,
+        200.0,
+    );
+    for step in 0..20 {
+        send(&mut ui, wheel(0.0, 7.0), 300.0, 200.0);
+        send(
+            &mut ui,
+            wheel(if step % 2 == 0 { 3.0 } else { -3.0 }, 0.0),
+            300.0,
+            200.0,
+        );
+        ui.key(&down);
+        frame(&mut ui);
+    }
+    let _ = actions_of(&mut ui);
+
+    let ((), stats) = measure(|| {
+        for step in 0..200u16 {
+            send(&mut ui, wheel(0.0, 1.0), 300.0, 200.0);
+            send(
+                &mut ui,
+                wheel(if step % 2 == 0 { 1.0 } else { -1.0 }, 0.0),
+                300.0,
+                200.0,
+            );
+            ui.key(&down);
+            let x = f32::from(step * 3 % 600);
+            send(&mut ui, PointerKind::Move, x, 10.0);
+            frame(&mut ui);
+            // As an application does after each event.
+            black_box(actions_of(&mut ui));
+        }
+    });
+    assert!(stats.is_zero(), "the grid allocated: {stats:?}");
+    black_box(grid);
+}
+
+/// Drains the actions without keeping them (their queue keeps its capacity).
+fn actions_of(ui: &mut Ui) -> usize {
+    ui.actions().count()
+}

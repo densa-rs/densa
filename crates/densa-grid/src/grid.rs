@@ -12,13 +12,32 @@ pub const CELL_BYTES: usize = 64;
 /// The stack buffer a [`GridSource`] writes one cell's text into.
 pub type CellText = FmtBuf<CELL_BYTES>;
 
-/// How one cell is drawn.
+/// How one cell is drawn: `CellStyle::new(color)`, with
+/// [`with_background`](CellStyle::with_background) for a fill.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct CellStyle {
     /// Text color.
     pub color: Color,
     /// Cell fill drawn under the text; `None` for none.
     pub background: Option<Color>,
+}
+
+impl CellStyle {
+    /// Text in `color`, with no fill.
+    pub const fn new(color: Color) -> Self {
+        Self {
+            color,
+            background: None,
+        }
+    }
+
+    /// The style with the cell filled with `background` (a color, or `None` for no fill).
+    #[must_use]
+    pub fn with_background(mut self, background: impl Into<Option<Color>>) -> Self {
+        self.background = background.into();
+        self
+    }
 }
 
 /// The data a [`GridPainter`] draws: one call per visible cell, every frame.
@@ -103,6 +122,19 @@ impl GridPainter {
 
     /// Draws the grid for `source` onto `canvas`.
     pub fn paint<S: GridSource + ?Sized>(&mut self, source: &S, canvas: &mut Canvas<'_>) {
+        self.paint_columns(source, canvas, 0..self.columns.len());
+    }
+
+    /// Draws the grid for `source` onto `canvas`, asking for and drawing the cells of
+    /// `columns` only (the header bar and row stripes still span the grid): for a widget
+    /// that shows some columns scrolled and others frozen.
+    pub fn paint_columns<S: GridSource + ?Sized>(
+        &mut self,
+        source: &S,
+        canvas: &mut Canvas<'_>,
+        columns: std::ops::Range<usize>,
+    ) {
+        let columns = columns.start.min(self.columns.len())..columns.end.min(self.columns.len());
         let width = self.layout.width() as f32;
         let row_height = self.layout.row_height() as f32;
 
@@ -112,7 +144,13 @@ impl GridPainter {
             self.palette.header_background,
         );
         let baseline = self.layout.baseline_y(0);
-        for (index, column) in self.columns.iter().enumerate() {
+        for (index, column) in self
+            .columns
+            .iter()
+            .enumerate()
+            .take(columns.end)
+            .skip(columns.start)
+        {
             let cell = Cell {
                 index,
                 align: column.align,
@@ -129,7 +167,13 @@ impl GridPainter {
                 canvas.fill_rect(Rect::new(0.0, y, width, row_height), self.palette.stripe);
             }
             let baseline = self.layout.baseline_y(grid_row);
-            for (index, column) in self.columns.iter().enumerate() {
+            for (index, column) in self
+                .columns
+                .iter()
+                .enumerate()
+                .take(columns.end)
+                .skip(columns.start)
+            {
                 self.cell.clear();
                 let style = source.cell(row, index, &mut self.cell);
                 if let Some(background) = style.background {

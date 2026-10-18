@@ -123,9 +123,6 @@ impl GridSource for LiveGridView<'_> {
         } else {
             self.dim
         };
-        CellStyle {
-            color,
-            background: None,
-        }
+        CellStyle::new(color)
     }
 }

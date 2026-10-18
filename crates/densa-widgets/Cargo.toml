@@ -14,12 +14,13 @@ categories = ["gui"]
 [dependencies]
 densa-core.workspace = true
 densa-draw.workspace = true
+densa-grid.workspace = true
 densa-paragraph.workspace = true
+densa-text.workspace = true
 densa-ui.workspace = true
 
 [dev-dependencies]
 densa-alloc.workspace = true
-densa-text.workspace = true
 densa-window.workspace = true
 
 [lints]

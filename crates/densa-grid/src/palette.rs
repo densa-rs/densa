@@ -1,7 +1,8 @@
 use densa_core::Color;
 
-/// Grid colors (dark theme). Built once at startup.
+/// Grid colors: [`Palette::new`] is the dark default; change its fields for others.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct Palette {
     /// Window background (what `GpuRenderer::render` clears to).
     pub background: Color,

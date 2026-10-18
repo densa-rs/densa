@@ -106,7 +106,7 @@ impl<'a, const N: usize> MarketGrid<'a, N> {
             let alpha = flash_alpha(self.now_ns.saturating_sub(row.last_change_ns));
             (alpha > 0.0).then_some(color.with_alpha(alpha))
         });
-        CellStyle { color, background }
+        CellStyle::new(color).with_background(background)
     }
 }
 
@@ -117,10 +117,7 @@ impl<const N: usize> GridSource for MarketGrid<'_, N> {
 
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
         let row = &self.snapshot.visible()[row];
-        let plain = |color| CellStyle {
-            color,
-            background: None,
-        };
+        let plain = |color| CellStyle::new(color);
         match column {
             SYMBOL => {
                 // Fits: "SYM" + at most 10 digits of a u32.

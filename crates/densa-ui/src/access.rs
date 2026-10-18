@@ -32,6 +32,14 @@ pub enum Role {
     Tab,
     /// The content a tab shows.
     TabPanel,
+    /// Rows of cells under column headers.
+    Table,
+    /// A row of a table.
+    Row,
+    /// A column's title in a table.
+    ColumnHeader,
+    /// A cell of a table row.
+    Cell,
 }
 
 /// Something assistive technology can ask a widget to do.

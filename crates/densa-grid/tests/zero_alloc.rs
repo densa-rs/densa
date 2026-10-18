@@ -26,12 +26,10 @@ impl GridSource for Ticking {
             0 => text.push_str("Café crème"),
             _ => write_fixed(text, value, 2),
         };
-        CellStyle {
-            color: Color::WHITE,
-            background: row
-                .is_multiple_of(3)
+        CellStyle::new(Color::WHITE).with_background(
+            row.is_multiple_of(3)
                 .then_some(Color::linear(0.0, 1.0, 0.0, 0.2)),
-        }
+        )
     }
 }
 

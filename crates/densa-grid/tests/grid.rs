@@ -31,10 +31,7 @@ fn columns() -> Vec<Column> {
 }
 
 fn white() -> CellStyle {
-    CellStyle {
-        color: Color::WHITE,
-        background: None,
-    }
+    CellStyle::new(Color::WHITE)
 }
 
 fn painter(rows: u32) -> GridPainter {
@@ -199,13 +196,7 @@ mod text {
         let mut p = painter(1);
         let s = TestSource {
             rows: vec![vec!["a", "b"]],
-            styles: vec![
-                white(),
-                CellStyle {
-                    color: red,
-                    background: None,
-                },
-            ],
+            styles: vec![white(), CellStyle::new(red)],
         };
         let buf = paint(&mut p, &s);
         let row = glyphs_in_row(&p, &buf, 1);
@@ -223,13 +214,7 @@ mod styles {
         let mut p = painter(1);
         let s = TestSource {
             rows: vec![vec!["a", "b"]],
-            styles: vec![
-                white(),
-                CellStyle {
-                    color: Color::WHITE,
-                    background: Some(bg),
-                },
-            ],
+            styles: vec![white(), CellStyle::new(Color::WHITE).with_background(bg)],
         };
         let buf = paint(&mut p, &s);
         let fills: Vec<_> = buf
@@ -277,14 +262,8 @@ mod capacity {
         let s = TestSource {
             rows: vec![vec!["WWWWWW", "88888888"]; 20],
             styles: vec![
-                CellStyle {
-                    color: Color::WHITE,
-                    background: Some(Color::WHITE),
-                },
-                CellStyle {
-                    color: Color::WHITE,
-                    background: Some(Color::WHITE),
-                },
+                CellStyle::new(Color::WHITE).with_background(Color::WHITE),
+                CellStyle::new(Color::WHITE).with_background(Color::WHITE),
             ],
         };
         let buf = paint(&mut p, &s);
@@ -336,6 +315,25 @@ mod capacity {
             canvas.cache().stats().misses,
             misses,
             "and reuses every glyph"
+        );
+    }
+}
+
+#[test]
+fn painting_some_columns_draws_only_their_titles_and_cells() {
+    let mut p = painter(2);
+    let s = source(vec![vec!["AB", "1"], vec!["CD", "2"]]);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(p.layout().max_instances());
+    let mut canvas = Canvas::begin(&mut cache, &mut out);
+    p.paint_columns(&s, &mut canvas, 0..1);
+    let end = (p.layout().column_x(0) + p.layout().column_width(0)) as f32;
+    for row in 0..3 {
+        let row_glyphs = glyphs_in_row(&p, &out, row);
+        assert!(!row_glyphs.is_empty(), "row {row} shows its first column");
+        assert!(
+            row_glyphs.iter().all(|g| g.rect[0] < end),
+            "row {row} drew past the first column"
         );
     }
 }

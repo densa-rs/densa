@@ -1001,6 +1001,7 @@ dependencies = [
  "densa-alloc",
  "densa-core",
  "densa-draw",
+ "densa-grid",
  "densa-paragraph",
  "densa-text",
  "densa-ui",

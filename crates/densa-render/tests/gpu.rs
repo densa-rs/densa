@@ -374,10 +374,7 @@ impl GridSource for OneRow {
 
     fn cell(&self, _row: usize, column: usize, text: &mut CellText) -> CellStyle {
         let _ = text.push_str(["Hé", "1234.5"][column]);
-        CellStyle {
-            color: Color::srgb(0xFFFFFF),
-            background: None,
-        }
+        CellStyle::new(Color::srgb(0xFFFFFF))
     }
 }
 

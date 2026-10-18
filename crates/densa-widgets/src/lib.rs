@@ -29,6 +29,7 @@
 
 mod button;
 mod dock;
+mod grid;
 mod label;
 mod paint;
 mod panel;
@@ -39,6 +40,7 @@ mod text_input;
 
 pub use button::Button;
 pub use dock::{DockArea, DockAt, DockPanel, DockSide};
+pub use grid::DataGrid;
 pub use label::Label;
 pub use panel::Panel;
 pub use scroll::ScrollView;
