@@ -12,6 +12,7 @@ keywords = ["gui", "ui", "widgets", "button", "text-input"]
 categories = ["gui"]
 
 [dependencies]
+densa-chart.workspace = true
 densa-core.workspace = true
 densa-draw.workspace = true
 densa-grid.workspace = true

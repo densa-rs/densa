@@ -15,6 +15,8 @@ use densa_ui::{
     Theme, Widget,
 };
 
+use crate::paint::luminance;
+
 /// What a press on the grid is doing while the button is held.
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Drag {
@@ -302,11 +304,6 @@ fn palette(theme: &Theme) -> Palette {
         palette.negative = Color::srgb(0xCF222E);
     }
     palette
-}
-
-/// How bright `color` is, from 0 (black) to 1 (white).
-fn luminance(color: Color) -> f32 {
-    0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
 }
 
 /// The rows on screen, as the painter reads them: from the first row, the selected one

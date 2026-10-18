@@ -27,7 +27,7 @@ the pixel.
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/densa-rs/densa/main/docs/architecture-dark.svg">
-    <img alt="densa's crates in three lanes: data (Arrow sources, densa-data, densa-arrow), interface (densa-grid, densa-widgets, densa-paragraph, densa-ui, densa-text, densa-draw, densa-render, densa-window, the GPU) and runtime (densa-sync, densa-platform, densa-fmt, densa-alloc), all on densa-core" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/architecture.svg" width="900">
+    <img alt="densa's crates in three lanes: data (Arrow sources, densa-data, densa-arrow), interface (densa-grid, densa-chart, densa-widgets, densa-paragraph, densa-ui, densa-text, densa-draw, densa-render, densa-window, the GPU) and runtime (densa-sync, densa-platform, densa-fmt, densa-alloc), all on densa-core" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/architecture.svg" width="900">
   </picture>
 </p>
 
@@ -35,7 +35,7 @@ the pixel.
   views sort and filter them, groups aggregate them, and both follow every change
   incrementally.
 - **Interface.** A tree of widgets, laid out with flexbox, takes pointer, keyboard and input
-  method events; widgets (buttons, text inputs, scroll views, a data grid) draw into a
+  method events; widgets (buttons, text inputs, scroll views, a data grid, charts) draw into a
   display list that is independent of any GPU API, and `densa-window` presents a whole frame
   in one draw call with wgpu.
 - **Runtime.** Hand data between threads without locks, place threads on the right cores,
@@ -48,6 +48,9 @@ or windowing crate.
 
 - **Live tables.** Upsert Arrow batches by key; sorted, filtered views and grouped
   aggregates are kept up to date as rows change instead of being recomputed.
+- **Charts over live data.** Lines, candlesticks and volume in stacked panes that follow the
+  newest data, zoom around the pointer and pan; a line is drawn one pixel column at a time,
+  so a million points cost about as much as the chart is wide and every high and low shows.
 - **Widgets with flexbox layout.** A retained widget tree laid out with flexbox, with pointer
   capture, hover, focus and Tab order, and widgets for toolbars, forms, lists, split panes
   and docking workspaces; it runs headless, so interfaces are tested without a window.
@@ -76,6 +79,7 @@ cd densa
 cargo run --release -p densa-widgets --example gallery      # widgets in a window
 cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid
 cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
+cargo run --release -p densa-widgets --example chart        # live candles, volume, pan and zoom
 cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
 cargo run --release -p densa-arrow --example table           # a million-row Arrow table
 cargo run --release -p densa-paragraph --example editor      # editable text
@@ -98,9 +102,10 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid and the grid widget, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
-| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, a data grid widget |
+| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, a data grid widget, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
+| [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that fits the GPU's limits |
 | [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs, independent of any GPU API |
@@ -222,6 +227,30 @@ impl GridSource for Sensors<'_> {
 
 `GridPainter::paint` draws a `GridSource` onto a `Canvas`; `GpuRenderer` draws the result.
 
+### A chart over your own data
+
+```rust
+use densa_chart::{paint_line, points_within, y_extent, Axis, Color, LineStyle, Plot, Rect};
+
+// A day of readings, one a second: (seconds since the epoch, value).
+let readings: Vec<(f64, f64)> = (0..86_400)
+    .map(|s| (1_792_368_000.0 + f64::from(s), (f64::from(s) / 3_600.0).sin()))
+    .collect();
+
+// The last hour, scaled to what it holds.
+let x = Axis::time(1_792_450_800.0, 1_792_454_400.0);
+let (low, high) = y_extent(&readings[..], points_within(&readings[..], &x)).unwrap();
+let plot = Plot::new(Rect::new(0.0, 0.0, 800.0, 300.0), x, Axis::number(low, high).padded(0.05));
+
+// One span per pixel column, however many readings fall in it.
+paint_line(&mut canvas, &plot, &readings[..], LineStyle::new(Color::WHITE));
+```
+
+`ChartPainter` adds gridlines, tick labels and a crosshair; `paint_candles` and `paint_bars`
+draw candlesticks and volume. In a window, implement `ChartModel` (stacked panes on one time
+axis) and give it to the `Chart` widget, which follows new data, zooms with the wheel and
+pans by dragging: see the [`chart` example](crates/densa-widgets/examples/chart.rs).
+
 ### Text
 
 ```rust
@@ -273,6 +302,9 @@ if reader.update() {
   <img alt="A docking workspace: a live watchlist grid with prices flashing green and red as they change, beside a details pane above log and notes tabs" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/dock.png" width="660">
 </p>
 <p align="center">
+  <img alt="A live chart: one-minute candles with a moving average over volume bars, with time labels below and prices on the right" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/chart.png" width="660">
+</p>
+<p align="center">
   <img alt="A live table of instruments sorted by percent change" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/live-table.png" width="260">
   &nbsp;
   <img alt="A million-row Arrow table of orders" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="380">
@@ -286,6 +318,7 @@ if reader.update() {
 | [`densa-widgets` `gallery`](crates/densa-widgets/examples/gallery.rs) | A toolbar, a filterable list in a scroll view beside a details pane in a splitter, Tab between controls; `--light` for the light theme |
 | [`densa-widgets` `dock`](crates/densa-widgets/examples/dock.rs) | Panels in tab groups (drag tabs to join or split groups, the gaps to resize) around a live watchlist grid: click a title to sort, a row to select; `--demo` starts mid-drag |
 | [`densa-widgets` `live_table`](crates/densa-widgets/examples/live_table.rs) | 100,000 instruments in a live table, updated every frame: click a title to sort, type to filter, select a row and it follows its instrument |
+| [`densa-widgets` `chart`](crates/densa-widgets/examples/chart.rs) | Live one-minute candles with a moving average over volume: scroll to zoom, drag to pan, double-click to follow the newest candle |
 | [`densa-arrow` `live`](crates/densa-arrow/examples/live.rs) | A live table updated continuously, its "top movers" view kept sorted |
 | [`densa-arrow` `table`](crates/densa-arrow/examples/table.rs) | A million-row Arrow table; `--live` appends batches while it is shown |
 | [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |
@@ -322,6 +355,10 @@ if reader.update() {
   rows keys), with no multiple selection, cell selection or editing yet. Docking does not yet
   save and restore layouts (panels already carry stable keys for it) or float panels in
   their own windows.
+- **Charts:** lines, candlesticks and bars on number and time axes (UTC: no time zones yet),
+  in stacked panes. Not there yet: logarithmic axes, area fills, annotations and drawing
+  tools, several y axes in one pane, and a chart fed straight from a live table. A line is
+  one pixel column wide where it is steep, however thick it is set.
 - **Live data:** views sort and filter, groups count, sum, average and find extremes; time
   windows and joins are not there yet. A table is used from one thread at a time.
 - **Text:** grid cells are single-line, unshaped text in the bundled font. Word breaks in

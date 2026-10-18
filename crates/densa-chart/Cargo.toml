@@ -1,0 +1,24 @@
+[package]
+name = "densa-chart"
+description = "Charts for densa: time series, candlesticks and volume over your own data, drawn without allocating"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["chart", "time-series", "candlestick", "gui", "no-alloc"]
+categories = ["gui", "visualization"]
+
+[dependencies]
+densa-core.workspace = true
+densa-draw.workspace = true
+densa-fmt.workspace = true
+densa-text.workspace = true
+
+[dev-dependencies]
+densa-alloc.workspace = true
+
+[lints]
+workspace = true

@@ -2,7 +2,8 @@
 //!
 //! Floats go through `core::fmt` (exact, allocation-free, identical output to `format!`);
 //! only digit grouping, which `core::fmt` lacks, is hand-written. All writes append
-//! all-or-nothing: on error the buffer is left exactly as it was.
+//! all-or-nothing: on error the buffer is left exactly as it was. [`civil_from_days`] turns
+//! days since the epoch into a calendar date, for writers of dates.
 
 use std::fmt::{self, Write as _};
 
@@ -157,4 +158,27 @@ pub fn write_grouped<const N: usize>(
         buf.len = mark;
     }
     result
+}
+
+/// Year, month (1-12) and day (1-31) of `days` since 1970-01-01, proleptic Gregorian
+/// (Howard Hinnant's `civil_from_days`). Exact for any `days` within a few hundred billion
+/// years of the epoch; never panics (days near the ends of `i64` give a date near the end of
+/// that range rather than an overflow).
+pub fn civil_from_days(days: i64) -> (i64, u32, u32) {
+    let z = days.saturating_add(719_468);
+    let era = z.div_euclid(146_097);
+    let day_of_era = z.rem_euclid(146_097);
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let shifted_month = (5 * day_of_year + 2) / 153;
+    // Lossless: day is 1..=31 and month 1..=12.
+    let day = (day_of_year - (153 * shifted_month + 2) / 5 + 1) as u32;
+    let month = if shifted_month < 10 {
+        shifted_month + 3
+    } else {
+        shifted_month - 9
+    } as u32;
+    let year = year_of_era + era * 400 + i64::from(month <= 2);
+    (year, month, day)
 }

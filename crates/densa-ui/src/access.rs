@@ -40,6 +40,8 @@ pub enum Role {
     ColumnHeader,
     /// A cell of a table row.
     Cell,
+    /// A picture of data, such as a chart: read by its label.
+    Image,
 }
 
 /// Something assistive technology can ask a widget to do.

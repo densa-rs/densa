@@ -88,6 +88,7 @@ fn role(role: Role) -> KitRole {
         Role::Row => KitRole::Row,
         Role::ColumnHeader => KitRole::ColumnHeader,
         Role::Cell => KitRole::Cell,
+        Role::Image => KitRole::Image,
         _ => KitRole::GenericContainer,
     }
 }
@@ -269,6 +270,7 @@ mod tests {
             (Role::Row, KitRole::Row),
             (Role::ColumnHeader, KitRole::ColumnHeader),
             (Role::Cell, KitRole::Cell),
+            (Role::Image, KitRole::Image),
         ];
         for (densa, kit) in roles {
             assert_eq!(role(densa), kit);

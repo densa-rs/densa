@@ -1,6 +1,6 @@
 //! Formatting: exact parity with `format!`, grouping, all-or-nothing appends.
 
-use densa_fmt::{write_fixed, write_grouped, FmtBuf, FmtError};
+use densa_fmt::{civil_from_days, write_fixed, write_grouped, FmtBuf, FmtError};
 use std::fmt::Write as _;
 
 /// Deterministic xorshift so the oracle sweep is reproducible.
@@ -179,4 +179,47 @@ fn truncate_shortens_on_character_boundaries_only() {
     assert_eq!(buf.as_str(), "aé!", "longer than the text: unchanged");
     buf.truncate(3);
     assert_eq!(buf.as_str(), "aé");
+}
+
+fn days_in_month(year: i64, month: u32) -> u32 {
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    match month {
+        2 if leap => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
+#[test]
+fn days_since_the_epoch_walk_the_calendar_one_day_at_a_time() {
+    assert_eq!(civil_from_days(0), (1970, 1, 1));
+    assert_eq!(civil_from_days(-1), (1969, 12, 31));
+    assert_eq!(civil_from_days(-719_528), (0, 1, 1));
+    // Day by day across about two thousand years each side of the epoch, every date must
+    // follow the one before it.
+    let mut date = civil_from_days(-800_000);
+    for days in -799_999..800_000 {
+        let (year, month, day) = date;
+        let next = if day < days_in_month(year, month) {
+            (year, month, day + 1)
+        } else if month < 12 {
+            (year, month + 1, 1)
+        } else {
+            (year + 1, 1, 1)
+        };
+        date = civil_from_days(days);
+        assert_eq!(date, next, "day {days}");
+    }
+}
+
+#[test]
+fn days_at_the_ends_of_the_range_do_not_panic() {
+    for days in [i64::MAX, i64::MAX - 1, i64::MIN, i64::MIN + 1] {
+        let (_, month, day) = civil_from_days(days);
+        assert!(
+            (1..=12).contains(&month) && (1..=31).contains(&day),
+            "{days}"
+        );
+    }
 }

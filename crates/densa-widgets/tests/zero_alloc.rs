@@ -393,3 +393,130 @@ fn grid_frames_scrolling_and_selection_perform_zero_heap_operations() {
 fn actions_of(ui: &mut Ui) -> usize {
     ui.actions().count()
 }
+
+/// A day of one-second prices as a line over minute candles, with volume below.
+struct Day {
+    line: Vec<(f64, f64)>,
+    candles: Vec<(f64, densa_chart::Candle)>,
+    volume: Vec<(f64, f64)>,
+}
+
+impl Day {
+    fn new() -> Self {
+        let line: Vec<(f64, f64)> = (0..86_400)
+            .map(|s| (f64::from(s), 100.0 + (f64::from(s) * 0.001).sin()))
+            .collect();
+        let candles: Vec<_> = (0..1_440)
+            .map(|m| {
+                let open = 100.0 + (f64::from(m) * 0.06).sin();
+                let close = 100.0 + (f64::from(m + 1) * 0.06).sin();
+                let candle =
+                    densa_chart::Candle::new(open, open.max(close), open.min(close), close);
+                (60.0 * f64::from(m), candle)
+            })
+            .collect();
+        let volume = candles
+            .iter()
+            .map(|(x, c)| (*x, (c.close - c.open).abs()))
+            .collect();
+        Self {
+            line,
+            candles,
+            volume,
+        }
+    }
+}
+
+impl densa_chart::ChartModel for Day {
+    fn x_extent(&self) -> Option<(f64, f64)> {
+        Some((0.0, 86_399.0))
+    }
+
+    fn x_step(&self) -> Option<f64> {
+        Some(1.0)
+    }
+
+    fn panes(&self) -> usize {
+        2
+    }
+
+    fn y_axis(&self, pane: usize, x: &densa_chart::Axis) -> Option<densa_chart::Axis> {
+        let range = densa_chart::points_within(&self.line[..], x);
+        let (low, high) = if pane == 0 {
+            densa_chart::y_extent(&self.line[..], range)?
+        } else {
+            (0.0, 0.1)
+        };
+        Some(densa_chart::Axis::number(low, high).padded(0.05))
+    }
+
+    fn paint(
+        &self,
+        pane: usize,
+        plot: &densa_chart::Plot,
+        canvas: &mut Canvas<'_>,
+        palette: &densa_chart::ChartPalette,
+    ) {
+        if pane == 0 {
+            let style = densa_chart::CandleStyle::new(palette.up, palette.down);
+            densa_chart::paint_candles(canvas, plot, &self.candles[..], 60.0, style);
+            let line = densa_chart::LineStyle::new(palette.line);
+            densa_chart::paint_line(canvas, plot, &self.line[..], line);
+        } else {
+            densa_chart::paint_bars(
+                canvas,
+                plot,
+                &self.volume[..],
+                60.0,
+                densa_chart::BarStyle::new(),
+                |_| palette.up,
+            );
+        }
+    }
+}
+
+#[test]
+fn chart_frames_zooming_panning_and_the_crosshair_perform_zero_heap_operations() {
+    assert!(is_active(), "counting allocator not installed");
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(1_000.0, 600.0));
+    let chart = densa_widgets::Chart::new(Day::new(), 6.0 * 3_600.0);
+    let chart = ui
+        .add(ui.root(), chart, densa_widgets::Chart::<Day>::style())
+        .unwrap();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(65_536);
+    let mut frame = |ui: &mut Ui| {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    };
+    let wheel = |dy: f32| PointerKind::Scroll(ScrollDelta::Lines(0.0, dy));
+    let left = KeyEvent::down(Key::Named(NamedKey::ArrowLeft));
+    let step = |ui: &mut Ui, i: u16, frame: &mut dyn FnMut(&mut Ui)| {
+        let x = f32::from(100 + i * 7 % 700);
+        send(ui, PointerKind::Move, x, 200.0);
+        send(
+            ui,
+            wheel(if i.is_multiple_of(2) { 1.0 } else { -1.0 }),
+            x,
+            200.0,
+        );
+        send(ui, DOWN, x, 300.0);
+        send(ui, PointerKind::Move, x + 40.0, 300.0);
+        send(ui, PointerKind::Up(PointerButton::Primary), x + 40.0, 300.0);
+        ui.key(&left);
+        frame(ui);
+        black_box(actions_of(ui));
+    };
+    // Warm up: every label character drawn, the crosshair's too.
+    for i in 0..60 {
+        step(&mut ui, i, &mut frame);
+    }
+    let ((), stats) = measure(|| {
+        for i in 0..200 {
+            step(&mut ui, i, &mut frame);
+        }
+    });
+    assert!(stats.is_zero(), "the chart allocated: {stats:?}");
+    black_box(chart);
+}

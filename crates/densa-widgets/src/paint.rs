@@ -20,3 +20,8 @@ pub(crate) fn centered(rect: Rect, width: f32, height: f32) -> densa_core::Point
         (rect.top() + (rect.height() - height) / 2.0).round(),
     )
 }
+
+/// How bright `color` is, from 0 (black) to 1 (white).
+pub(crate) fn luminance(color: Color) -> f32 {
+    0.2126 * color.r + 0.7152 * color.g + 0.0722 * color.b
+}
