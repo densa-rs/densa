@@ -1,8 +1,8 @@
 //! Generic grid painting: layout from font metrics, alignment, overflow, styles, capacity.
 
 use densa_render::{
-    Align, Canvas, CellStyle, CellText, Column, GridPainter, GridSource, Instance, InstanceBuffer,
-    Palette,
+    Align, Canvas, CellStyle, CellText, Color, Column, GridPainter, GridSource, Instance,
+    InstanceBuffer, Palette,
 };
 use densa_text::{AtlasConfig, Font, GlyphCache};
 
@@ -34,7 +34,7 @@ fn columns() -> Vec<Column> {
 
 fn white() -> CellStyle {
     CellStyle {
-        color: [1.0; 4],
+        color: Color::WHITE,
         background: None,
     }
 }
@@ -197,7 +197,7 @@ mod text {
 
     #[test]
     fn glyphs_use_the_cell_style_colour() {
-        let red = [1.0, 0.0, 0.0, 1.0];
+        let red = Color::linear(1.0, 0.0, 0.0, 1.0);
         let mut p = painter(1);
         let s = TestSource {
             rows: vec![vec!["a", "b"]],
@@ -211,8 +211,8 @@ mod text {
         };
         let buf = paint(&mut p, &s);
         let row = glyphs_in_row(&p, &buf, 1);
-        assert!(row.iter().any(|g| g.color == red));
-        assert!(row.iter().any(|g| g.color == [1.0; 4]));
+        assert!(row.iter().any(|g| g.color == red.to_array()));
+        assert!(row.iter().any(|g| g.color == Color::WHITE.to_array()));
     }
 }
 
@@ -221,20 +221,24 @@ mod styles {
 
     #[test]
     fn cell_backgrounds_cover_only_their_cell() {
-        let bg = [0.0, 0.5, 0.0, 0.25];
+        let bg = Color::linear(0.0, 0.5, 0.0, 0.25);
         let mut p = painter(1);
         let s = TestSource {
             rows: vec![vec!["a", "b"]],
             styles: vec![
                 white(),
                 CellStyle {
-                    color: [1.0; 4],
+                    color: Color::WHITE,
                     background: Some(bg),
                 },
             ],
         };
         let buf = paint(&mut p, &s);
-        let fills: Vec<_> = buf.as_slice().iter().filter(|i| i.color == bg).collect();
+        let fills: Vec<_> = buf
+            .as_slice()
+            .iter()
+            .filter(|i| i.color == bg.to_array())
+            .collect();
         assert_eq!(fills.len(), 1);
         let l = p.layout();
         let [x, _, w, _] = fills[0].rect;
@@ -253,7 +257,7 @@ mod styles {
         let stripes = buf
             .as_slice()
             .iter()
-            .filter(|i| i.color == palette.stripe)
+            .filter(|i| i.color == palette.stripe.to_array())
             .count();
         assert_eq!(stripes, 2);
     }
@@ -276,12 +280,12 @@ mod capacity {
             rows: vec![vec!["WWWWWW", "88888888"]; 20],
             styles: vec![
                 CellStyle {
-                    color: [1.0; 4],
-                    background: Some([1.0; 4]),
+                    color: Color::WHITE,
+                    background: Some(Color::WHITE),
                 },
                 CellStyle {
-                    color: [1.0; 4],
-                    background: Some([1.0; 4]),
+                    color: Color::WHITE,
+                    background: Some(Color::WHITE),
                 },
             ],
         };

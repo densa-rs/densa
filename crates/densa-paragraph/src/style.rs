@@ -1,9 +1,7 @@
+use densa_core::Color;
 use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
-
-/// Linear RGBA, not premultiplied: the color space densa's renderer blends in.
-pub type Color = [f32; 4];
 
 /// Largest font size accepted, in pixels per em. Far beyond any UI text; it keeps every
 /// line metric finite (sizes near `f32::MAX` turn layout geometry into NaN).
@@ -59,7 +57,7 @@ impl ParagraphStyle {
             family: Cow::Borrowed("monospace"),
             size_px,
             line_height: 1.3,
-            color: [1.0; 4],
+            color: Color::WHITE,
             align: TextAlign::Start,
             max_width: None,
         }

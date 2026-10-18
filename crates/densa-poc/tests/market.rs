@@ -106,9 +106,13 @@ fn only_the_last_cell_of_a_recent_change_flashes() {
         .filter(|&c| cells[c].1.background.is_some())
         .collect();
     assert_eq!(flashing, [LAST]);
-    let [r, g, b, a] = cells[LAST].1.background.unwrap();
-    assert_eq!([r, g, b], palette.positive[..3]);
-    assert!((a - flash_alpha(FLASH_NS / 4)).abs() < 1e-6);
+    let flash = cells[LAST].1.background.unwrap();
+    assert_eq!(
+        flash.with_alpha(1.0),
+        palette.positive,
+        "the positive color"
+    );
+    assert!((flash.a - flash_alpha(FLASH_NS / 4)).abs() < 1e-6);
 }
 
 #[test]

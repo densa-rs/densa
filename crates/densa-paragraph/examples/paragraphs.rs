@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use densa_paragraph::{Paragraph, ParagraphStyle, Span, TextAlign, TextSystem};
-use densa_render::{srgb, Canvas, GpuGrid, InstanceBuffer, Palette};
+use densa_render::{Canvas, Color, GpuGrid, InstanceBuffer, Palette};
 use densa_text::{AtlasConfig, GlyphCache};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -100,7 +100,7 @@ struct State {
     cache: GlyphCache,
     instances: InstanceBuffer,
     paragraphs: Vec<Paragraph>,
-    background: wgpu::Color,
+    background: Color,
 }
 
 impl State {
@@ -145,7 +145,7 @@ impl State {
             cache,
             instances: InstanceBuffer::with_capacity(MAX_INSTANCES),
             paragraphs,
-            background: Palette::new().clear_color(),
+            background: Palette::new().background,
         })
     }
 
@@ -212,7 +212,7 @@ fn text_width(window_width: u32) -> Option<f32> {
 
 fn build_paragraphs(width: Option<f32>) -> Result<Vec<Paragraph>, Box<dyn Error>> {
     let mut system = TextSystem::new()?;
-    let text = srgb(0xC9D1D9, 1.0);
+    let text = Color::srgb(0xC9D1D9);
     let base = ParagraphStyle::new(15.0)
         .with_color(text)
         .with_max_width(width);
@@ -220,8 +220,8 @@ fn build_paragraphs(width: Option<f32>) -> Result<Vec<Paragraph>, Box<dyn Error>
     let title_style = base.clone().with_align(TextAlign::Center);
     let title_spans = [Span::new(0.."densa".len())
         .with_size(30.0)
-        .with_color(srgb(0x58A6FF, 1.0))];
-    let accent = srgb(0x3FB950, 1.0);
+        .with_color(Color::srgb(0x58A6FF))];
+    let accent = Color::srgb(0x3FB950);
     let intro_spans = [Span::new(0.."Văn bản".len()).with_color(accent)];
     Ok(vec![
         system.paragraph(TITLE, &title_style, &title_spans)?,
@@ -231,7 +231,7 @@ fn build_paragraphs(width: Option<f32>) -> Result<Vec<Paragraph>, Box<dyn Error>
             RIGHT,
             &base
                 .with_align(TextAlign::Right)
-                .with_color(srgb(0x8B949E, 1.0)),
+                .with_color(Color::srgb(0x8B949E)),
             &[],
         )?,
     ])

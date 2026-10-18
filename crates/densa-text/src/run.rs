@@ -1,3 +1,5 @@
+use densa_core::Color;
+
 use crate::{Font, GlyphId};
 
 /// A glyph placed by a text layout, relative to the layout's origin.
@@ -21,8 +23,8 @@ pub struct GlyphRun<'a> {
     pub font: &'a Font,
     /// Size in pixels per em.
     pub px: f32,
-    /// Linear RGBA.
-    pub color: [f32; 4],
+    /// Text color.
+    pub color: Color,
     /// The glyphs, in drawing order.
     pub glyphs: &'a [PositionedGlyph],
 }

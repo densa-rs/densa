@@ -1,7 +1,7 @@
 //! Proves drawing a laid-out paragraph every frame never touches the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
-use densa_paragraph::{ParagraphStyle, Span, TextSystem};
+use densa_paragraph::{Color, ParagraphStyle, Span, TextSystem};
 use densa_render::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
 use std::hint::black_box;
@@ -18,7 +18,7 @@ fn drawing_a_paragraph_performs_zero_heap_operations() {
     let mut system = TextSystem::new().unwrap();
     let text = "Tiếng Việt có dấu, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
-    let spans = [Span::new(0.."Tiếng Việt".len()).with_color([1.0, 0.5, 0.0, 1.0])];
+    let spans = [Span::new(0.."Tiếng Việt".len()).with_color(Color::linear(1.0, 0.5, 0.0, 1.0))];
     let paragraph = system.paragraph(text, &style, &spans).unwrap();
     assert!(paragraph.lines().len() > 2);
 

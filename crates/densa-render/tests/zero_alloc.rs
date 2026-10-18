@@ -3,7 +3,8 @@
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_fmt::write_fixed;
 use densa_render::{
-    Align, Canvas, CellStyle, CellText, Column, GridPainter, GridSource, InstanceBuffer, Palette,
+    Align, Canvas, CellStyle, CellText, Color, Column, GridPainter, GridSource, InstanceBuffer,
+    Palette,
 };
 use densa_text::{AtlasConfig, Font, GlyphCache};
 use std::hint::black_box;
@@ -28,8 +29,10 @@ impl GridSource for Ticking {
             _ => write_fixed(text, value, 2),
         };
         CellStyle {
-            color: [1.0; 4],
-            background: row.is_multiple_of(3).then_some([0.0, 1.0, 0.0, 0.2]),
+            color: Color::WHITE,
+            background: row
+                .is_multiple_of(3)
+                .then_some(Color::linear(0.0, 1.0, 0.0, 0.2)),
         }
     }
 }

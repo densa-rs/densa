@@ -369,7 +369,7 @@ impl Session {
         self.gpu.render(
             &mut encoder,
             &view,
-            self.painter.palette().clear_color(),
+            self.painter.palette().background,
             count,
         );
         self.queue.submit([encoder.finish()]);

@@ -1,6 +1,8 @@
 //! Paragraph layout: lines, wrapping, reflow, alignment, spans, scripts, validation.
 
-use densa_paragraph::{Paragraph, ParagraphError, ParagraphStyle, Span, TextAlign, TextSystem};
+use densa_paragraph::{
+    Color, Paragraph, ParagraphError, ParagraphStyle, Span, TextAlign, TextSystem,
+};
 use densa_text::{Font, GlyphId};
 
 const PX: f32 = 14.0;
@@ -164,7 +166,7 @@ mod alignment {
 mod spans {
     use super::*;
 
-    const RED: [f32; 4] = [1.0, 0.0, 0.0, 1.0];
+    const RED: Color = Color::linear(1.0, 0.0, 0.0, 1.0);
 
     #[test]
     fn colored_spans_become_runs_of_their_color() {
@@ -177,7 +179,7 @@ mod spans {
             .map(|r| r.glyphs.len())
             .sum();
         assert_eq!(red, 3);
-        assert!(p.runs().any(|r| r.color == [1.0; 4]));
+        assert!(p.runs().any(|r| r.color == Color::WHITE));
     }
 
     #[test]

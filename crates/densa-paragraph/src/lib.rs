@@ -13,8 +13,7 @@ mod paragraph;
 mod style;
 mod system;
 
+pub use densa_core::Color;
 pub use paragraph::{LineBox, Paragraph};
-pub use style::{
-    Color, ParagraphError, ParagraphStyle, Span, TextAlign, MAX_FONT_PX, MAX_LINE_HEIGHT,
-};
+pub use style::{ParagraphError, ParagraphStyle, Span, TextAlign, MAX_FONT_PX, MAX_LINE_HEIGHT};
 pub use system::TextSystem;

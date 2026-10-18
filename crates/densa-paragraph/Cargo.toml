@@ -12,6 +12,7 @@ rust-version.workspace = true
 system-fonts = ["parley/system"]
 
 [dependencies]
+densa-core.workspace = true
 densa-text.workspace = true
 parley.workspace = true
 rustc-hash.workspace = true

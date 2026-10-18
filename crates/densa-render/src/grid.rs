@@ -1,4 +1,5 @@
 use crate::{Align, Canvas, Column, GridLayout, Palette};
+use densa_core::Color;
 use densa_fmt::FmtBuf;
 use densa_text::{Font, GlyphCache, GlyphMap, SUBPIXEL_STEPS};
 
@@ -12,10 +13,10 @@ pub type CellText = FmtBuf<CELL_BYTES>;
 /// How one cell is drawn.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CellStyle {
-    /// Text color, linear RGBA.
-    pub color: [f32; 4],
-    /// Cell fill drawn under the text, linear RGBA; `None` for none.
-    pub background: Option<[f32; 4]>,
+    /// Text color.
+    pub color: Color,
+    /// Cell fill drawn under the text; `None` for none.
+    pub background: Option<Color>,
 }
 
 /// The data a [`GridPainter`] draws: one call per visible cell, every frame.
@@ -163,7 +164,7 @@ struct Cell {
     index: usize,
     align: Align,
     baseline: f32,
-    color: [f32; 4],
+    color: Color,
 }
 
 /// The grid font's character map: lays out cell text and draws it glyph by glyph.

@@ -8,6 +8,7 @@ homepage.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+densa-core.workspace = true
 bytemuck = { workspace = true, features = ["derive"] }
 densa-fmt.workspace = true
 densa-text.workspace = true

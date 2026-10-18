@@ -1,4 +1,5 @@
 use bytemuck::{Pod, Zeroable};
+use densa_core::Color;
 
 /// One quad, as read by the vertex shader (per-instance step mode).
 ///
@@ -10,23 +11,27 @@ pub struct Instance {
     pub rect: [f32; 4],
     /// `[x0, y0, x1, y1]` of the glyph in the atlas, in texels (the shader normalizes).
     pub uv: [f32; 4],
-    /// Linear RGBA, not premultiplied.
+    /// Linear RGBA, not premultiplied (a [`Color`] in the shader's layout).
     pub color: [f32; 4],
 }
 
 impl Instance {
     /// A filled rectangle.
-    pub const fn solid(rect: [f32; 4], color: [f32; 4]) -> Self {
+    pub const fn solid(rect: [f32; 4], color: Color) -> Self {
         Self {
             rect,
             uv: [0.0; 4],
-            color,
+            color: color.to_array(),
         }
     }
 
     /// A glyph: `uv` selects its atlas cell, `color` tints its coverage.
-    pub const fn glyph(rect: [f32; 4], uv: [f32; 4], color: [f32; 4]) -> Self {
-        Self { rect, uv, color }
+    pub const fn glyph(rect: [f32; 4], uv: [f32; 4], color: Color) -> Self {
+        Self {
+            rect,
+            uv,
+            color: color.to_array(),
+        }
     }
 
     /// `true` for glyphs, `false` for solid rectangles.

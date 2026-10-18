@@ -1,4 +1,5 @@
 use crate::{Instance, InstanceBuffer};
+use densa_core::Color;
 use densa_text::{quantize_x, Font, GlyphCache, GlyphId, GlyphRun};
 
 /// One frame being drawn: everything painters emit goes through it.
@@ -23,8 +24,8 @@ impl<'a> Canvas<'a> {
         Self { cache, out }
     }
 
-    /// A filled rectangle `[x, y, width, height]` in pixels, linear RGBA `color`.
-    pub fn fill_rect(&mut self, rect: [f32; 4], color: [f32; 4]) {
+    /// A filled rectangle `[x, y, width, height]` in pixels.
+    pub fn fill_rect(&mut self, rect: [f32; 4], color: Color) {
         self.out.push(Instance::solid(rect, color));
     }
 
@@ -38,7 +39,7 @@ impl<'a> Canvas<'a> {
         glyph: GlyphId,
         px: f32,
         [x, baseline_y]: [f32; 2],
-        color: [f32; 4],
+        color: Color,
     ) {
         let (pixel, bin) = quantize_x(x);
         let Ok(cached) = self.cache.get(font, glyph, px, bin) else {

@@ -462,6 +462,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "densa-core"
+version = "0.1.0"
+
+[[package]]
 name = "densa-data"
 version = "0.1.0"
 dependencies = [
@@ -491,6 +495,7 @@ name = "densa-paragraph"
 version = "0.1.0"
 dependencies = [
  "densa-alloc",
+ "densa-core",
  "densa-render",
  "densa-text",
  "parley",
@@ -512,6 +517,7 @@ name = "densa-poc"
 version = "0.1.0"
 dependencies = [
  "densa-alloc",
+ "densa-core",
  "densa-data",
  "densa-engine",
  "densa-fmt",
@@ -530,6 +536,7 @@ version = "0.1.0"
 dependencies = [
  "bytemuck",
  "densa-alloc",
+ "densa-core",
  "densa-fmt",
  "densa-text",
  "pollster",
@@ -550,6 +557,7 @@ name = "densa-text"
 version = "0.1.0"
 dependencies = [
  "densa-alloc",
+ "densa-core",
  "etagere",
  "rustc-hash 2.1.3",
  "skrifa",

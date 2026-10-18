@@ -5,8 +5,8 @@
 //! missing adapter is a failure, not a silent pass.
 
 use densa_render::{
-    srgb, Align, AtlasError, Canvas, CellStyle, CellText, Column, GpuGrid, GridPainter, GridSource,
-    Instance, InstanceBuffer, Palette,
+    Align, AtlasError, Canvas, CellStyle, CellText, Color, Column, GpuGrid, GridPainter,
+    GridSource, Instance, InstanceBuffer, Palette,
 };
 use densa_text::{AtlasConfig, AtlasUpdate, Font, GlyphCache, GlyphUpload};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -16,12 +16,7 @@ const W: u32 = 64;
 const H: u32 = 32;
 const ATLAS: u32 = 64;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
-const BLACK: wgpu::Color = wgpu::Color {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 1.0,
-};
+const BLACK: Color = Color::BLACK;
 
 /// Serializes GPU tests. Concurrent devices on one adapter are fine while tests pass, but a
 /// test panicking mid-submission once left the others hung in the driver instead of failing.
@@ -163,7 +158,7 @@ const fn resize(width: u32, height: u32) -> AtlasUpdate {
 /// A white glyph quad at screen `(x, y)` showing atlas texels `[x0, y0, x1, y1]`.
 fn glyph_at(x: f32, y: f32, texels: [f32; 4]) -> Instance {
     let size = [texels[2] - texels[0], texels[3] - texels[1]];
-    Instance::glyph([x, y, size[0], size[1]], texels, srgb(0xFFFFFF, 1.0))
+    Instance::glyph([x, y, size[0], size[1]], texels, Color::srgb(0xFFFFFF))
 }
 
 #[test]
@@ -171,7 +166,7 @@ fn solid_quads_land_on_the_right_pixels() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let red = srgb(0xFF0000, 1.0);
+    let red = Color::srgb(0xFF0000);
     let pixels = render(
         &device,
         &queue,
@@ -381,7 +376,7 @@ impl GridSource for OneRow {
     fn cell(&self, _row: usize, column: usize, text: &mut CellText) -> CellStyle {
         let _ = text.push_str(["Hà", "1234.5"][column]);
         CellStyle {
-            color: srgb(0xFFFFFF, 1.0),
+            color: Color::srgb(0xFFFFFF),
             background: None,
         }
     }
@@ -480,7 +475,7 @@ fn translucent_quads_blend_over_the_background() {
     let Some((device, queue, _gpu)) = device() else {
         return;
     };
-    let half_white = srgb(0xFFFFFF, 0.5);
+    let half_white = Color::srgb(0xFFFFFF).with_alpha(0.5);
     let pixels = render(
         &device,
         &queue,
@@ -500,7 +495,7 @@ fn instances_beyond_gpu_capacity_are_clipped_not_overrun() {
         return;
     };
     let grid = GpuGrid::new(&device, FORMAT, 2);
-    let quad = Instance::solid([0.0; 4], [1.0; 4]);
+    let quad = Instance::solid([0.0; 4], Color::WHITE);
     assert_eq!(grid.prepare(&queue, (W, H), &[quad; 5]), 2);
     assert_eq!(grid.capacity(), 2);
 }

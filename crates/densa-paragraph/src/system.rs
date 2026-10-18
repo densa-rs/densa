@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use densa_core::Color;
 use densa_text::{Font, FontBytes, FontError};
 use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 use parley::{FontContext, FontData, FontFamily, LayoutContext, LineHeight, StyleProperty};
@@ -7,8 +8,8 @@ use rustc_hash::FxHashMap;
 
 use crate::paragraph::{bytes_key, face_key, FaceKey, Paragraph};
 use crate::style::{
-    check_font_size, check_line_height, check_span, check_width, Color, ParagraphError,
-    ParagraphStyle, Span,
+    check_font_size, check_line_height, check_span, check_width, ParagraphError, ParagraphStyle,
+    Span,
 };
 
 /// Generic families the bundled font stands in for when system fonts are off.

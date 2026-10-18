@@ -10,6 +10,7 @@ rust-version.workspace = true
 include = ["src/**", "tests/**", "fonts/**", "Cargo.toml"]
 
 [dependencies]
+densa-core.workspace = true
 etagere.workspace = true
 rustc-hash.workspace = true
 skrifa.workspace = true

@@ -3,6 +3,7 @@
 //! App code on top of the domain-agnostic `densa_render` grid: columns, number formats,
 //! direction colors and the price-change flash all live here.
 
+use densa_core::Color;
 use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_fmt::{write_fixed, write_grouped};
 use densa_render::{Align, CellStyle, CellText, Column, GridPainter, GridSource, Palette};
@@ -74,7 +75,7 @@ impl<'a, const N: usize> MarketGrid<'a, N> {
         }
     }
 
-    fn direction_color(&self, row: &RowSnapshot) -> Option<[f32; 4]> {
+    fn direction_color(&self, row: &RowSnapshot) -> Option<Color> {
         match row.direction {
             Direction::Up => Some(self.palette.positive),
             Direction::Down => Some(self.palette.negative),
@@ -83,7 +84,7 @@ impl<'a, const N: usize> MarketGrid<'a, N> {
     }
 
     /// Formats `price`; returns the color to draw it with (dimmed for "no quote yet").
-    fn price(&self, price: f64, color: [f32; 4], text: &mut CellText) -> [f32; 4] {
+    fn price(&self, price: f64, color: Color, text: &mut CellText) -> Color {
         if write_fixed(text, price, PRICE_DECIMALS).is_ok() {
             return color;
         }
@@ -101,9 +102,9 @@ impl<'a, const N: usize> MarketGrid<'a, N> {
     fn last(&self, row: &RowSnapshot, text: &mut CellText) -> CellStyle {
         let direction = self.direction_color(row);
         let color = self.price(row.last, direction.unwrap_or(self.palette.text), text);
-        let background = direction.and_then(|[r, g, b, _]| {
+        let background = direction.and_then(|color| {
             let alpha = flash_alpha(self.now_ns.saturating_sub(row.last_change_ns));
-            (alpha > 0.0).then_some([r, g, b, alpha])
+            (alpha > 0.0).then_some(color.with_alpha(alpha))
         });
         CellStyle { color, background }
     }

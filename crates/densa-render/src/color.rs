@@ -1,63 +1,38 @@
-/// `0xRRGGBB` sRGB plus alpha, converted to the linear RGBA the shader blends in.
-///
-/// Render targets are sRGB-format views, so the GPU re-encodes on write: colors written
-/// here as their familiar hex values come out on screen exactly as specified.
-pub fn srgb(hex: u32, alpha: f32) -> [f32; 4] {
-    let channel = |shift: u32| {
-        let c = ((hex >> shift) & 0xFF) as f32 / 255.0;
-        if c <= 0.04045 {
-            c / 12.92
-        } else {
-            ((c + 0.055) / 1.055).powf(2.4)
-        }
-    };
-    [channel(16), channel(8), channel(0), alpha]
-}
+use densa_core::Color;
 
-/// Grid colors (dark theme), in linear space. Built once at startup.
+/// Grid colors (dark theme). Built once at startup.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
-    /// Window background (the render-pass clear color).
-    pub background: [f32; 4],
+    /// Window background (what `GpuGrid::render` clears to).
+    pub background: Color,
     /// Header row bar.
-    pub header_background: [f32; 4],
+    pub header_background: Color,
     /// Column titles.
-    pub header_text: [f32; 4],
+    pub header_text: Color,
     /// Every other data row.
-    pub stripe: [f32; 4],
+    pub stripe: Color,
     /// Cell text.
-    pub text: [f32; 4],
+    pub text: Color,
     /// Placeholders and secondary text.
-    pub dim_text: [f32; 4],
+    pub dim_text: Color,
     /// Good news: a value rose, a check passed.
-    pub positive: [f32; 4],
+    pub positive: Color,
     /// Bad news: a value fell, a check failed.
-    pub negative: [f32; 4],
+    pub negative: Color,
 }
 
 impl Palette {
     /// The default dark palette.
     pub fn new() -> Self {
         Self {
-            background: srgb(0x0D1117, 1.0),
-            header_background: srgb(0x161B22, 1.0),
-            header_text: srgb(0x8B949E, 1.0),
-            stripe: srgb(0x131922, 1.0),
-            text: srgb(0xC9D1D9, 1.0),
-            dim_text: srgb(0x6E7681, 1.0),
-            positive: srgb(0x3FB950, 1.0),
-            negative: srgb(0xF85149, 1.0),
-        }
-    }
-
-    /// The background as a render-pass clear color.
-    pub fn clear_color(&self) -> wgpu::Color {
-        let [r, g, b, a] = self.background;
-        wgpu::Color {
-            r: f64::from(r),
-            g: f64::from(g),
-            b: f64::from(b),
-            a: f64::from(a),
+            background: Color::srgb(0x0D1117),
+            header_background: Color::srgb(0x161B22),
+            header_text: Color::srgb(0x8B949E),
+            stripe: Color::srgb(0x131922),
+            text: Color::srgb(0xC9D1D9),
+            dim_text: Color::srgb(0x6E7681),
+            positive: Color::srgb(0x3FB950),
+            negative: Color::srgb(0xF85149),
         }
     }
 }

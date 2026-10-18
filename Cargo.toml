@@ -13,6 +13,7 @@ rust-version = "1.90"
 
 [workspace.dependencies]
 densa-alloc = { path = "crates/densa-alloc" }
+densa-core = { path = "crates/densa-core" }
 densa-data = { path = "crates/densa-data" }
 densa-engine = { path = "crates/densa-engine" }
 densa-fmt = { path = "crates/densa-fmt" }

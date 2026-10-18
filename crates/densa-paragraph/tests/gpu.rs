@@ -3,7 +3,7 @@
 //! Needs a GPU adapter. Set `DENSA_SKIP_GPU_TESTS=1` on machines without one; otherwise a
 //! missing adapter is a failure, not a silent pass.
 
-use densa_paragraph::{Paragraph, ParagraphStyle, TextAlign, TextSystem};
+use densa_paragraph::{Color, Paragraph, ParagraphStyle, TextAlign, TextSystem};
 use densa_render::{Canvas, GpuGrid, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
 use std::sync::{Mutex, MutexGuard, PoisonError};
@@ -66,7 +66,7 @@ fn render(device: &wgpu::Device, queue: &wgpu::Queue, paragraph: &Paragraph) -> 
     let count = grid.prepare(queue, (W, H), instances.as_slice());
     let view = target.create_view(&wgpu::TextureViewDescriptor::default());
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-    grid.render(&mut encoder, &view, wgpu::Color::BLACK, count);
+    grid.render(&mut encoder, &view, Color::BLACK, count);
     encoder.copy_texture_to_buffer(
         target.as_image_copy(),
         wgpu::TexelCopyBufferInfo {

@@ -3,7 +3,8 @@ use std::ops::Range;
 use densa_text::{Font, GlyphId, GlyphRun, PositionedGlyph};
 use parley::{Alignment, AlignmentOptions, FontData, Layout, PositionedLayoutItem};
 
-use crate::style::{check_width, Color, ParagraphError, TextAlign};
+use crate::style::{check_width, ParagraphError, TextAlign};
+use densa_core::Color;
 
 /// One laid-out line, in pixels relative to the paragraph's top-left corner.
 #[derive(Debug, Clone, PartialEq)]

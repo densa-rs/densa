@@ -96,6 +96,7 @@ Every second a line like this is printed (and the window title shows a summary):
 
 | Crate | Role |
 |---|---|
+| `densa-core` | Dependency-free primitives every crate shares (`Color`) |
 | `densa-sync` | Wait-free SPSC triple buffer, loom-checked |
 | `densa-data` | `MarketTable`, `TickGenerator`, fixed-size `ViewportSnapshot<N>` |
 | `densa-fmt` | Allocation-free number formatting into stack buffers |

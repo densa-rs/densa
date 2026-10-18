@@ -21,7 +21,8 @@ mod layout;
 
 pub use atlas::AtlasError;
 pub use canvas::Canvas;
-pub use color::{srgb, Palette};
+pub use color::Palette;
+pub use densa_core::Color;
 pub use gpu::GpuGrid;
 pub use grid::{CellStyle, CellText, GridPainter, GridSource, CELL_BYTES};
 pub use instance::{Instance, InstanceBuffer};

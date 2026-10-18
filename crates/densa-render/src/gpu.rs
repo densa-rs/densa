@@ -1,6 +1,7 @@
 use crate::atlas::{AtlasError, GpuAtlas};
 use crate::Instance;
 use bytemuck::{Pod, Zeroable};
+use densa_core::Color;
 use densa_text::AtlasUpdate;
 use std::mem::size_of;
 
@@ -157,9 +158,15 @@ impl GpuGrid {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
-        clear: wgpu::Color,
+        clear: Color,
         count: u32,
     ) {
+        let clear = wgpu::Color {
+            r: f64::from(clear.r),
+            g: f64::from(clear.g),
+            b: f64::from(clear.b),
+            a: f64::from(clear.a),
+        };
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("densa grid"),
             color_attachments: &[Some(wgpu::RenderPassColorAttachment {
