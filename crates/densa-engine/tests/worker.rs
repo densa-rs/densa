@@ -73,6 +73,16 @@ fn auto_pin_lock() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Distinct physical cores of any class.
+#[cfg(windows)]
+fn physical_cores() -> usize {
+    let cpus = densa_platform::logical_cpus().unwrap();
+    let mut cores: Vec<(u16, u8)> = cpus.iter().map(|c| (c.id.group, c.core)).collect();
+    cores.sort_unstable();
+    cores.dedup();
+    cores.len()
+}
+
 /// Distinct physical cores of the fastest efficiency class.
 #[cfg(windows)]
 fn performance_cores() -> usize {
@@ -98,6 +108,12 @@ fn concurrent_auto_workers_get_separate_physical_cores() {
     };
     let (first, _r1) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
     let (second, _r2) = spawn_worker::<ROWS>(auto(), Clock::new()).unwrap();
+    if physical_cores() < 2 {
+        // One physical core (e.g. a 2-vCPU CI runner): automatic placement never takes the
+        // last free core, so nothing is pinned.
+        assert_eq!((first.pinned_cpu(), second.pinned_cpu()), (None, None));
+        return;
+    }
     match (first.pinned_cpu(), second.pinned_cpu()) {
         (Some(a), Some(b)) => assert_ne!(a.core, b.core, "both workers on core {}", a.core),
         // No free core left (small CI machines, other tests holding claims): the documented
@@ -123,7 +139,10 @@ fn stopping_a_worker_releases_its_cpu_claim() {
         ..config(None)
     };
     let (handle, _reader) = spawn_worker::<ROWS>(cfg, Clock::new()).unwrap();
-    let cpu = handle.pinned_cpu().unwrap();
+    let Some(cpu) = handle.pinned_cpu() else {
+        assert!(physical_cores() < 2, "auto placement found no core to pin");
+        return; // Single-core machine: nothing pinned, nothing to release.
+    };
     let held = |cpu| {
         cpu_registry()
             .claimed()
