@@ -252,6 +252,13 @@ impl EventCx<'_> {
         self.state.node(id).map(|node| &node.style)
     }
 
+    /// Whether keyboard focus is on `id` or a widget inside it.
+    pub fn focus_within(&self, id: WidgetId) -> bool {
+        self.state
+            .focus
+            .is_some_and(|focus| self.state.is_within(focus, id))
+    }
+
     /// Changes the style of the widget itself or of a widget inside it (a splitter resizing
     /// its panes, tabs showing one page); `false` for any other widget.
     pub fn set_style(&mut self, id: WidgetId, style: Style) -> bool {

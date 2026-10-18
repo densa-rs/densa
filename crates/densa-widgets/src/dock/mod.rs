@@ -1,5 +1,6 @@
 //! Docking: panels in tab groups, side by side or stacked, rearranged by dragging tabs.
 
+mod access;
 mod geometry;
 mod input;
 mod tree;
@@ -7,8 +8,8 @@ mod tree;
 use densa_core::{Color, Point, Rect, Size};
 use densa_draw::Canvas;
 use densa_ui::{
-    Event, EventCx, Handled, LayoutCx, Length, Overflow, PaintCx, PointerButton, PointerKind,
-    Style, Ui, UiError, Widget, WidgetId,
+    AccessNode, AccessRequest, Event, EventCx, Handled, LayoutCx, Length, Overflow, PaintCx,
+    PointerButton, PointerKind, Style, Ui, UiError, Widget, WidgetId,
 };
 
 use self::geometry::{bar, beside, content_style, divider_rect, group_rect, hairline};
@@ -128,6 +129,8 @@ enum Kind {
         tabs: Vec<usize>,
         active: usize,
         scroll: f32,
+        /// The group's number for assistive technology: kept while it lives.
+        serial: u32,
     },
 }
 
@@ -144,6 +147,8 @@ struct Tab {
     title: Text,
     key: Option<String>,
     group: usize,
+    /// The tab's number for assistive technology: kept while it lives, whatever its index.
+    serial: u32,
 }
 
 /// The divider between a split's two parts.
@@ -246,6 +251,10 @@ pub struct DockArea {
     hovered: Option<usize>,
     /// The scale the panels were last styled at.
     styled_scale: f32,
+    /// The group whose tabs the keyboard moves between (the last one clicked or chosen).
+    focus_group: Option<usize>,
+    /// The last serial given to a tab or a group.
+    last_serial: u32,
 }
 
 impl DockArea {
@@ -406,11 +415,13 @@ impl DockArea {
 
     fn attach(&mut self, cx: &mut EventCx<'_>, widget: WidgetId, panel: DockPanel, at: DockAt) {
         let index = self.tabs.len();
+        let serial = self.next_serial();
         self.tabs.push(Tab {
             widget,
             title: Text::new(panel.title),
             key: panel.key,
             group: usize::MAX,
+            serial,
         });
         let first = self.frames.first().map(|&(group, _)| group);
         let other = match at {
@@ -486,6 +497,9 @@ impl DockArea {
             }
             if position == active {
                 canvas.fill_rect(tab, theme.surface);
+                if cx.is_focused() && self.focused_group() == Some(group) {
+                    outline(canvas, tab, 2.0 * line, theme.focus);
+                }
                 let accent =
                     Rect::from_edges(tab.left(), tab.top(), tab.right(), tab.top() + 2.0 * line);
                 canvas.fill_rect(accent, theme.accent);
@@ -554,6 +568,23 @@ impl DockArea {
 }
 
 impl Widget for DockArea {
+    fn accessibility(&self, cx: &PaintCx<'_>, node: &mut AccessNode) {
+        self.describe(cx, node);
+    }
+
+    fn access_action(&mut self, cx: &mut EventCx<'_>, request: &AccessRequest<'_>) -> Handled {
+        self.act(cx, request)
+    }
+
+    /// Reachable by Tab, as a tab list; clicks on panels do not focus it (a tab press does).
+    fn accepts_focus(&self) -> bool {
+        !self.tabs.is_empty()
+    }
+
+    fn focus_on_press(&self) -> bool {
+        false
+    }
+
     fn layout(&mut self, cx: &mut LayoutCx<'_>, size: Size) {
         let color = cx.theme().text;
         for tab in &mut self.tabs {
@@ -598,8 +629,14 @@ impl Widget for DockArea {
         if cx.scale() != self.styled_scale {
             self.restyle(cx);
         }
-        let Event::Pointer(pointer) = event else {
-            return Handled::No;
+        let pointer = match event {
+            Event::Pointer(pointer) => pointer,
+            Event::Key(key) => return self.key(cx, key),
+            Event::FocusGained | Event::FocusLost => {
+                cx.request_paint();
+                return Handled::No;
+            }
+            _ => return Handled::No,
         };
         match pointer.kind {
             PointerKind::Down(PointerButton::Primary) => self.press(cx, pointer.position),

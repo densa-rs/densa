@@ -14,6 +14,24 @@ impl DockArea {
         }
     }
 
+    /// A serial for a new tab or group, unused by any living one (they wrap only after
+    /// millions of additions, far more than tabs alive at once).
+    pub(super) fn next_serial(&mut self) -> u32 {
+        self.last_serial = (self.last_serial + 1) % super::access::SERIALS;
+        self.last_serial
+    }
+
+    /// `group`'s serial (0 if it is not a group).
+    pub(super) fn group_serial(&self, group: usize) -> u32 {
+        match self.nodes.get(group) {
+            Some(Some(Node {
+                kind: Kind::Group { serial, .. },
+                ..
+            })) => *serial,
+            _ => 0,
+        }
+    }
+
     /// How far `group`'s tab bar is scrolled, in logical pixels.
     pub(super) fn group_scroll(&self, group: usize) -> f32 {
         match self.nodes.get(group) {
@@ -50,10 +68,12 @@ impl DockArea {
     /// shown tab, or into a new root group if there is none.
     pub(super) fn join(&mut self, index: usize, group: Option<usize>, position: Option<usize>) {
         let group = group.unwrap_or_else(|| {
+            let serial = self.next_serial();
             let group = self.push(Kind::Group {
                 tabs: Vec::new(),
                 active: 0,
                 scroll: 0.0,
+                serial,
             });
             self.root = Some(group);
             group
@@ -73,10 +93,12 @@ impl DockArea {
     /// Puts tab `index` into a new group on `side` of `group`.
     pub(super) fn split(&mut self, index: usize, group: usize, side: DockSide) {
         let parent = self.nodes[group].as_ref().and_then(|n| n.parent);
+        let serial = self.next_serial();
         let fresh = self.push(Kind::Group {
             tabs: vec![index],
             active: 0,
             scroll: 0.0,
+            serial,
         });
         self.tabs[index].group = fresh;
         let axis = match side {
@@ -168,6 +190,10 @@ impl DockArea {
         let Some(node) = self.nodes[group].take() else {
             return;
         };
+        // Its slot may be reused by a new group, which must not inherit the keyboard.
+        if self.focus_group == Some(group) {
+            self.focus_group = None;
+        }
         let Some(split) = node.parent else {
             self.root = None;
             return;

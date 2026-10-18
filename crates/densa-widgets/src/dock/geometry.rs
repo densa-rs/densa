@@ -219,18 +219,25 @@ impl DockArea {
     /// Scrolls `group`'s tab bar so its shown tab is wholly in view, when the dock is at
     /// `rect`.
     pub(super) fn reveal(&mut self, group: usize, rect: Rect, scale: f32) {
+        let (_, active) = self.group_tabs(group);
+        self.reveal_at(group, active, rect, scale);
+    }
+
+    /// Scrolls `group`'s tab bar so its tab at `position` is wholly in view.
+    pub(super) fn reveal_at(&mut self, group: usize, position: usize, rect: Rect, scale: f32) {
         let Some(strip) = self.strip_of(group, rect, scale) else {
             return;
         };
         if strip.buttons.is_none() {
             return;
         }
-        let (members, active) = self.group_tabs(group);
-        let start: f32 = members[..active]
+        let (members, _) = self.group_tabs(group);
+        let position = position.min(members.len());
+        let start: f32 = members[..position]
             .iter()
             .map(|&i| strip.width(self, i))
             .sum();
-        let end = start + members.get(active).map_or(0.0, |&i| strip.width(self, i));
+        let end = start + members.get(position).map_or(0.0, |&i| strip.width(self, i));
         let room = strip.tabs.width();
         let offset = if start < strip.offset {
             start

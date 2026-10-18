@@ -367,13 +367,14 @@ fn a_press_that_barely_moves_is_a_click_not_a_drag() {
     panel(&mut ui, dock, "B", DockAt::With(a));
     ui.layout();
     // Dragged to the left half of A's tab, B would go before A: a marker shows where.
-    let still = frame(&mut ui).len();
     pointer(
         &mut ui,
         PointerKind::Down(PointerButton::Primary),
         40.0,
         14.0,
     );
+    // The press itself focuses the tab list (a focus ring): count from there.
+    let still = frame(&mut ui).len();
     pointer(&mut ui, PointerKind::Move, 37.0, 17.0);
     assert_eq!(frame(&mut ui).len(), still, "a small move shows nothing");
     assert_eq!(ui.cursor(), Cursor::Default);
@@ -856,9 +857,9 @@ fn a_drop_that_changes_nothing_shows_nothing() {
     let a = panel(&mut ui, dock, "A", DockAt::First);
     panel(&mut ui, dock, "B", DockAt::With(a));
     ui.layout();
-    let still = frame(&mut ui).len();
     let (ax, ay) = tab(&ui, dock, a);
     pointer(&mut ui, PointerKind::Down(PointerButton::Primary), ax, ay);
+    let still = frame(&mut ui).len();
     // Into the middle of its own group: it is already there.
     pointer(&mut ui, PointerKind::Move, 400.0, 300.0);
     assert_eq!(frame(&mut ui).len(), still);

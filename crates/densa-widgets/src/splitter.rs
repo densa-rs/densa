@@ -1,7 +1,8 @@
 use densa_core::Rect;
 use densa_draw::Canvas;
 use densa_ui::{
-    Cursor, Event, EventCx, Handled, Length, PaintCx, PointerButton, PointerKind, Style, Widget,
+    AccessNode, Cursor, Event, EventCx, Handled, Length, PaintCx, PointerButton, PointerKind, Role,
+    Style, Widget,
 };
 
 /// The divider's thickness, in logical pixels: the gap between the panes.
@@ -74,6 +75,10 @@ impl Splitter {
 }
 
 impl Widget for Splitter {
+    fn accessibility(&self, _: &PaintCx<'_>, node: &mut AccessNode) {
+        node.set_role(Role::Splitter);
+    }
+
     fn paint(&mut self, cx: &PaintCx<'_>, canvas: &mut Canvas<'_>) {
         let Some(pane) = cx.children().first().and_then(|&first| cx.rect_of(first)) else {
             return;

@@ -231,7 +231,8 @@ impl Ui {
     fn focus_from(&mut self, from: Option<WidgetId>) {
         let mut at = from;
         while let Some(id) = at.filter(|id| self.state.is_live(*id)) {
-            if self.accepts_focus(id) {
+            let widget = self.widgets.get(id.slot()).and_then(Option::as_deref);
+            if widget.is_some_and(|w| w.accepts_focus() && w.focus_on_press()) {
                 self.give_focus(Some(id));
                 return;
             }
@@ -239,7 +240,7 @@ impl Ui {
         }
     }
 
-    fn accepts_focus(&self, id: WidgetId) -> bool {
+    pub(crate) fn accepts_focus(&self, id: WidgetId) -> bool {
         self.widgets
             .get(id.slot())
             .and_then(Option::as_deref)

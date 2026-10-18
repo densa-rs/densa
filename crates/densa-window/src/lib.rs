@@ -8,6 +8,10 @@
 //! Frames are painted when something changed, when another thread asks for one through a
 //! [`Waker`] (new data arrived), or continuously while the app asks for it (animation).
 //!
+//! Screen readers (Narrator, VoiceOver, Orca) read the interface through AccessKit: the
+//! window sends the [`Ui`]'s accessibility tree after each frame, only while one is
+//! listening, and carries out what it asks.
+//!
 //! The [`Ui`]'s text uses `densa_paragraph::TextSystem::new`: the bundled font, and the
 //! system's fonts for characters it lacks (Korean, Japanese, Chinese, ...). Turning off the
 //! default `system-fonts` feature leaves the bundled font alone.
@@ -31,6 +35,7 @@
 //! # Ok::<(), Box<dyn Error>>(())
 //! ```
 
+mod access;
 mod gpu;
 mod translate;
 
@@ -82,7 +87,7 @@ pub trait App: 'static {
 #[derive(Debug)]
 pub struct Host<'a> {
     window: &'a Window,
-    proxy: &'a EventLoopProxy<Wake>,
+    proxy: &'a EventLoopProxy<UserEvent>,
     close: &'a mut bool,
 }
 
@@ -106,19 +111,29 @@ impl Host<'_> {
 
 /// Asks the window's thread for a frame, from any thread.
 #[derive(Debug, Clone)]
-pub struct Waker(EventLoopProxy<Wake>);
+pub struct Waker(EventLoopProxy<UserEvent>);
 
 impl Waker {
     /// Asks for a frame: [`App::frame`] runs and the interface is painted soon. `false` if
     /// the window is gone.
     pub fn wake(&self) -> bool {
-        self.0.send_event(Wake).is_ok()
+        self.0.send_event(UserEvent::Wake).is_ok()
     }
 }
 
-/// The event a [`Waker`] sends.
-#[derive(Debug, Clone, Copy)]
-struct Wake;
+/// What other threads send the window's thread: a [`Waker`]'s request for a frame, or a
+/// screen reader's request through AccessKit.
+#[derive(Debug)]
+enum UserEvent {
+    Wake,
+    Access(accesskit_winit::Event),
+}
+
+impl From<accesskit_winit::Event> for UserEvent {
+    fn from(event: accesskit_winit::Event) -> Self {
+        Self::Access(event)
+    }
+}
 
 /// The window [`run`] opens.
 #[derive(Debug, Clone)]
@@ -207,7 +222,7 @@ impl Error for WindowError {
 /// [`WindowError`] if the window, the GPU or the fonts cannot be set up, a frame cannot be
 /// drawn, or [`App::build`] fails.
 pub fn run(options: WindowOptions, app: impl App) -> Result<(), WindowError> {
-    let event_loop = EventLoop::<Wake>::with_user_event()
+    let event_loop = EventLoop::<UserEvent>::with_user_event()
         .build()
         .map_err(|e| WindowError::Window(e.to_string()))?;
     let mut shell = Shell {
@@ -227,7 +242,7 @@ pub fn run(options: WindowOptions, app: impl App) -> Result<(), WindowError> {
 struct Shell<A: App> {
     app: A,
     options: WindowOptions,
-    proxy: EventLoopProxy<Wake>,
+    proxy: EventLoopProxy<UserEvent>,
     session: Option<Session>,
     error: Option<WindowError>,
     /// The app asked to close the window while building its interface.
@@ -237,6 +252,8 @@ struct Shell<A: App> {
 /// The window, its GPU surface and its interface.
 struct Session {
     window: Arc<Window>,
+    /// Hands the interface to screen readers, and their requests back.
+    access: accesskit_winit::Adapter,
     gpu: Gpu,
     ui: Ui,
     cache: GlyphCache,
@@ -256,12 +273,19 @@ impl<A: App> Shell<A> {
 
     fn open(&mut self, event_loop: &ActiveEventLoop) -> Result<Session, WindowError> {
         let size = self.options.size;
+        // Hidden until AccessKit's adapter is attached, which must happen before it is shown.
         let attributes = Window::default_attributes()
             .with_title(self.options.title.clone())
-            .with_inner_size(LogicalSize::new(size.width, size.height));
+            .with_inner_size(LogicalSize::new(size.width, size.height))
+            .with_visible(false);
         let window = event_loop
             .create_window(attributes)
             .map_err(|e| WindowError::Window(e.to_string()))?;
+        let access = accesskit_winit::Adapter::with_event_loop_proxy(
+            event_loop,
+            &window,
+            self.proxy.clone(),
+        );
         let window = Arc::new(window);
         window.set_ime_allowed(true);
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
@@ -280,8 +304,10 @@ impl<A: App> Shell<A> {
         self.app
             .build(&mut ui, &mut host)
             .map_err(WindowError::App)?;
+        window.set_visible(true);
         Ok(Session {
             window,
+            access,
             gpu,
             ui,
             cache,
@@ -295,7 +321,7 @@ impl<A: App> Shell<A> {
     }
 }
 
-impl<A: App> ApplicationHandler<Wake> for Shell<A> {
+impl<A: App> ApplicationHandler<UserEvent> for Shell<A> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.session.is_some() {
             return;
@@ -317,6 +343,8 @@ impl<A: App> ApplicationHandler<Wake> for Shell<A> {
             return;
         };
         let window = Arc::clone(&session.window);
+        session.access.process_event(&window, &event);
+        let redraw = matches!(event, WindowEvent::RedrawRequested);
         let mut close = false;
         let mut failed = None;
         {
@@ -338,6 +366,11 @@ impl<A: App> ApplicationHandler<Wake> for Shell<A> {
                     self.app.action(&mut session.ui, &mut host, action);
                 }
                 session.reflect();
+                // After a frame and what the app did about it: the tree screen readers see
+                // matches the screen.
+                if redraw {
+                    session.publish_access();
+                }
             }
         }
         if let Some(error) = failed {
@@ -347,9 +380,38 @@ impl<A: App> ApplicationHandler<Wake> for Shell<A> {
         }
     }
 
-    fn user_event(&mut self, _: &ActiveEventLoop, _: Wake) {
-        if let Some(session) = &self.session {
-            session.window.request_redraw();
+    fn user_event(&mut self, event_loop: &ActiveEventLoop, event: UserEvent) {
+        let Some(session) = self.session.as_mut() else {
+            return;
+        };
+        let access = match event {
+            UserEvent::Wake => {
+                session.window.request_redraw();
+                return;
+            }
+            UserEvent::Access(access) => access.window_event,
+        };
+        match access {
+            accesskit_winit::WindowEvent::InitialTreeRequested => session.publish_access(),
+            accesskit_winit::WindowEvent::ActionRequested(request) => {
+                access::perform(&mut session.ui, &request);
+                let window = Arc::clone(&session.window);
+                let mut close = false;
+                let mut host = Host {
+                    window: &window,
+                    proxy: &self.proxy,
+                    close: &mut close,
+                };
+                while let Some(action) = session.ui.next_action() {
+                    self.app.action(&mut session.ui, &mut host, action);
+                }
+                session.reflect();
+                session.publish_access();
+                if close {
+                    event_loop.exit();
+                }
+            }
+            accesskit_winit::WindowEvent::AccessibilityDeactivated => {}
         }
     }
 
@@ -447,6 +509,15 @@ impl Session {
             background,
         )?;
         Ok(())
+    }
+
+    /// Sends screen readers the interface as it is now; nothing is built unless one is
+    /// listening.
+    fn publish_access(&mut self) {
+        let Self {
+            access, ui, window, ..
+        } = self;
+        access.update_if_active(|| access::tree_update(&ui.access_tree(), &window.title()));
     }
 
     /// Shows the interface's state in the window: cursor, input method area, repaint.

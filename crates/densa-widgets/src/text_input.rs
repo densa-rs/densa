@@ -2,8 +2,9 @@ use densa_core::{Color, Point, Rect, Size};
 use densa_draw::Canvas;
 use densa_paragraph::{Motion, ParagraphError, ParagraphStyle, TextEditor, TextSelection};
 use densa_ui::{
-    ActionKind, Constraints, Cursor, Event, EventCx, Handled, Ime, Key, KeyEvent, LayoutCx,
-    NamedKey, PaintCx, PointerButton, PointerKind, Widget,
+    AccessAction, AccessNode, AccessRequest, ActionKind, Constraints, Cursor, Event, EventCx,
+    Handled, Ime, Key, KeyEvent, LayoutCx, NamedKey, PaintCx, PointerButton, PointerKind, Role,
+    Widget,
 };
 
 use crate::paint::outline;
@@ -268,6 +269,26 @@ impl TextInput {
 }
 
 impl Widget for TextInput {
+    fn accessibility(&self, _: &PaintCx<'_>, node: &mut AccessNode) {
+        node.set_role(Role::TextInput);
+        node.set_value(self.text());
+        if !self.placeholder.as_str().is_empty() {
+            node.set_placeholder(self.placeholder.as_str());
+        }
+        node.add_action(AccessAction::SetValue);
+    }
+
+    fn access_action(&mut self, cx: &mut EventCx<'_>, request: &AccessRequest<'_>) -> Handled {
+        let (AccessAction::SetValue, Some(value)) = (request.action, request.value) else {
+            return Handled::No;
+        };
+        if self.set_text(cx, value).is_err() {
+            return Handled::No;
+        }
+        cx.emit(ActionKind::Changed);
+        Handled::Yes
+    }
+
     fn measure(&mut self, cx: &mut LayoutCx<'_>, _: Constraints) -> Size {
         self.prepare(cx);
         let line = self

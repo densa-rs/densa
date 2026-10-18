@@ -42,6 +42,8 @@ impl std::error::Error for UiError {}
 #[derive(Debug)]
 pub(crate) struct Node {
     pub(crate) generation: u32,
+    /// Its number for assistive technology: never reused, unlike its slot.
+    pub(crate) access: u64,
     pub(crate) live: bool,
     pub(crate) parent: Option<WidgetId>,
     pub(crate) children: Vec<WidgetId>,
@@ -80,6 +82,8 @@ pub(crate) struct Press {
 pub(crate) struct State {
     pub(crate) nodes: Vec<Node>,
     free: Vec<u32>,
+    /// The last widget serial given out (the root has 0).
+    pub(crate) next_access: u64,
     taffy: TaffyTree<WidgetId>,
     pub(crate) root: WidgetId,
     pub(crate) theme: Theme,
@@ -266,6 +270,7 @@ impl Ui {
         let mut state = State {
             nodes: vec![Node {
                 generation: 0,
+                access: 0,
                 live: true,
                 parent: None,
                 children: Vec::new(),
@@ -282,6 +287,7 @@ impl Ui {
                 notified: None,
             }],
             free: Vec::new(),
+            next_access: 0,
             taffy,
             root,
             theme: Theme::default(),
@@ -360,8 +366,10 @@ impl Ui {
             position,
             taffy,
         ));
+        self.state.next_access += 1;
         let node = Node {
             generation,
+            access: self.state.next_access,
             live: true,
             parent: Some(parent),
             children: Vec::new(),

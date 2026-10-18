@@ -1,8 +1,8 @@
 use densa_core::{Point, Rect, Size};
 use densa_draw::Canvas;
 use densa_ui::{
-    Event, EventCx, Handled, Length, Overflow, PaintCx, PointerButton, PointerKind, ScrollDelta,
-    Style, Widget,
+    AccessAction, AccessNode, Event, EventCx, Handled, Length, Overflow, PaintCx, PointerButton,
+    PointerKind, Role, ScrollDelta, Style, Widget,
 };
 
 /// Logical pixels one wheel notch scrolls.
@@ -70,6 +70,22 @@ fn thumb(axis: Axis, rect: Rect, content: Size, scroll: Point, scale: f32) -> Op
 }
 
 impl Widget for ScrollView {
+    fn accessibility(&self, cx: &PaintCx<'_>, node: &mut AccessNode) {
+        node.set_role(Role::ScrollView);
+        let (at, content, view) = (cx.scroll(), cx.content_size(), cx.rect());
+        let (room_x, room_y) = (content.width - view.width(), content.height - view.height());
+        for (action, can) in [
+            (AccessAction::ScrollUp, at.y > 0.0),
+            (AccessAction::ScrollDown, at.y < room_y),
+            (AccessAction::ScrollLeft, at.x > 0.0),
+            (AccessAction::ScrollRight, at.x < room_x),
+        ] {
+            if can {
+                node.add_action(action);
+            }
+        }
+    }
+
     fn paint_over(&mut self, cx: &PaintCx<'_>, canvas: &mut Canvas<'_>) {
         let theme = cx.theme();
         for axis in [Axis::Vertical, Axis::Horizontal] {

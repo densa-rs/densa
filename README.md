@@ -49,8 +49,11 @@ or windowing crate.
 - **Live tables.** Upsert Arrow batches by key; sorted, filtered views and grouped
   aggregates are kept up to date as rows change instead of being recomputed.
 - **Widgets with flexbox layout.** A retained widget tree laid out with flexbox, with pointer
-  capture, hover, focus and Tab order, and widgets for toolbars, forms, lists and split
-  panes; it runs headless, so interfaces are tested without a window.
+  capture, hover, focus and Tab order, and widgets for toolbars, forms, lists, split panes
+  and docking workspaces; it runs headless, so interfaces are tested without a window.
+- **Accessible.** Widgets describe themselves to screen readers (through AccessKit on
+  Windows, macOS and Linux) and do what they are asked: press, type, scroll, choose a tab.
+  Docking tabs are reachable and usable from the keyboard.
 - **Arrow from end to end.** Batches are shared, never copied, from the source to the
   screen; a grid over millions of rows costs only its visible rows.
 - **No allocation per frame.** Drawing, scrolling, hit-testing, delivering events and moving
@@ -93,9 +96,9 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 |---|---|
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, with typed, allocation-free cell formatting |
-| [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes; no window or GPU needed |
+| [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking |
-| [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out |
+| [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridSource`): columns, alignment, cell styles |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that fits the GPU's limits |
@@ -308,8 +311,9 @@ if reader.update() {
 ## Limitations
 
 - **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels, docking and a
-  data grid, with flexbox layout, events and focus. Not there yet: accessibility, menus, undo,
-  redo and the clipboard in text inputs; the grid is not yet a widget. Docking does not yet
+  data grid, with flexbox layout, events, focus and accessibility. Not there yet: menus, undo,
+  redo and the clipboard in text inputs, and text inputs' caret and selection for screen
+  readers; the grid is not yet a widget. Docking does not yet
   save and restore layouts (panels already carry stable keys for it) or float panels in
   their own windows.
 - **Live data:** views sort and filter, groups count, sum, average and find extremes; time

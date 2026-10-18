@@ -1,8 +1,8 @@
 use densa_core::{Color, Size};
 use densa_draw::Canvas;
 use densa_ui::{
-    ActionKind, Constraints, Cursor, Event, EventCx, Handled, Key, LayoutCx, NamedKey, PaintCx,
-    PointerButton, PointerKind, Theme, Widget,
+    AccessAction, AccessNode, AccessRequest, ActionKind, Constraints, Cursor, Event, EventCx,
+    Handled, Key, LayoutCx, NamedKey, PaintCx, PointerButton, PointerKind, Role, Theme, Widget,
 };
 
 use crate::paint::{centered, outline};
@@ -140,5 +140,19 @@ impl Widget for Button {
 
     fn accepts_focus(&self) -> bool {
         true
+    }
+
+    fn accessibility(&self, _: &PaintCx<'_>, node: &mut AccessNode) {
+        node.set_role(Role::Button);
+        node.set_label(self.text.as_str());
+        node.add_action(AccessAction::Click);
+    }
+
+    fn access_action(&mut self, cx: &mut EventCx<'_>, request: &AccessRequest<'_>) -> Handled {
+        if request.action != AccessAction::Click {
+            return Handled::No;
+        }
+        cx.emit(ActionKind::Clicked);
+        Handled::Yes
     }
 }

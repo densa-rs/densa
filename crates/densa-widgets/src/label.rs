@@ -1,6 +1,6 @@
 use densa_core::{Color, Point, Size};
 use densa_draw::Canvas;
-use densa_ui::{Constraints, EventCx, LayoutCx, PaintCx, Theme, Widget};
+use densa_ui::{AccessNode, Constraints, EventCx, LayoutCx, PaintCx, Role, Theme, Widget};
 
 use crate::text::Text;
 
@@ -71,6 +71,11 @@ impl Label {
 }
 
 impl Widget for Label {
+    fn accessibility(&self, _: &PaintCx<'_>, node: &mut AccessNode) {
+        node.set_role(Role::Label);
+        node.set_value(self.text.as_str());
+    }
+
     fn measure(&mut self, cx: &mut LayoutCx<'_>, constraints: Constraints) -> Size {
         let color = self.color(cx.theme());
         self.text.measure(cx, constraints, color)

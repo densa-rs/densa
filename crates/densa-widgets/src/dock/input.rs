@@ -1,7 +1,7 @@
 //! What the pointer does to the dock: clicking and dragging tabs, dragging dividers.
 
 use densa_core::Point;
-use densa_ui::{ActionKind, Cursor, EventCx, Handled, ScrollDelta};
+use densa_ui::{ActionKind, Cursor, EventCx, Handled, Key, KeyEvent, NamedKey, ScrollDelta};
 
 use super::geometry::divider_rect;
 use super::{Axis, DockArea, Drag, Found};
@@ -33,6 +33,9 @@ impl DockArea {
                 }
                 // A tab partly scrolled out of its bar comes wholly into view.
                 self.reveal(self.tabs[index].group, rect, scale);
+                // The keyboard now moves between this group's tabs.
+                self.focus_group = Some(self.tabs[index].group);
+                cx.request_focus();
                 self.drag = Some(Drag::Pressed {
                     tab: index,
                     from: at,
@@ -165,6 +168,80 @@ impl DockArea {
         }
         cx.request_paint();
         Handled::Yes
+    }
+
+    /// The keyboard: with the dock focused, the arrow keys, Home and End choose a tab of the
+    /// focused group; anywhere in the dock, Ctrl+Tab and Ctrl+Shift+Tab cycle through the
+    /// tabs of the group whose panel has focus.
+    pub(super) fn key(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Handled {
+        if !key.pressed {
+            return Handled::No;
+        }
+        let focused = cx.is_focused();
+        let only_control = key.modifiers.control() && !key.modifiers.alt() && !key.modifiers.logo();
+        let cycle = key.key == Key::Named(NamedKey::Tab) && only_control;
+        let group = if focused {
+            self.focused_group()
+        } else if cycle {
+            self.group_with_focus(cx)
+        } else {
+            None
+        };
+        let Some(group) = group else {
+            return Handled::No;
+        };
+        let (tabs, active) = self.group_tabs(group);
+        let count = tabs.len();
+        if count == 0 {
+            return Handled::No;
+        }
+        let back = (active + count - 1) % count;
+        let next = (active + 1) % count;
+        let to = match key.key {
+            Key::Named(NamedKey::Tab) if cycle => {
+                if key.modifiers.shift() {
+                    back
+                } else {
+                    next
+                }
+            }
+            Key::Named(NamedKey::ArrowLeft) if focused => back,
+            Key::Named(NamedKey::ArrowRight) if focused => next,
+            Key::Named(NamedKey::Home) if focused => 0,
+            Key::Named(NamedKey::End) if focused => count - 1,
+            _ => return Handled::No,
+        };
+        let index = tabs[to];
+        self.focus_group = Some(group);
+        if to != active {
+            self.activate(index);
+            self.restyle(cx);
+            cx.emit(ActionKind::Selected(index));
+        }
+        self.reveal(group, cx.rect(), cx.scale());
+        // Focus was in the panel just hidden: it moves to the tab list.
+        if !focused {
+            cx.request_focus();
+        }
+        cx.request_paint();
+        Handled::Yes
+    }
+
+    /// The group whose tabs the keyboard moves between while the dock has focus.
+    pub(super) fn focused_group(&self) -> Option<usize> {
+        let known = |g: &usize| self.frames.iter().any(|(f, _)| f == g);
+        self.focus_group
+            .filter(known)
+            .or_else(|| self.frames.first().map(|&(g, _)| g))
+    }
+
+    /// The group whose shown panel holds the keyboard focus.
+    fn group_with_focus(&self, cx: &EventCx<'_>) -> Option<usize> {
+        self.tabs
+            .iter()
+            .enumerate()
+            .find(|(i, tab)| self.is_active(*i) && cx.focus_within(tab.widget))
+            .map(|(_, tab)| tab.group)
     }
 
     /// Marks the tab `index` as the one under the pointer.

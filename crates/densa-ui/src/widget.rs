@@ -3,7 +3,7 @@ use std::any::Any;
 use densa_core::Size;
 use densa_draw::Canvas;
 
-use crate::{Event, EventCx, LayoutCx, PaintCx, WidgetId};
+use crate::{AccessNode, AccessRequest, Event, EventCx, LayoutCx, PaintCx, WidgetId};
 
 /// A part of the interface: it can measure itself, paint, and handle events.
 ///
@@ -47,6 +47,29 @@ pub trait Widget: Any {
     /// Whether the widget takes keyboard focus, by click or by Tab.
     fn accepts_focus(&self) -> bool {
         false
+    }
+
+    /// Whether a press on the widget, or on a widget inside it that takes no focus, focuses
+    /// it (if it [accepts focus](Self::accepts_focus)). A container reachable by Tab, such
+    /// as a dock's tab list, says no, so clicks on its contents do not focus it; it can still
+    /// ask for focus itself.
+    fn focus_on_press(&self) -> bool {
+        self.accepts_focus()
+    }
+
+    /// Describes the widget to assistive technology: fills `node`, which starts as a
+    /// [`Role::Group`](crate::Role::Group) with the widget's rectangle. Called only while
+    /// assistive technology is listening; it may allocate.
+    fn accessibility(&self, cx: &PaintCx<'_>, node: &mut AccessNode) {
+        let _ = (cx, node);
+    }
+
+    /// Does what assistive technology asks (only actions the widget's node lists are asked
+    /// of it). Focus and scrolling into view are done for every widget; a request the widget
+    /// does not handle goes on to its parent if it is a scroll.
+    fn access_action(&mut self, cx: &mut EventCx<'_>, request: &AccessRequest<'_>) -> Handled {
+        let _ = (cx, request);
+        Handled::No
     }
 }
 

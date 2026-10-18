@@ -25,11 +25,11 @@ Every `densa-*` crate in `crates/` is a library; applications live in `examples/
 | `densa-text` | Fonts, rasterization, the glyph atlas |
 | `densa-paragraph` | Shaped paragraphs, selection, `TextEditor` (on parley) |
 | `densa-draw` | The GPU-free display list: `Canvas` (with clipping), `InstanceBuffer` |
-| `densa-ui` | The widget tree: layout (flexbox, via taffy), events, focus, themes |
+| `densa-ui` | The widget tree: layout (flexbox, via taffy), events, focus, themes, accessibility tree |
 | `densa-widgets` | Labels, buttons, text inputs, scroll views, splitters, panels, docking |
 | `densa-grid` | The data grid widget over a `GridSource` |
 | `densa-render` | wgpu: draws a frame's instances in one call |
-| `densa-window` | Runs a `Ui` in a winit window, drawing with `densa-render` |
+| `densa-window` | Runs a `Ui` in a winit window, drawing with `densa-render`; screen readers via AccessKit |
 | `densa-data` | Live Arrow tables, views and grouped aggregates |
 | `densa-arrow` | Arrow tables and live views in the grid |
 | `densa-sync` | Lock-free hand-off between threads (triple buffer) |

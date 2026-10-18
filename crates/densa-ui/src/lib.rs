@@ -10,6 +10,10 @@
 //! Layout runs only when a style, a widget's content or the viewport changes; painting,
 //! hit-testing and delivering events run every frame and do not allocate.
 //!
+//! Widgets also describe themselves to assistive technology ([`Widget::accessibility`]):
+//! [`Ui::access_tree`] is what a screen reader reads, and [`Ui::access_action`] does what it
+//! asks. Both are platform-neutral; `densa-window` connects them to the operating system.
+//!
 //! ```
 //! use densa_core::{Point, Size};
 //! use densa_paragraph::TextSystem;
@@ -44,6 +48,8 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+mod access;
+mod access_tree;
 mod context;
 mod dispatch;
 mod event;
@@ -53,6 +59,7 @@ mod theme;
 mod ui;
 mod widget;
 
+pub use access::{AccessAction, AccessId, AccessNode, AccessRequest, AccessTree, Role, MAX_PART};
 pub use context::{EventCx, LayoutCx, PaintCx};
 pub use event::{
     Cursor, Event, Ime, Key, KeyEvent, Modifiers, NamedKey, PointerButton, PointerEvent,

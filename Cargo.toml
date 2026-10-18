@@ -14,6 +14,9 @@ readme = "README.md"
 rust-version = "1.90"
 
 [workspace.dependencies]
+# Screen readers: densa-window turns densa-ui's accessibility tree into the platform's.
+accesskit = "0.25.1"
+accesskit_winit = "0.34.1"
 densa-alloc = { path = "crates/densa-alloc", version = "0.1.0" }
 densa-arrow = { path = "crates/densa-arrow", version = "0.1.0" }
 densa-core = { path = "crates/densa-core", version = "0.1.0" }
