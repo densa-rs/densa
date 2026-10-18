@@ -253,6 +253,23 @@ impl TextSelection {
     }
 }
 
+/// Where Backspace with the caret at byte `index` starts deleting: the previous character
+/// (code point), so a combining accent comes off its letter as in other editors, except that
+/// a line break or an emoji is deleted whole.
+pub(crate) fn backspace_start(paragraph: &Paragraph, text: &str, index: usize) -> usize {
+    let at = cursor(paragraph, index, Affinity::Downstream);
+    let [upstream, _] = at.logical_clusters(paragraph.layout());
+    let Some(cluster) = upstream else {
+        return index;
+    };
+    if cluster.is_hard_line_break() || cluster.is_emoji() {
+        return cluster.text_range().start;
+    }
+    text.get(..index)
+        .and_then(|before| before.char_indices().next_back())
+        .map_or(index, |(start, _)| start)
+}
+
 /// A cursor at byte `index` clamped to the text.
 fn cursor(paragraph: &Paragraph, index: usize, affinity: Affinity) -> Cursor {
     let index = index.min(paragraph.text_len());

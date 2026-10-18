@@ -35,8 +35,8 @@ every frame without allocating memory.
 - **No locks between threads.** A wait-free triple buffer hands the newest data from a
   producer thread to the UI thread; its memory orderings are model-checked with loom.
 - **One draw call per frame** for every rectangle and glyph.
-- **Real text.** Shaping, wrapping, bidirectional text, alignment, selection and keyboard
-  navigation, built on [parley](https://github.com/linebender/parley).
+- **Real text.** Shaping, wrapping, bidirectional text, alignment, selection, editing and
+  input methods (IME), built on [parley](https://github.com/linebender/parley).
 - **Bounded memory.** The glyph atlas grows to a fixed limit, then reuses the least recently
   used space, never a glyph drawn in the current frame.
 - **Use only what you need.** Rendering, text and data hand-off are independent crates, and no
@@ -51,6 +51,7 @@ git clone https://github.com/densa-rs/densa
 cd densa
 cargo run --release -p trading-demo                          # live data grid
 cargo run --release -p densa-paragraph --example paragraphs  # text and selection
+cargo run --release -p densa-paragraph --example editor      # editable text
 ```
 
 To use the crates before they are published, depend on the repository:
@@ -67,7 +68,7 @@ densa-sync = { git = "https://github.com/densa-rs/densa" }
 | Crate | Use it for |
 |---|---|
 | [`densa-render`](crates/densa-render) | Drawing with wgpu: a `Canvas` that batches rectangles and text into one draw call, and a data grid you fill from your own data (`GridSource`) |
-| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection and keyboard navigation |
+| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, alignment, colored and sized spans, click-to-caret, selection, keyboard navigation, and editing with input methods (IME) |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that grows with your text and fits the GPU's limits |
 | [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect` |
 | [`densa-sync`](crates/densa-sync) | Wait-free triple buffer: hand the latest data from a producer thread to the UI thread without locks |
@@ -151,6 +152,26 @@ deletion, so right-to-left text behaves correctly. The
 [`paragraphs` example](crates/densa-paragraph/examples/paragraphs.rs) supports click, drag,
 shift+click, double- and triple-click, shift/ctrl + arrows and Home/End; resize the window to
 re-wrap.
+
+### Editable text
+
+```rust
+use densa_paragraph::{Motion, ParagraphStyle, TextEditor, TextSystem};
+
+let mut text = TextSystem::new()?;
+let mut editor = TextEditor::new(&mut text, "Hello", ParagraphStyle::new(15.0))?;
+editor.insert(&mut text, ", brave world")?; // typed, pasted or committed by an input method
+editor.delete(&mut text, Motion::PreviousWord)?; // ctrl+Backspace
+editor.move_caret(Motion::TextStart, false); // moving the caret never allocates
+```
+
+`TextEditor` keeps the text, its layout and the selection in step. Backspace removes one
+character (a combining accent comes off its letter; an emoji or line break goes whole), and
+`delete` takes any motion: by word, to the line start, forward. For input methods, pass
+winit's `Ime::Preedit` to `set_composition` and `Ime::Commit` to `insert`, underline
+`for_each_composition_rect`, and give `ime_area` to `Window::set_ime_cursor_area` so the
+candidate window opens next to the text. The
+[`editor` example](crates/densa-paragraph/examples/editor.rs) does all of this.
 
 ### Handing data to the UI thread
 
@@ -289,12 +310,12 @@ application code, not part of the published crates: every `densa-*` crate is a l
 
 ## Limitations
 
-- **Widgets:** a data grid and selectable paragraphs. No text input, layout system, event
-  routing or accessibility yet.
+- **Widgets:** a data grid, selectable paragraphs and editable text. No layout system, event
+  routing, focus handling or accessibility yet; text editing has no undo, redo or clipboard
+  yet (applications can call `selected_text` and `insert`).
 - **Text:** grid cells are single-line, unshaped text. Paragraphs use only the bundled font
   unless the `system-fonts` feature is enabled (no fallback for CJK without it). Not supported
-  yet: inline boxes, variable-font axes, synthetic bold and italic, color emoji, text editing
-  and input methods (IME).
+  yet: inline boxes, variable-font axes, synthetic bold and italic, color emoji.
 - **Glyphs:** if one frame needs more glyphs than the whole atlas holds, the extra ones appear
   in a later frame; glyphs larger than an atlas page are not drawn.
 - **Threads:** pinning is not isolation. Next to a busy neighbor, a pinned, time-critical

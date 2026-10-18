@@ -1,7 +1,9 @@
 //! Proves drawing a laid-out paragraph every frame never touches the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
-use densa_paragraph::{Color, Motion, ParagraphStyle, Point, Span, TextSelection, TextSystem};
+use densa_paragraph::{
+    Color, Motion, ParagraphStyle, Point, Span, TextEditor, TextSelection, TextSystem,
+};
 use densa_render::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
 use std::hint::black_box;
@@ -88,4 +90,36 @@ fn hit_testing_and_moving_selections_perform_zero_heap_operations() {
         }
     });
     assert!(stats.is_zero(), "selection work allocated: {stats:?}");
+}
+
+#[test]
+fn moving_the_caret_and_querying_an_editor_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut system = TextSystem::new().unwrap();
+    let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
+    let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
+    let mut editor = TextEditor::new(&mut system, text, style).unwrap();
+    editor
+        .set_composition(&mut system, "preedit", Some(7..7))
+        .unwrap();
+
+    let ((), stats) = measure(|| {
+        black_box(editor.ime_area());
+        editor.for_each_composition_rect(|rect| {
+            black_box(rect);
+        });
+        for step in 0..1_000u32 {
+            editor.move_caret(Motion::Left, step % 3 == 0);
+            editor.move_caret(Motion::Down, false);
+            let point = Point::new((step % 160) as f32, (step % 60) as f32);
+            editor.set_selection(TextSelection::at_point(editor.paragraph(), point));
+            black_box(editor.selected_text());
+            black_box(editor.ime_area());
+            black_box(editor.paragraph().runs().count());
+        }
+    });
+    assert!(stats.is_zero(), "caret work allocated: {stats:?}");
 }

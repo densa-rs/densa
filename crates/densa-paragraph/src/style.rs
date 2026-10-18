@@ -147,6 +147,9 @@ pub enum ParagraphError {
     InvalidWidth(f32),
     /// A span's range is reversed, outside the text, or splits a character.
     InvalidSpan(Range<usize>),
+    /// A byte range (such as an input method's cursor in its preedit text) is reversed,
+    /// outside its text, or splits a character.
+    InvalidRange(Range<usize>),
     /// The shaper chose a font whose data cannot be read for drawing.
     UnreadableFont,
 }
@@ -161,6 +164,10 @@ impl fmt::Display for ParagraphError {
             Self::InvalidSpan(range) => write!(
                 f,
                 "span {range:?} is reversed, outside the text, or splits a character"
+            ),
+            Self::InvalidRange(range) => write!(
+                f,
+                "range {range:?} is reversed, outside its text, or splits a character"
             ),
             Self::UnreadableFont => f.write_str("a font chosen for the text cannot be read"),
         }
@@ -194,14 +201,17 @@ pub(crate) fn check_width(width: Option<f32>) -> Result<Option<f32>, ParagraphEr
 }
 
 pub(crate) fn check_span(text: &str, span: &Span) -> Result<(), ParagraphError> {
-    let Range { start, end } = span.range;
-    let valid = start <= end
-        && end <= text.len()
-        && text.is_char_boundary(start)
-        && text.is_char_boundary(end);
-    if !valid {
+    if !is_char_range(text, &span.range) {
         return Err(ParagraphError::InvalidSpan(span.range.clone()));
     }
     span.size_px.map(check_font_size).transpose()?;
     Ok(())
+}
+
+/// Whether `range` is in order, within `text` and on character boundaries.
+pub(crate) fn is_char_range(text: &str, range: &Range<usize>) -> bool {
+    range.start <= range.end
+        && range.end <= text.len()
+        && text.is_char_boundary(range.start)
+        && text.is_char_boundary(range.end)
 }
