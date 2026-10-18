@@ -1,3 +1,4 @@
+use crate::market::{market_painter, MarketGrid};
 use crate::pinning::{describe_pin, worker_pin};
 use crate::report::{
     format_cpu, format_duration_ns as dur, format_latency, format_priority, format_rate as rate,
@@ -9,7 +10,7 @@ use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencySummary, ProbeReport, WorkerHandle, WorkerMetrics,
 };
 use densa_platform::logical_cpus;
-use densa_render::{GlyphAtlas, GridLayout, GridPainter, InstanceBuffer};
+use densa_render::{GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use std::error::Error;
 use std::hint::black_box;
@@ -77,7 +78,7 @@ pub fn run_headless(args: &Args, out: &mut impl Write) -> Result<RunSummary, Box
         pin_note,
     )?;
 
-    let mut frame = Frame::new(args.worker.symbols);
+    let mut frame = Frame::new(args.worker.symbols)?;
     let mut total = FrameProbe::new();
     let frame_ns = NANOS_PER_SEC / u64::from(args.fps);
     let start = clock.now_ns();
@@ -142,17 +143,20 @@ struct Frame {
 }
 
 impl Frame {
-    fn new(symbols: u32) -> Self {
+    fn new(symbols: u32) -> Result<Self, Box<dyn Error>> {
         // Lossless: VIEWPORT_ROWS is a small constant.
-        let layout = GridLayout::new(VIEWPORT_ROWS as u32);
-        Self {
+        let mut painter = market_painter(VIEWPORT_ROWS as u32)?;
+        // No GPU here: the prewarmed glyphs' pixels are discarded, once, at startup.
+        painter.drain_uploads().for_each(drop);
+        let instances = InstanceBuffer::with_capacity(painter.layout().max_instances());
+        Ok(Self {
             window: FrameProbe::new(),
-            painter: GridPainter::new(layout, &GlyphAtlas::font8x8()),
-            instances: InstanceBuffer::with_capacity(layout.max_instances()),
+            painter,
+            instances,
             first_row: 0,
             max_first_row: symbols.saturating_sub(VIEWPORT_ROWS as u32),
             scrolling_down: true,
-        }
+        })
     }
 
     fn render(
@@ -169,8 +173,11 @@ impl Frame {
         reader.read(|snapshot| {
             window.observe(snapshot, fresh, now);
             total.observe(snapshot, fresh, now);
-            painter.paint(snapshot, now, instances);
+            let palette = *painter.palette();
+            painter.paint(&MarketGrid::new(snapshot, now, palette), instances);
         });
+        // Any glyph missed by the prewarm shows up here as heap operations.
+        self.painter.drain_uploads().for_each(drop);
         black_box(self.instances.as_slice());
         self.scroll();
         worker.set_viewport(self.first_row);

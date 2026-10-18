@@ -1,5 +1,6 @@
-use crate::{GlyphAtlas, Instance, ATLAS_HEIGHT, ATLAS_WIDTH};
+use crate::Instance;
 use bytemuck::{Pod, Zeroable};
+use densa_text::GlyphUpload;
 use std::mem::size_of;
 
 #[repr(C)]
@@ -11,30 +12,39 @@ struct Globals {
 
 /// GPU resources for drawing a frame of [`Instance`]s in one draw call.
 ///
-/// Everything is created up front; per frame only [`GpuGrid::prepare`] (two buffer
-/// writes) and [`GpuGrid::render`] (one pass, one draw) run.
+/// Everything is created up front; per frame only [`GpuGrid::upload_glyphs`] (only when
+/// new glyphs appeared), [`GpuGrid::prepare`] (two buffer writes) and [`GpuGrid::render`]
+/// (one pass, one draw) run.
 #[derive(Debug)]
 pub struct GpuGrid {
     pipeline: wgpu::RenderPipeline,
     bind_group: wgpu::BindGroup,
     globals: wgpu::Buffer,
     instances: wgpu::Buffer,
+    atlas: wgpu::Texture,
     capacity: usize,
 }
 
 impl GpuGrid {
+    /// A grid drawing up to `capacity` instances with glyphs from an empty
+    /// `atlas_size` x `atlas_size` coverage atlas, filled by [`GpuGrid::upload_glyphs`].
+    ///
+    /// Pass the painter's `GridPainter::atlas_size()`: glyph UVs are normalized by the cache's
+    /// atlas size, so a different texture size samples the wrong texels.
+    ///
     /// `format` must match the color target `render` will draw into; use an sRGB format
     /// (or an sRGB view of the surface) so linear shader colors display correctly.
     pub fn new(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         format: wgpu::TextureFormat,
         capacity: usize,
+        atlas_size: u32,
     ) -> Self {
-        let atlas_view = upload_atlas(device, queue, &GlyphAtlas::font8x8());
+        let atlas = create_atlas(device, atlas_size);
+        let atlas_view = atlas.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("densa atlas sampler"),
-            // Nearest: the bitmap font is drawn at integer scales and must stay crisp.
+            // Nearest: glyphs are drawn texel-for-pixel at whole-pixel positions.
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
@@ -78,6 +88,7 @@ impl GpuGrid {
             bind_group,
             globals,
             instances,
+            atlas,
             capacity,
         }
     }
@@ -85,6 +96,63 @@ impl GpuGrid {
     /// Instances the GPU buffer holds; more are clipped by [`GpuGrid::prepare`].
     pub fn capacity(&self) -> usize {
         self.capacity
+    }
+
+    /// Side of the square glyph atlas in pixels.
+    pub fn atlas_size(&self) -> u32 {
+        self.atlas.width()
+    }
+
+    /// Copies newly rasterized glyphs into the atlas, in order. Returns how many were
+    /// written; uploads that do not lie inside the atlas are skipped.
+    pub fn upload_glyphs(
+        &self,
+        queue: &wgpu::Queue,
+        uploads: impl IntoIterator<Item = GlyphUpload>,
+    ) -> usize {
+        let side = self.atlas_size();
+        let mut written = 0;
+        for upload in uploads {
+            let inside = upload
+                .x
+                .checked_add(upload.width)
+                .is_some_and(|r| r <= side)
+                && upload
+                    .y
+                    .checked_add(upload.height)
+                    .is_some_and(|b| b <= side);
+            let complete =
+                upload.coverage.len() as u64 == u64::from(upload.width) * u64::from(upload.height);
+            debug_assert!(inside && complete, "malformed glyph upload {upload:?}");
+            if upload.width == 0 || upload.height == 0 || !inside || !complete {
+                continue;
+            }
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.atlas,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d {
+                        x: upload.x,
+                        y: upload.y,
+                        z: 0,
+                    },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                &upload.coverage,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(upload.width),
+                    rows_per_image: Some(upload.height),
+                },
+                wgpu::Extent3d {
+                    width: upload.width,
+                    height: upload.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+            written += 1;
+        }
+        written
     }
 
     /// Uploads the frame's instances for a `screen` of (width, height) physical pixels.
@@ -137,37 +205,22 @@ impl GpuGrid {
     }
 }
 
-fn upload_atlas(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    atlas: &GlyphAtlas,
-) -> wgpu::TextureView {
-    let size = wgpu::Extent3d {
-        width: ATLAS_WIDTH,
-        height: ATLAS_HEIGHT,
-        depth_or_array_layers: 1,
-    };
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
+/// An R8 coverage atlas; wgpu zero-initializes it, so unwritten texels are transparent.
+fn create_atlas(device: &wgpu::Device, side: u32) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
         label: Some("densa glyph atlas"),
-        size,
+        size: wgpu::Extent3d {
+            width: side.max(1),
+            height: side.max(1),
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
         format: wgpu::TextureFormat::R8Unorm,
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
-    });
-    queue.write_texture(
-        texture.as_image_copy(),
-        atlas.pixels(),
-        wgpu::TexelCopyBufferLayout {
-            offset: 0,
-            bytes_per_row: Some(ATLAS_WIDTH),
-            rows_per_image: Some(ATLAS_HEIGHT),
-        },
-        size,
-    );
-    texture.create_view(&wgpu::TextureViewDescriptor::default())
+    })
 }
 
 fn bind_group_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {

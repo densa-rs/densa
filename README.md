@@ -27,9 +27,10 @@ priority (the defaults). Numbers are from the summary line each run prints.
 | Headless, 200k ticks/s target | 200.0k ticks/s | 120.0 fps | 156 us / 328 us | worker 0, frame loop 0 |
 | Headless, unbounded, batch 1024 | 115.3M ticks/s | 120.0 fps | 47 us / 107 us | worker 0, frame loop 0 |
 
-Building a frame's 50 rows of instances (`GridPainter::paint`) takes ~19 us (p50) and ~29 us
-(p99). wgpu itself allocates during submit/present (~197 heap operations per frame); that is
-measured and reported separately, not hidden.
+Building a frame's 50 rows of instances (`GridPainter::paint`) takes ~35 us (p50) and ~65 us
+(p99) with real text (JetBrains Mono 13px, two cache lookups per glyph); the 8x8 bitmap font it
+replaced took ~19 us. wgpu itself allocates during submit/present (~199 heap operations per
+frame); that is measured and reported separately, not hidden.
 
 Micro-benchmarks (criterion, bench thread pinned to a P-core): triple buffer publish 4.4 ns,
 update + read 10.6 ns, 2.8 KB fill + publish with a reader spinning on another core 72 ns;
@@ -101,12 +102,12 @@ Every second a line like this is printed (and the window title shows a summary):
 | `densa-platform` | CPU topology, thread pinning, process-wide CPU claim registry (the only FFI) |
 | `densa-engine` | Ingestion worker, pacer, latency histogram, frame probe |
 | `densa-text` | Fonts, glyph rasterization and an allocation-free glyph atlas cache |
-| `densa-render` | `GridPainter` (GPU-free, unit-tested) and `GpuGrid` (wgpu 30) |
-| `densa-poc` | The demo binary: argument parsing, window and headless modes |
+| `densa-render` | Domain-agnostic grid: `GridSource` trait, `GridPainter` (GPU-free, unit-tested), `GpuGrid` (wgpu 30) |
+| `densa-poc` | The demo binary: market columns (`MarketGrid`), argument parsing, window and headless modes |
 | `densa-bench` | Criterion benchmarks, kept out of the libraries' dependencies |
 
-Dependencies only point downward (app → render → engine → data/sync); core crates never
-depend on GPU or windowing crates.
+Dependencies only point downward (app → render → text/fmt, app → engine → data/sync); core
+crates never depend on GPU or windowing crates, and the renderer knows nothing about markets.
 
 ### Design decisions, and the evidence behind them
 
@@ -130,9 +131,13 @@ depend on GPU or windowing crates.
   with snapshot age p99 32.5 ms; `above`/`high` only reached ~170k with p99 ~30 ms; only
   `critical` held 198k with p99 under 1 ms. The demo defaults to it (`--priority normal` opts
   out); the library default stays `Normal`.
-- **One draw call.** Every quad is a solid rectangle or a glyph from an 8x8 bitmap-font atlas,
-  drawn as instances. Building them is GPU-free code with unit tests; the GPU half is verified
-  by rendering offscreen and reading pixels back.
+- **One draw call.** Every quad is a solid rectangle or a glyph from a coverage atlas, drawn
+  as instances. Glyphs are rasterized on first use (4 subpixel positions) and uploaded once;
+  the demo rasterizes its whole character set at startup, so frames never allocate. Building
+  instances is GPU-free code with unit tests; the GPU half is verified by rendering offscreen
+  and reading pixels back.
+- **The renderer is generic.** Apps describe columns and implement `GridSource`, formatting
+  each cell into a stack buffer; markets, prices and flashes live in the demo, not the renderer.
 - **Only the LAST cell flashes, for 300 ms.** With each symbol changing ~20 times per second, a
   first version that flashed whole rows for 600 ms turned the grid into a wall of color.
 
@@ -166,8 +171,13 @@ calls are covered by tests that watch threads actually move between CPUs.
   processes, `isolcpus` on Linux) is the remaining step.
 - **CPU pinning is Windows-only**; elsewhere `--pin auto` runs unpinned and says so.
 - **The CPU claim registry is per process**: two densa processes may still pick the same core.
-- **Text is an 8x8 ASCII bitmap font.** A shaped, proportional font with a glyph cache
-  (allocating only on cache misses) is needed for real applications.
+- **Text is unshaped, single-line.** One glyph per character: precomposed Vietnamese and
+  other Latin text work, but ligatures, combining marks, complex scripts and bidi need a
+  shaper (parley is planned). No font fallback: missing characters render as `?`. Characters
+  outside the prewarmed set allocate once, the first time they are drawn.
+- **The glyph atlas has a fixed size** (1024 x 1024). When it fills with glyphs needed in the
+  same frame, extra glyphs are dropped (counted) and retried every frame; eviction is plain LRU
+  on a shelf packer. Fine for grids, not yet for text-heavy views.
 - **The feed is synthetic.** No network ingestion, order book or persistence yet.
 - wgpu allocates per frame internally; "zero-allocation frames" covers densa's own code.
 

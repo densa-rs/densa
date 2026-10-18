@@ -1,166 +1,72 @@
-use crate::{GlyphAtlas, Instance, InstanceBuffer, Palette, GLYPH_PX};
-use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
-use densa_fmt::{write_fixed, write_grouped, FmtBuf};
-use std::fmt::Write as _;
+use crate::{Align, Column, GridLayout, Instance, InstanceBuffer, Palette};
+use densa_fmt::FmtBuf;
+use densa_text::{quantize_x, CacheStats, Font, GlyphCache, GlyphMap, GlyphUpload, SUBPIXEL_STEPS};
 
-/// Horizontal alignment of text within a column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Align {
-    /// Flush with the column's left edge (labels).
-    Left,
-    /// Flush with the column's right edge (numbers).
-    Right,
+/// Bytes a cell's text may take. [`FmtBuf`] appends are all-or-nothing, so a write that
+/// does not fit leaves the cell as it was (blank if nothing was written yet), not truncated.
+pub const CELL_BYTES: usize = 64;
+
+/// The stack buffer a [`GridSource`] writes one cell's text into.
+pub type CellText = FmtBuf<CELL_BYTES>;
+
+/// Side of the square glyph atlas in pixels: room for thousands of glyphs at grid sizes.
+pub const ATLAS_SIZE: u32 = 1024;
+
+/// How one cell is drawn.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CellStyle {
+    /// Text color, linear RGBA.
+    pub color: [f32; 4],
+    /// Cell fill drawn under the text, linear RGBA; `None` for none.
+    pub background: Option<[f32; 4]>,
 }
 
-/// A grid column: header title, width in characters, alignment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Column {
-    /// Header text.
-    pub title: &'static str,
-    /// Width in characters.
-    pub chars: u32,
-    /// Text alignment.
-    pub align: Align,
-}
-
-/// The grid's columns, left to right: SYMBOL, BID, ASK, LAST, VOLUME.
-pub const COLUMNS: [Column; 5] = [
-    Column {
-        title: "SYMBOL",
-        chars: 8,
-        align: Align::Left,
-    },
-    Column {
-        title: "BID",
-        chars: 10,
-        align: Align::Right,
-    },
-    Column {
-        title: "ASK",
-        chars: 10,
-        align: Align::Right,
-    },
-    Column {
-        title: "LAST",
-        chars: 10,
-        align: Align::Right,
-    },
-    Column {
-        title: "VOLUME",
-        chars: 15,
-        align: Align::Right,
-    },
-];
-
-const LAST_COLUMN: usize = 3;
-const PRICE_DECIMALS: usize = 2;
-
-/// How long the LAST cell flashes after the last-traded price changes.
+/// The data a [`GridPainter`] draws: one call per visible cell, every frame.
 ///
-/// Short on purpose: a busy symbol changes price many times per second, and a flash that
-/// outlives the gap between changes never fades.
-pub const FLASH_NS: u64 = 300_000_000;
+/// Implementations format straight into `text` (see `densa_fmt`) so a frame allocates
+/// nothing.
+pub trait GridSource {
+    /// Rows available; the painter draws at most as many as its layout holds.
+    fn rows(&self) -> usize;
 
-/// Flash opacity `age_ns` after a price change: full at 0, linearly fading to 0.
-pub fn flash_alpha(age_ns: u64) -> f32 {
-    if age_ns >= FLASH_NS {
-        return 0.0;
-    }
-    let remaining = 1.0 - age_ns as f32 / FLASH_NS as f32;
-    Palette::FLASH_MAX_ALPHA * remaining
+    /// Writes the text of the cell at `row`, `column` into `text` (empty on entry) and
+    /// returns its style.
+    ///
+    /// Text over [`CELL_BYTES`] does not fit: write a placeholder instead (for example a
+    /// run of `#`, which the painter shows as overflow) rather than ignoring the error.
+    fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle;
 }
 
-/// Pixel geometry of the grid. All sizes are physical pixels.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct GridLayout {
-    /// Data rows (the header is extra).
-    pub rows: u32,
-    /// Screen pixels per font pixel; integer so the bitmap font stays crisp.
-    pub glyph_scale: u32,
-    /// Row pitch in pixels.
-    pub row_height: u32,
-    /// Margin around the grid in pixels.
-    pub padding: u32,
-    /// Blank characters between columns.
-    pub gap_chars: u32,
-}
-
-impl GridLayout {
-    /// Layout for `rows` data rows with the PoC defaults: 2x glyphs, 18 px rows.
-    pub const fn new(rows: u32) -> Self {
-        Self {
-            rows,
-            glyph_scale: 2,
-            row_height: 18,
-            padding: 8,
-            gap_chars: 2,
-        }
-    }
-
-    /// Width of one character cell in pixels.
-    pub const fn char_width(&self) -> u32 {
-        GLYPH_PX * self.glyph_scale
-    }
-
-    /// Height of a drawn glyph in pixels.
-    pub const fn glyph_height(&self) -> u32 {
-        GLYPH_PX * self.glyph_scale
-    }
-
-    fn total_chars(&self) -> u32 {
-        COLUMNS.iter().map(|c| c.chars).sum::<u32>() + self.gap_chars * (COLUMNS.len() as u32 - 1)
-    }
-
-    /// Total grid width in pixels, padding included.
-    pub fn width(&self) -> u32 {
-        self.padding * 2 + self.total_chars() * self.char_width()
-    }
-
-    /// Total grid height in pixels: header plus data rows, padding included.
-    pub fn height(&self) -> u32 {
-        self.padding * 2 + (self.rows + 1) * self.row_height
-    }
-
-    /// Left edge of column `index`.
-    pub fn column_x(&self, index: usize) -> u32 {
-        let chars_before: u32 = COLUMNS[..index].iter().map(|c| c.chars).sum();
-        self.padding + (chars_before + self.gap_chars * index as u32) * self.char_width()
-    }
-
-    /// Top edge of grid row `row` (0 is the header).
-    pub fn row_y(&self, row: u32) -> u32 {
-        self.padding + row * self.row_height
-    }
-
-    /// Instances needed for a full viewport in the worst case: every cell filled, plus a
-    /// stripe and a flash per row and the header bar.
-    pub fn max_instances(&self) -> usize {
-        let per_row = COLUMNS.iter().map(|c| c.chars).sum::<u32>() + 2;
-        ((self.rows + 1) * per_row + 1) as usize
-    }
-}
-
-/// Builds the instances of one frame from a viewport snapshot. Allocation-free.
-#[derive(Debug, Clone)]
+/// Turns a [`GridSource`] into the [`Instance`]s of one frame.
+///
+/// Owns the font, its character map and the glyph atlas cache. Painting a frame whose
+/// characters have all been drawn (or [prewarmed](Self::prewarm)) before allocates nothing;
+/// a character seen for the first time is mapped and rasterized (allocating, once) and its
+/// pixels queued in [`drain_uploads`](Self::drain_uploads) for the GPU atlas, whose side must
+/// be [`atlas_size`](Self::atlas_size).
+#[derive(Debug)]
 pub struct GridPainter {
+    columns: Box<[Column]>,
     layout: GridLayout,
     palette: Palette,
-    uvs: [[f32; 4]; 128],
-    cell: FmtBuf<32>,
+    text: TextPen,
+    cell: CellText,
 }
 
 impl GridPainter {
-    /// A painter for `layout`, caching each glyph's UV rectangle from `atlas`.
-    pub fn new(layout: GridLayout, atlas: &GlyphAtlas) -> Self {
-        let mut uvs = [[0.0; 4]; 128];
-        for (code, uv) in (0u8..).zip(uvs.iter_mut()) {
-            *uv = atlas.uv(code);
-        }
+    /// A painter for `rows` data rows of `columns`, in `font` at `px` pixels per em.
+    pub fn new(columns: Vec<Column>, rows: u32, font: Font, px: f32, palette: Palette) -> Self {
+        let mut glyphs = GlyphMap::new(font, px);
+        let layout = GridLayout::new(&columns, rows, &mut glyphs);
         Self {
+            columns: columns.into_boxed_slice(),
             layout,
-            palette: Palette::new(),
-            uvs,
-            cell: FmtBuf::new(),
+            palette,
+            text: TextPen {
+                glyphs,
+                cache: GlyphCache::new(ATLAS_SIZE),
+            },
+            cell: CellText::new(),
         }
     }
 
@@ -174,152 +80,185 @@ impl GridPainter {
         &self.palette
     }
 
-    /// Replaces `out` with the frame for `snapshot` as of `now_ns` (same clock as the
-    /// snapshot's timestamps; drives the flash fade).
-    pub fn paint<const N: usize>(
-        &mut self,
-        snapshot: &ViewportSnapshot<N>,
-        now_ns: u64,
-        out: &mut InstanceBuffer,
-    ) {
-        out.clear();
-        let header_y = self.layout.row_y(0) as f32;
-        out.push(Instance::solid(
-            [
-                0.0,
-                header_y,
-                self.layout.width() as f32,
-                self.layout.row_height as f32,
-            ],
-            self.palette.header_background,
-        ));
-        for (index, column) in COLUMNS.iter().enumerate() {
-            self.draw(
-                column.title.as_bytes(),
-                index,
-                header_y,
-                self.palette.header_text,
-                out,
-            );
-        }
-        for (r, row) in (1u32..).zip(snapshot.visible()) {
-            self.paint_row(row, r, now_ns, out);
-        }
+    /// The columns, left to right.
+    pub fn columns(&self) -> &[Column] {
+        &self.columns
     }
 
-    fn paint_row(
-        &mut self,
-        row: &RowSnapshot,
-        grid_row: u32,
-        now_ns: u64,
-        out: &mut InstanceBuffer,
-    ) {
-        let y = self.layout.row_y(grid_row) as f32;
-        let full_row = [
-            0.0,
-            y,
-            self.layout.width() as f32,
-            self.layout.row_height as f32,
-        ];
-        if grid_row.is_multiple_of(2) {
-            out.push(Instance::solid(full_row, self.palette.stripe));
-        }
+    /// Side of the square atlas texture the uploads target, in pixels.
+    pub fn atlas_size(&self) -> u32 {
+        self.text.cache.atlas_size()
+    }
 
-        let direction_color = match row.direction {
-            Direction::Up => Some(self.palette.up),
-            Direction::Down => Some(self.palette.down),
-            Direction::Flat => None,
-        };
-        if let Some([r, g, b, _]) = direction_color {
-            let alpha = flash_alpha(now_ns.saturating_sub(row.last_change_ns));
-            if alpha > 0.0 {
-                out.push(Instance::solid(
-                    self.cell_rect(LAST_COLUMN, y),
-                    [r, g, b, alpha],
-                ));
+    /// Glyph cache counters.
+    pub fn cache_stats(&self) -> CacheStats {
+        self.text.cache.stats()
+    }
+
+    /// Rasterizes every character of `chars` at every subpixel position now, so frames that
+    /// only use them never rasterize (or allocate). Uploads queue as usual.
+    pub fn prewarm(&mut self, chars: &str) {
+        let pen = &mut self.text;
+        pen.cache.begin_frame();
+        for ch in chars.chars() {
+            let Some(mapped) = pen.glyphs.get(ch) else {
+                continue;
+            };
+            for bin in 0..SUBPIXEL_STEPS {
+                let _ = pen
+                    .cache
+                    .get(pen.glyphs.font(), mapped.id, pen.glyphs.px(), bin);
             }
         }
-
-        self.cell.clear();
-        // Fits: "SYM" + at most 10 digits of a u32 is 13 bytes of a 32-byte buffer.
-        let _ = write!(self.cell, "SYM{:05}", row.symbol_id);
-        self.draw_cell(0, y, self.palette.text, out);
-
-        for (column, price) in [(1, row.bid), (2, row.ask)] {
-            let color = self.price_text(price, self.palette.text);
-            self.draw_cell(column, y, color, out);
-        }
-        let last_color = self.price_text(row.last, direction_color.unwrap_or(self.palette.text));
-        self.draw_cell(LAST_COLUMN, y, last_color, out);
-
-        self.cell.clear();
-        // Fits: u64::MAX grouped is 26 bytes; wider than the column, it renders as '#'.
-        let _ = write_grouped(&mut self.cell, row.volume, ',');
-        self.draw_cell(4, y, self.palette.text, out);
     }
 
-    /// Formats `price` into the cell buffer; returns the color to draw it with.
-    fn price_text(&mut self, price: f64, color: [f32; 4]) -> [f32; 4] {
-        self.cell.clear();
-        if write_fixed(&mut self.cell, price, PRICE_DECIMALS).is_ok() {
-            return color;
+    /// Takes the glyph pixels queued since the last call; copy them into the GPU atlas
+    /// before drawing the frame just painted.
+    pub fn drain_uploads(&mut self) -> std::vec::Drain<'_, GlyphUpload> {
+        self.text.cache.drain_uploads()
+    }
+
+    /// Replaces `out` with the frame for `source`.
+    pub fn paint<S: GridSource + ?Sized>(&mut self, source: &S, out: &mut InstanceBuffer) {
+        out.clear();
+        self.text.cache.begin_frame();
+        let width = self.layout.width() as f32;
+        let row_height = self.layout.row_height() as f32;
+
+        let header_y = self.layout.row_y(0) as f32;
+        out.push(Instance::solid(
+            [0.0, header_y, width, row_height],
+            self.palette.header_background,
+        ));
+        let baseline = self.layout.baseline_y(0);
+        for (index, column) in self.columns.iter().enumerate() {
+            let cell = Cell {
+                index,
+                align: column.align,
+                baseline,
+                color: self.palette.header_text,
+            };
+            self.text.draw(&column.title, cell, &self.layout, out);
         }
-        // NaN (no quote yet) or too long for any column: `draw` turns the latter into '#'.
-        self.cell.clear();
-        if price.is_finite() {
-            // Longer than every column, so it renders as '#' fill.
-            let _ = self.cell.push_str("################################");
-            color
-        } else {
-            let _ = self.cell.push_str("-");
-            self.palette.dim_text
+
+        let visible = source.rows().min(self.layout.rows() as usize);
+        for (row, grid_row) in (0..visible).zip(1u32..) {
+            let y = self.layout.row_y(grid_row) as f32;
+            if grid_row.is_multiple_of(2) {
+                out.push(Instance::solid(
+                    [0.0, y, width, row_height],
+                    self.palette.stripe,
+                ));
+            }
+            let baseline = self.layout.baseline_y(grid_row);
+            for (index, column) in self.columns.iter().enumerate() {
+                self.cell.clear();
+                let style = source.cell(row, index, &mut self.cell);
+                if let Some(background) = style.background {
+                    out.push(Instance::solid(self.cell_rect(index, y), background));
+                }
+                let cell = Cell {
+                    index,
+                    align: column.align,
+                    baseline,
+                    color: style.color,
+                };
+                self.text.draw(self.cell.as_str(), cell, &self.layout, out);
+            }
         }
     }
 
-    /// Background rectangle of one cell: the column plus half a character of margin on
-    /// each side, so it never touches neighbouring columns.
+    /// Background rectangle of one cell: the column plus half the gap on each side, so
+    /// neighbouring cell backgrounds meet without overlapping.
     fn cell_rect(&self, column: usize, y: f32) -> [f32; 4] {
-        let char_width = self.layout.char_width() as f32;
-        let margin = char_width / 2.0;
+        let margin = self.layout.gap() as f32 / 2.0;
         [
             self.layout.column_x(column) as f32 - margin,
             y,
-            (COLUMNS[column].chars as f32) * char_width + 2.0 * margin,
-            self.layout.row_height as f32,
+            self.layout.column_width(column) as f32 + 2.0 * margin,
+            self.layout.row_height() as f32,
         ]
     }
+}
 
-    fn draw_cell(&self, column: usize, y: f32, color: [f32; 4], out: &mut InstanceBuffer) {
-        self.draw(self.cell.as_bytes(), column, y, color, out);
+/// Where and how one cell's text goes.
+#[derive(Debug, Clone, Copy)]
+struct Cell {
+    index: usize,
+    align: Align,
+    baseline: f32,
+    color: [f32; 4],
+}
+
+/// Character mapping plus glyph cache: lays out and emits glyph quads.
+#[derive(Debug)]
+struct TextPen {
+    glyphs: GlyphMap,
+    cache: GlyphCache,
+}
+
+/// Text that cannot be measured more precisely than this is treated as fitting.
+const FIT_EPSILON: f32 = 0.01;
+
+impl TextPen {
+    /// Draws `text` aligned in its column; text wider than the column (in pixels or in
+    /// characters) becomes `#` fill, like a spreadsheet, rather than a misleading truncated
+    /// number.
+    fn draw(&mut self, text: &str, cell: Cell, layout: &GridLayout, out: &mut InstanceBuffer) {
+        let left = layout.column_x(cell.index) as f32;
+        let room = layout.column_width(cell.index) as f32;
+        let max_chars = layout.column_chars(cell.index) as usize;
+
+        let width = self.glyphs.measure(text);
+        if width <= room + FIT_EPSILON && text.chars().count() <= max_chars {
+            self.run(text.chars(), width, left, room, cell, out);
+            return;
+        }
+        let hash = self
+            .glyphs
+            .get('#')
+            .map_or(layout.char_width(), |g| g.advance);
+        // Lossless: column widths are a few hundred pixels at most.
+        let count = ((room / hash) as usize).min(max_chars);
+        let fill = std::iter::repeat_n('#', count);
+        self.run(fill, count as f32 * hash, left, room, cell, out);
     }
 
-    /// Draws `text` in `column` at row top `y`; text wider than the column becomes `#`s,
-    /// like a spreadsheet, rather than a misleading truncated number.
-    fn draw(&self, text: &[u8], column: usize, y: f32, color: [f32; 4], out: &mut InstanceBuffer) {
-        let spec = COLUMNS[column];
-        let width = spec.chars as usize;
-        let overflow = text.len() > width;
-        let len = if overflow { width } else { text.len() };
-        let pad = match spec.align {
-            Align::Left => 0,
-            Align::Right => width - len,
+    fn run(
+        &mut self,
+        chars: impl Iterator<Item = char>,
+        width: f32,
+        left: f32,
+        room: f32,
+        cell: Cell,
+        out: &mut InstanceBuffer,
+    ) {
+        let mut pen = match cell.align {
+            Align::Left => left,
+            Align::Right => left + room - width,
         };
-
-        let char_width = self.layout.char_width() as f32;
-        let glyph_height = self.layout.glyph_height() as f32;
-        let x0 = self.layout.column_x(column) as f32 + pad as f32 * char_width;
-        let top = y + (self.layout.row_height - self.layout.glyph_height()) as f32 / 2.0;
-        for (k, &byte) in text.iter().take(len).enumerate() {
-            let byte = if overflow { b'#' } else { byte };
-            if byte == b' ' {
+        for ch in chars {
+            let Some(mapped) = self.glyphs.get(ch) else {
                 continue;
+            };
+            let (x, bin) = quantize_x(pen);
+            pen += mapped.advance;
+            let (font, px) = (self.glyphs.font(), self.glyphs.px());
+            let Some(glyph) = self.cache.get(font, mapped.id, px, bin) else {
+                continue; // Atlas full of this frame's glyphs: counted in the cache stats.
+            };
+            if glyph.size[0] == 0.0 {
+                continue; // No ink, e.g. a space.
             }
-            let uv = self.uvs[usize::from(byte & 0x7F)];
-            let x = x0 + k as f32 * char_width;
             out.push(Instance::glyph(
-                [x, top, char_width, glyph_height],
-                uv,
-                color,
+                [
+                    x as f32 + glyph.offset[0],
+                    cell.baseline + glyph.offset[1],
+                    glyph.size[0],
+                    glyph.size[1],
+                ],
+                glyph.uv,
+                cell.color,
             ));
         }
     }

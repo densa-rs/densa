@@ -9,9 +9,8 @@ rust-version.workspace = true
 
 [dependencies]
 bytemuck = { workspace = true, features = ["derive"] }
-densa-data.workspace = true
 densa-fmt.workspace = true
-font8x8 = { workspace = true, default-features = false }
+densa-text.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]

@@ -1,50 +1,66 @@
-//! Proves building a frame's instances never touches the heap.
+//! Proves painting warm frames never touches the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
-use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
-use densa_render::{GlyphAtlas, GridLayout, GridPainter, InstanceBuffer, FLASH_NS};
+use densa_fmt::write_fixed;
+use densa_render::{
+    Align, CellStyle, CellText, Column, GridPainter, GridSource, InstanceBuffer, Palette,
+};
+use densa_text::Font;
 use std::hint::black_box;
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
 
+/// Numbers that change every frame, like a live data grid.
+struct Ticking {
+    frame: u64,
+}
+
+impl GridSource for Ticking {
+    fn rows(&self) -> usize {
+        50
+    }
+
+    fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
+        let value = (self.frame as f64 * 0.37 + row as f64 * 11.0) % 10_000.0;
+        let _ = match column {
+            0 => text.push_str("Ngân hàng"),
+            _ => write_fixed(text, value, 2),
+        };
+        CellStyle {
+            color: [1.0; 4],
+            background: row.is_multiple_of(3).then_some([0.0, 1.0, 0.0, 0.2]),
+        }
+    }
+}
+
 #[test]
-fn painting_frames_performs_zero_heap_operations() {
+fn painting_warm_frames_performs_zero_heap_operations() {
     assert!(
         is_active(),
         "counting allocator not installed: test would be vacuous"
     );
 
-    // Startup allocations: painter, atlas, buffer, snapshot.
-    let layout = GridLayout::new(50);
-    let mut painter = GridPainter::new(layout, &GlyphAtlas::font8x8());
-    let mut buf = InstanceBuffer::with_capacity(layout.max_instances());
-    let mut snap = Box::new(ViewportSnapshot::<50>::new());
-    for (i, row) in snap.rows.iter_mut().enumerate() {
-        *row = RowSnapshot {
-            symbol_id: i as u32,
-            bid: 100.0 + i as f64,
-            ask: 100.5 + i as f64,
-            last: if i.is_multiple_of(7) {
-                f64::NAN
-            } else {
-                100.25 + i as f64
-            },
-            volume: (i as u64) * 1_000_003,
-            updated_at_ns: 1,
-            last_change_ns: (i as u64) * FLASH_NS / 50,
-            direction: [Direction::Up, Direction::Down, Direction::Flat][i % 3],
-        };
-    }
-    snap.len = 50;
-    snap.seq = 1;
+    let columns = vec![
+        Column::new("NAME", 10, Align::Left),
+        Column::new("VALUE", 10, Align::Right),
+    ];
+    let font = Font::bundled_mono().unwrap();
+    let mut painter = GridPainter::new(columns, 50, font, 14.0, Palette::new());
+    let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
+
+    // Startup: every glyph the frames use, at every subpixel position.
+    painter.prewarm("NAMEVLU0123456789.Ngân hà");
+    painter.drain_uploads().for_each(drop);
 
     let ((), stats) = measure(|| {
-        for frame in 0..1_000u64 {
-            painter.paint(&snap, black_box(frame * 1_000_000), &mut buf);
+        for frame in 0..1_000 {
+            painter.paint(&Ticking { frame }, &mut buf);
+            painter.drain_uploads().for_each(drop);
             black_box(buf.as_slice());
         }
     });
     assert!(stats.is_zero(), "painting allocated: {stats:?}");
     assert_eq!(buf.dropped(), 0);
+    assert_eq!(painter.cache_stats().dropped, 0);
 }

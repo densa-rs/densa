@@ -3,6 +3,7 @@
 //! Glue only: frame content comes from `GridPainter` (unit-tested, allocation-free) and
 //! drawing from `GpuGrid` (GPU-tested). This module wires events, timing and reporting.
 
+use crate::market::{market_painter, MarketGrid};
 use crate::pinning::{describe_pin, worker_pin};
 use crate::report::{
     format_cpu, format_duration_ns as dur, format_latency, format_priority, format_rate as rate,
@@ -15,7 +16,7 @@ use densa_engine::{
     spawn_worker, Clock, FrameProbe, LatencyHistogram, WorkerHandle, WorkerMetrics,
 };
 use densa_platform::logical_cpus;
-use densa_render::{GlyphAtlas, GpuGrid, GridLayout, GridPainter, InstanceBuffer};
+use densa_render::{GpuGrid, GridPainter, InstanceBuffer};
 use densa_sync::Reader;
 use std::error::Error;
 use std::io::Write;
@@ -86,7 +87,7 @@ impl ApplicationHandler for App {
                 let rows = match delta {
                     MouseScrollDelta::LineDelta(_, y) => wheel_rows(f64::from(y), false, 0),
                     MouseScrollDelta::PixelDelta(p) => {
-                        wheel_rows(p.y, true, session.painter.layout().row_height)
+                        wheel_rows(p.y, true, session.painter.layout().row_height())
                     }
                 };
                 session.scroll(ScrollAction::Rows(rows));
@@ -174,7 +175,8 @@ impl Session {
         out: &mut impl Write,
     ) -> Result<Self, Box<dyn Error>> {
         // Lossless: VIEWPORT_ROWS is a small constant.
-        let layout = GridLayout::new(VIEWPORT_ROWS as u32);
+        let painter = market_painter(VIEWPORT_ROWS as u32)?;
+        let layout = painter.layout().clone();
         let attributes = Window::default_attributes()
             .with_title("densa")
             .with_inner_size(PhysicalSize::new(layout.width(), layout.height()));
@@ -206,7 +208,12 @@ impl Session {
             config.view_formats.push(view_format);
         }
         surface.configure(&device, &config);
-        let gpu = GpuGrid::new(&device, &queue, view_format, layout.max_instances());
+        let gpu = GpuGrid::new(
+            &device,
+            view_format,
+            layout.max_instances(),
+            painter.atlas_size(),
+        );
 
         let mut worker_config = args.worker.clone();
         worker_config.pin = worker_pin(args.pin)?;
@@ -249,12 +256,12 @@ impl Session {
             config,
             view_format,
             gpu,
-            painter: GridPainter::new(layout, &GlyphAtlas::font8x8()),
+            painter,
             instances: InstanceBuffer::with_capacity(layout.max_instances()),
             reader,
             worker,
             clock,
-            scroll: Scroll::new(symbols, layout.rows),
+            scroll: Scroll::new(symbols, layout.rows()),
             stats: FrameStats::default(),
             start_ns,
             next_report_ns: start_ns + NANOS_PER_SEC,
@@ -302,7 +309,8 @@ impl Session {
             reader.read(|snapshot| {
                 stats.window_probe.observe(snapshot, fresh, now);
                 stats.total_probe.observe(snapshot, fresh, now);
-                painter.paint(snapshot, now, instances);
+                let palette = *painter.palette();
+                painter.paint(&MarketGrid::new(snapshot, now, palette), instances);
             });
         });
         let paint_ns = self.clock.now_ns() - now;
@@ -326,6 +334,8 @@ impl Session {
     /// Uploads, draws and presents. `Ok(false)` means the frame was skipped (surface busy,
     /// occluded or just reconfigured).
     fn submit(&mut self) -> Result<bool, Box<dyn Error>> {
+        self.gpu
+            .upload_glyphs(&self.queue, self.painter.drain_uploads());
         let count = self.gpu.prepare(
             &self.queue,
             (self.config.width, self.config.height),
@@ -398,7 +408,7 @@ impl Session {
             rate(ticks as f64),
             dur(probe.snapshot_age.p99),
             self.scroll.first_row(),
-            self.scroll.first_row() + self.painter.layout().rows - 1,
+            self.scroll.first_row() + self.painter.layout().rows() - 1,
         ));
 
         self.stats.window_probe.reset();

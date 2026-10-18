@@ -14,8 +14,10 @@
 
 mod cache;
 mod font;
+mod glyph_map;
 mod raster;
 
 pub use cache::{quantize_x, CacheStats, CachedGlyph, GlyphCache, GlyphUpload, SUBPIXEL_STEPS};
 pub use font::{Font, FontError, FontId, GlyphId, LineMetrics, BUNDLED_MONO};
+pub use glyph_map::{GlyphMap, MappedGlyph};
 pub use raster::{rasterize, GlyphBitmap};

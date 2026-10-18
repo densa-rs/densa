@@ -1,36 +1,64 @@
-//! Grid painter: layout, alignment, placeholders, overflow, flashes, capacity.
+//! Generic grid painting: layout from font metrics, alignment, overflow, styles, capacity.
 
-use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_render::{
-    flash_alpha, GlyphAtlas, GridLayout, GridPainter, Instance, InstanceBuffer, Palette, COLUMNS,
-    FLASH_NS,
+    Align, CellStyle, CellText, Column, GridPainter, GridSource, Instance, InstanceBuffer, Palette,
 };
+use densa_text::Font;
 
-const ROWS: usize = 4;
+const PX: f32 = 14.0;
 
-fn row(id: u32, bid: f64, ask: f64, last: f64, volume: u64) -> RowSnapshot {
-    RowSnapshot {
-        symbol_id: id,
-        bid,
-        ask,
-        last,
-        volume,
-        updated_at_ns: 1,
-        last_change_ns: 0,
-        direction: Direction::Flat,
+/// A grid of fixed strings with one style per column.
+struct TestSource {
+    rows: Vec<Vec<&'static str>>,
+    styles: Vec<CellStyle>,
+}
+
+impl GridSource for TestSource {
+    fn rows(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
+        let _ = text.push_str(self.rows[row][column]);
+        self.styles[column]
     }
 }
 
-fn snapshot(rows: &[RowSnapshot]) -> ViewportSnapshot<ROWS> {
-    let mut snap = ViewportSnapshot::new();
-    snap.rows[..rows.len()].copy_from_slice(rows);
-    snap.len = rows.len() as u32;
-    snap.seq = 1;
-    snap
+fn columns() -> Vec<Column> {
+    vec![
+        Column::new("NAME", 6, Align::Left),
+        Column::new("VALUE", 8, Align::Right),
+    ]
 }
 
-fn painter() -> GridPainter {
-    GridPainter::new(GridLayout::new(ROWS as u32), &GlyphAtlas::font8x8())
+fn white() -> CellStyle {
+    CellStyle {
+        color: [1.0; 4],
+        background: None,
+    }
+}
+
+fn painter(rows: u32) -> GridPainter {
+    GridPainter::new(
+        columns(),
+        rows,
+        Font::bundled_mono().unwrap(),
+        PX,
+        Palette::new(),
+    )
+}
+
+fn source(rows: Vec<Vec<&'static str>>) -> TestSource {
+    TestSource {
+        rows,
+        styles: vec![white(), white()],
+    }
+}
+
+fn paint(p: &mut GridPainter, s: &TestSource) -> InstanceBuffer {
+    let mut out = InstanceBuffer::with_capacity(p.layout().max_instances());
+    p.paint(s, &mut out);
+    out
 }
 
 fn glyphs(buf: &InstanceBuffer) -> Vec<Instance> {
@@ -41,205 +69,235 @@ fn glyphs(buf: &InstanceBuffer) -> Vec<Instance> {
         .collect()
 }
 
-fn solids(buf: &InstanceBuffer) -> Vec<Instance> {
-    buf.as_slice()
-        .iter()
-        .copied()
-        .filter(|i| !i.is_glyph())
-        .collect()
-}
-
-/// Glyphs whose top edge lies within data row `r` (0-based, below the header).
-fn glyphs_in_row(buf: &InstanceBuffer, layout: &GridLayout, r: u32) -> Vec<Instance> {
-    let top = layout.row_y(r + 1) as f32;
-    let bottom = top + layout.row_height as f32;
+/// Glyphs whose vertical centre lies in grid row `row` (0 = header).
+fn glyphs_in_row(p: &GridPainter, buf: &InstanceBuffer, row: u32) -> Vec<Instance> {
+    let top = p.layout().row_y(row) as f32;
+    let bottom = top + p.layout().row_height() as f32;
     glyphs(buf)
         .into_iter()
-        .filter(|g| g.rect[1] >= top && g.rect[1] < bottom)
+        .filter(|g| {
+            let centre = g.rect[1] + g.rect[3] / 2.0;
+            centre >= top && centre < bottom
+        })
         .collect()
 }
 
-#[test]
-fn layout_dimensions_follow_from_columns() {
-    let layout = GridLayout::new(50);
-    assert_eq!(layout.char_width(), 16);
-    let chars: u32 = COLUMNS.iter().map(|c| c.chars).sum::<u32>() + layout.gap_chars * 4;
-    assert_eq!(layout.width(), layout.padding * 2 + chars * 16);
-    assert_eq!(layout.height(), layout.padding * 2 + 51 * layout.row_height);
-    assert!(layout.height() <= 1000, "must fit a 1080p work area");
-    assert_eq!(layout.column_x(0), layout.padding);
-    assert_eq!(
-        layout.column_x(1),
-        layout.padding + (COLUMNS[0].chars + layout.gap_chars) * 16
-    );
-}
+mod layout {
+    use super::*;
 
-#[test]
-fn draws_header_and_every_cell_as_glyphs() {
-    let mut p = painter();
-    let mut buf = InstanceBuffer::with_capacity(p.layout().max_instances());
-    p.paint(&snapshot(&[row(42, 9.5, 10.5, 10.0, 1_234)]), 0, &mut buf);
-
-    // "SYMBOL" "BID" "ASK" "LAST" "VOLUME" = 22 glyphs; one row:
-    // "SYM00042"(8) "9.50"(4) "10.50"(5) "10.00"(5) "1,234"(5) = 27.
-    assert_eq!(glyphs(&buf).len(), 22 + 27);
-    assert_eq!(buf.dropped(), 0);
-}
-
-#[test]
-fn numbers_are_right_aligned_to_their_column_edge() {
-    let mut p = painter();
-    let layout = *p.layout();
-    let mut buf = InstanceBuffer::with_capacity(layout.max_instances());
-    p.paint(&snapshot(&[row(1, 9.5, 10.5, 10.0, 7)]), 0, &mut buf);
-
-    let bid_column_right = layout.column_x(1) + COLUMNS[1].chars * layout.char_width();
-    let row_glyphs = glyphs_in_row(&buf, &layout, 0);
-    let bid_glyphs: Vec<&Instance> = row_glyphs
-        .iter()
-        .filter(|g| g.rect[0] >= layout.column_x(1) as f32 && g.rect[0] < bid_column_right as f32)
-        .collect();
-    assert_eq!(bid_glyphs.len(), 4, "9.50");
-    let last = bid_glyphs
-        .iter()
-        .map(|g| g.rect[0] + g.rect[2])
-        .fold(0.0, f32::max);
-    assert_eq!(last, bid_column_right as f32);
-}
-
-#[test]
-fn missing_quotes_render_a_dash_and_overflow_renders_hashes() {
-    let mut p = painter();
-    let layout = *p.layout();
-    let mut buf = InstanceBuffer::with_capacity(layout.max_instances());
-    p.paint(
-        &snapshot(&[row(1, f64::NAN, 1e15, f64::NAN, 0)]),
-        0,
-        &mut buf,
-    );
-
-    // "SYM00001"(8) "-"(1) "##########"(10: 1e15 with 2 decimals overflows) "-"(1) "0"(1)
-    assert_eq!(glyphs_in_row(&buf, &layout, 0).len(), 8 + 1 + 10 + 1 + 1);
-}
-
-#[test]
-fn recent_price_changes_flash_and_fade() {
-    assert_eq!(flash_alpha(0), Palette::FLASH_MAX_ALPHA);
-    assert!(flash_alpha(FLASH_NS / 2) < Palette::FLASH_MAX_ALPHA);
-    assert!(flash_alpha(FLASH_NS / 2) > 0.0);
-    assert_eq!(flash_alpha(FLASH_NS), 0.0);
-    assert_eq!(flash_alpha(u64::MAX), 0.0);
-
-    let palette = Palette::new();
-    let mut p = painter();
-    let mut buf = InstanceBuffer::with_capacity(p.layout().max_instances());
-    let now = 10 * FLASH_NS;
-    let up = RowSnapshot {
-        direction: Direction::Up,
-        last_change_ns: now - FLASH_NS / 4,
-        ..row(0, 1.0, 1.1, 1.05, 1)
-    };
-    let down_but_old = RowSnapshot {
-        direction: Direction::Down,
-        last_change_ns: now - 2 * FLASH_NS,
-        ..row(1, 1.0, 1.1, 1.05, 1)
-    };
-    p.paint(&snapshot(&[up, down_but_old]), now, &mut buf);
-
-    let flashes: Vec<Instance> = solids(&buf)
-        .into_iter()
-        .filter(|s| s.color[..3] == palette.up[..3] || s.color[..3] == palette.down[..3])
-        .collect();
-    assert_eq!(flashes.len(), 1, "only the recent change flashes");
-    assert_eq!(flashes[0].color[..3], palette.up[..3]);
-    assert!((flashes[0].color[3] - flash_alpha(FLASH_NS / 4)).abs() < 1e-6);
-
-    // Only the LAST cell flashes, not the whole row: at ~20 price changes per second per
-    // symbol a whole-row flash turns the grid into a wall of color (seen in a screenshot).
-    let layout = *p.layout();
-    let [x, _, w, _] = flashes[0].rect;
-    let last_x0 = layout.column_x(3) as f32;
-    let last_x1 = last_x0 + (COLUMNS[3].chars * layout.char_width()) as f32;
-    assert!(
-        x <= last_x0 && x + w >= last_x1,
-        "flash covers the LAST cell"
-    );
-    assert!(x > layout.column_x(2) as f32, "flash stays clear of ASK");
-    assert!(
-        x + w < layout.column_x(4) as f32,
-        "flash stays clear of VOLUME"
-    );
-}
-
-// Design constraints, checked at compile time: a symbol may change price ~20x/s, so long
-// flashes never fade; and text must stay readable over the flash.
-const _: () = assert!(FLASH_NS <= 300_000_000, "flash too long to ever fade");
-const _: () = assert!(
-    Palette::FLASH_MAX_ALPHA <= 0.25,
-    "flash too opaque for readable text"
-);
-
-#[test]
-fn last_price_text_is_colored_by_direction() {
-    let palette = Palette::new();
-    let mut p = painter();
-    let layout = *p.layout();
-    let mut buf = InstanceBuffer::with_capacity(layout.max_instances());
-    let down = RowSnapshot {
-        direction: Direction::Down,
-        ..row(0, 1.0, 1.1, 1.05, 1)
-    };
-    p.paint(&snapshot(&[down]), 0, &mut buf);
-
-    let last_x0 = layout.column_x(3) as f32;
-    let last_x1 = last_x0 + (COLUMNS[3].chars * layout.char_width()) as f32;
-    let last_glyphs: Vec<Instance> = glyphs_in_row(&buf, &layout, 0)
-        .into_iter()
-        .filter(|g| g.rect[0] >= last_x0 && g.rect[0] < last_x1)
-        .collect();
-    assert!(!last_glyphs.is_empty());
-    assert!(last_glyphs.iter().all(|g| g.color == palette.down));
-}
-
-#[test]
-fn worst_case_viewport_fits_the_advertised_capacity() {
-    let layout = GridLayout::new(50);
-    let mut p = GridPainter::new(layout, &GlyphAtlas::font8x8());
-    let mut buf = InstanceBuffer::with_capacity(layout.max_instances());
-    let mut snap = ViewportSnapshot::<50>::new();
-    for (i, r) in snap.rows.iter_mut().enumerate() {
-        *r = RowSnapshot {
-            direction: Direction::Up,
-            last_change_ns: 100,
-            ..row(
-                4_000_000_000 + i as u32,
-                9_999_999.99,
-                9_999_999.99,
-                9_999_999.99,
-                u64::MAX,
-            )
-        };
+    #[test]
+    fn columns_are_sized_in_font_advances() {
+        let p = painter(3);
+        let l = p.layout();
+        assert!(
+            (l.char_width() - 0.6 * PX).abs() < 0.01,
+            "JetBrains Mono is 0.6 em"
+        );
+        assert_eq!(l.column_x(0), l.padding());
+        assert!(l.column_width(1) as f32 >= 8.0 * l.char_width() - 1.0);
+        assert!(l.column_x(1) > l.column_x(0) + l.column_width(0));
     }
-    snap.len = 50;
-    p.paint(&snap, 100, &mut buf);
-    assert_eq!(
-        buf.dropped(),
-        0,
-        "capacity {} too small",
-        layout.max_instances()
-    );
+
+    #[test]
+    fn rows_fit_the_fonts_line_height() {
+        let p = painter(3);
+        let line = Font::bundled_mono().unwrap().line_metrics(PX).line_height();
+        assert!(p.layout().row_height() as f32 >= line);
+        assert_eq!(
+            p.layout().height(),
+            2 * p.layout().padding() + 4 * p.layout().row_height()
+        );
+    }
+
+    #[test]
+    fn baseline_sits_inside_the_row() {
+        let p = painter(3);
+        let l = p.layout();
+        let baseline = l.baseline_y(1);
+        assert!(baseline > l.row_y(1) as f32);
+        assert!(baseline < (l.row_y(1) + l.row_height()) as f32);
+    }
 }
 
-#[test]
-fn painting_replaces_the_previous_frame() {
-    let mut p = painter();
-    let mut buf = InstanceBuffer::with_capacity(p.layout().max_instances());
-    p.paint(
-        &snapshot(&[row(1, 1.0, 1.1, 1.05, 1), row(2, 1.0, 1.1, 1.05, 1)]),
-        0,
-        &mut buf,
-    );
-    let two_rows = buf.len();
-    p.paint(&snapshot(&[row(1, 1.0, 1.1, 1.05, 1)]), 0, &mut buf);
-    assert!(buf.len() < two_rows);
+mod text {
+    use super::*;
+
+    #[test]
+    fn draws_one_glyph_per_inked_character() {
+        let mut p = painter(1);
+        let buf = paint(&mut p, &source(vec![vec!["ab c", "1.5"]]));
+        // Header "NAME" + "VALUE" = 9; row: "ab c" has 3 inked glyphs, "1.5" 3.
+        assert_eq!(glyphs(&buf).len(), 9 + 6);
+        assert_eq!(buf.dropped(), 0);
+    }
+
+    #[test]
+    fn right_aligned_text_ends_at_the_column_edge() {
+        let mut p = painter(1);
+        let buf = paint(&mut p, &source(vec![vec!["x", "42"]]));
+        let l = p.layout();
+        let right = (l.column_x(1) + l.column_width(1)) as f32;
+        let ink_right = glyphs_in_row(&p, &buf, 1)
+            .iter()
+            .map(|g| g.rect[0] + g.rect[2])
+            .fold(0.0, f32::max);
+        assert!(
+            ink_right <= right + 0.5,
+            "{ink_right} past the edge {right}"
+        );
+        assert!(
+            ink_right > right - l.char_width(),
+            "{ink_right} far from {right}"
+        );
+    }
+
+    #[test]
+    fn left_aligned_text_starts_at_the_column_edge() {
+        let mut p = painter(1);
+        let buf = paint(&mut p, &source(vec![vec!["H", ""]]));
+        let left = p.layout().column_x(0) as f32;
+        let ink = glyphs_in_row(&p, &buf, 1)[0].rect[0];
+        assert!(
+            (ink - left).abs() < p.layout().char_width() / 2.0,
+            "{ink} vs {left}"
+        );
+    }
+
+    #[test]
+    fn text_wider_than_its_column_becomes_hash_fill() {
+        let mut p = painter(1);
+        let buf = paint(&mut p, &source(vec![vec!["", "123456789012"]]));
+        // VALUE is 8 characters wide: 12 digits overflow into 8 '#'.
+        assert_eq!(glyphs_in_row(&p, &buf, 1).len(), 8);
+    }
+
+    #[test]
+    fn text_over_cell_bytes_leaves_the_cell_blank() {
+        let mut p = painter(1);
+        // 65 bytes: FmtBuf rejects the whole write, so nothing is drawn (documented on
+        // CELL_BYTES); sources are expected to write a placeholder instead.
+        let long: &'static str = Box::leak("x".repeat(65).into_boxed_str());
+        let buf = paint(&mut p, &source(vec![vec![long, ""]]));
+        assert!(glyphs_in_row(&p, &buf, 1).is_empty());
+    }
+
+    #[test]
+    fn vietnamese_text_is_drawn() {
+        let mut p = painter(1);
+        let buf = paint(&mut p, &source(vec![vec!["Việt", ""]]));
+        assert_eq!(glyphs_in_row(&p, &buf, 1).len(), 4);
+    }
+
+    #[test]
+    fn glyphs_use_the_cell_style_colour() {
+        let red = [1.0, 0.0, 0.0, 1.0];
+        let mut p = painter(1);
+        let s = TestSource {
+            rows: vec![vec!["a", "b"]],
+            styles: vec![
+                white(),
+                CellStyle {
+                    color: red,
+                    background: None,
+                },
+            ],
+        };
+        let buf = paint(&mut p, &s);
+        let row = glyphs_in_row(&p, &buf, 1);
+        assert!(row.iter().any(|g| g.color == red));
+        assert!(row.iter().any(|g| g.color == [1.0; 4]));
+    }
+}
+
+mod styles {
+    use super::*;
+
+    #[test]
+    fn cell_backgrounds_cover_only_their_cell() {
+        let bg = [0.0, 0.5, 0.0, 0.25];
+        let mut p = painter(1);
+        let s = TestSource {
+            rows: vec![vec!["a", "b"]],
+            styles: vec![
+                white(),
+                CellStyle {
+                    color: [1.0; 4],
+                    background: Some(bg),
+                },
+            ],
+        };
+        let buf = paint(&mut p, &s);
+        let fills: Vec<_> = buf.as_slice().iter().filter(|i| i.color == bg).collect();
+        assert_eq!(fills.len(), 1);
+        let l = p.layout();
+        let [x, _, w, _] = fills[0].rect;
+        assert!(
+            x > (l.column_x(0) + l.column_width(0)) as f32,
+            "clear of column 0"
+        );
+        assert!(x + w >= (l.column_x(1) + l.column_width(1)) as f32);
+    }
+
+    #[test]
+    fn every_other_row_is_striped() {
+        let palette = Palette::new();
+        let mut p = painter(4);
+        let buf = paint(&mut p, &source(vec![vec!["a", "b"]; 4]));
+        let stripes = buf
+            .as_slice()
+            .iter()
+            .filter(|i| i.color == palette.stripe)
+            .count();
+        assert_eq!(stripes, 2);
+    }
+
+    #[test]
+    fn source_rows_beyond_the_layout_are_ignored() {
+        let mut p = painter(2);
+        let buf = paint(&mut p, &source(vec![vec!["a", "b"]; 10]));
+        assert_eq!(glyphs(&buf).len(), 9 + 2 * 2);
+    }
+}
+
+mod capacity {
+    use super::*;
+
+    #[test]
+    fn worst_case_frame_fits_the_advertised_capacity() {
+        let mut p = painter(20);
+        let s = TestSource {
+            rows: vec![vec!["WWWWWW", "88888888"]; 20],
+            styles: vec![
+                CellStyle {
+                    color: [1.0; 4],
+                    background: Some([1.0; 4]),
+                },
+                CellStyle {
+                    color: [1.0; 4],
+                    background: Some([1.0; 4]),
+                },
+            ],
+        };
+        let buf = paint(&mut p, &s);
+        assert_eq!(buf.dropped(), 0, "capacity {}", p.layout().max_instances());
+    }
+
+    #[test]
+    fn painting_replaces_the_previous_frame() {
+        let mut p = painter(2);
+        let two = paint(&mut p, &source(vec![vec!["a", "b"]; 2])).len();
+        let one = paint(&mut p, &source(vec![vec!["a", "b"]; 1])).len();
+        assert!(one < two);
+    }
+
+    #[test]
+    fn new_glyphs_are_queued_for_upload_once() {
+        let mut p = painter(1);
+        let s = source(vec![vec!["abc", "1"]]);
+        paint(&mut p, &s);
+        let first = p.drain_uploads().count();
+        assert!(first >= 4, "header and cell glyphs uploaded, got {first}");
+        paint(&mut p, &s);
+        assert_eq!(p.drain_uploads().count(), 0, "warm frame uploads nothing");
+    }
 }

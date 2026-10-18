@@ -25,7 +25,6 @@ bytemuck = "1.25.2"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 crossbeam-utils = "0.8.23"
 etagere = "0.3.0"
-font8x8 = { version = "0.3.1", default-features = false }
 loom = "0.7.2"
 pollster = "1.0.1"
 rustc-hash = "2.1.3"

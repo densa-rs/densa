@@ -27,18 +27,15 @@ pub struct Palette {
     pub stripe: [f32; 4],
     /// Cell text.
     pub text: [f32; 4],
-    /// Placeholders such as `-` for a symbol without quotes yet.
+    /// Placeholders and secondary text.
     pub dim_text: [f32; 4],
-    /// Price went up: LAST text and its flash.
-    pub up: [f32; 4],
-    /// Price went down: LAST text and its flash.
-    pub down: [f32; 4],
+    /// Good news: a value rose, a check passed.
+    pub positive: [f32; 4],
+    /// Bad news: a value fell, a check failed.
+    pub negative: [f32; 4],
 }
 
 impl Palette {
-    /// Opacity of a row flash at the moment the price changes.
-    pub const FLASH_MAX_ALPHA: f32 = 0.25;
-
     /// The default dark palette.
     pub fn new() -> Self {
         Self {
@@ -48,8 +45,8 @@ impl Palette {
             stripe: srgb(0x131922, 1.0),
             text: srgb(0xC9D1D9, 1.0),
             dim_text: srgb(0x6E7681, 1.0),
-            up: srgb(0x3FB950, 1.0),
-            down: srgb(0xF85149, 1.0),
+            positive: srgb(0x3FB950, 1.0),
+            negative: srgb(0xF85149, 1.0),
         }
     }
 

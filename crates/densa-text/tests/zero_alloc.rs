@@ -1,11 +1,28 @@
 //! Proves a warm glyph cache serves frames without touching the heap.
 
 use densa_alloc::{is_active, measure, CountingAllocator};
-use densa_text::{quantize_x, Font, GlyphCache};
+use densa_text::{quantize_x, Font, GlyphCache, GlyphMap};
 use std::hint::black_box;
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
+
+#[test]
+fn glyph_map_lookups_after_first_use_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut glyphs = GlyphMap::new(Font::bundled_mono().unwrap(), 14.0);
+    let text = "SYM00042 1,234.50 ệĐữ";
+    black_box(glyphs.measure(text)); // first use of the non-ASCII characters caches them
+    let ((), stats) = measure(|| {
+        for _ in 0..10_000 {
+            black_box(glyphs.measure(black_box(text)));
+        }
+    });
+    assert!(stats.is_zero(), "glyph map allocated: {stats:?}");
+}
 
 #[test]
 fn warm_cache_lookups_perform_zero_heap_operations() {
