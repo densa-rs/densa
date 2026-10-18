@@ -17,6 +17,14 @@ fn one_session_at_a_time() -> std::sync::MutexGuard<'static, ()> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
+/// Throughput floors are performance measurements: meaningful on real hardware, not on shared
+/// CI virtual machines, where sleeps overshoot (macOS runners once paced a 120 fps loop at
+/// 41 fps). There (`CI` is set) only correctness is checked: limits never exceeded, data
+/// flowing, nothing allocated.
+fn on_ci() -> bool {
+    std::env::var_os("CI").is_some()
+}
+
 fn headless_args(extra: &[&str]) -> Args {
     // Default `--pin auto`, as users run it.
     let base = ["--headless", "--seconds", "1", "--symbols", "2000"];
@@ -41,14 +49,15 @@ fn rate_limited_run_hits_targets_with_zero_hot_path_allocations() {
     );
     assert_eq!(summary.worker.ticks_rejected, 0);
 
+    // The pacers never overshoot their targets (100k ticks/s, 120 fps), anywhere.
     let tick_rate = summary.worker.ticks_applied as f64 / summary.elapsed_s;
+    assert!(tick_rate <= 110_000.0, "tick rate {tick_rate}\n{text}");
+    assert!(summary.frames <= 125, "frames {}\n{text}", summary.frames);
+    // And reach them on real hardware (~120 frames in 1 s; generous for a busy machine).
+    let (min_rate, min_frames) = if on_ci() { (1.0, 1) } else { (50_000.0, 60) };
+    assert!(tick_rate >= min_rate, "tick rate {tick_rate}\n{text}");
     assert!(
-        (50_000.0..=110_000.0).contains(&tick_rate),
-        "tick rate {tick_rate}\n{text}"
-    );
-    // ~120 frames in 1 s; generous lower bound for a busy machine.
-    assert!(
-        (60..=125).contains(&summary.frames),
+        summary.frames >= min_frames,
         "frames {}\n{text}",
         summary.frames
     );
@@ -65,8 +74,10 @@ fn unbounded_run_is_much_faster_than_rate_limited() {
     let mut out = Vec::new();
     let summary = run_headless(&headless_args(&["--unbounded"]), &mut out).unwrap();
     let tick_rate = summary.worker.ticks_applied as f64 / summary.elapsed_s;
+    // At least twice the rate-limited target anywhere; over a million on real hardware.
+    let floor = if on_ci() { 200_000.0 } else { 1_000_000.0 };
     assert!(
-        tick_rate > 1_000_000.0,
+        tick_rate > floor,
         "unbounded only reached {tick_rate} ticks/s"
     );
     assert_eq!(summary.worker.heap_ops, 0);
