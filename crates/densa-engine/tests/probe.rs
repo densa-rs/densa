@@ -1,3 +1,5 @@
+//! Frame probe: snapshot/tick age, fresh and skipped snapshot accounting.
+
 use densa_data::{MarketTable, Tick, ViewportSnapshot};
 use densa_engine::FrameProbe;
 

@@ -1,3 +1,5 @@
+//! Command-line parsing, pin resolution and the CPU table.
+
 use densa_platform::{CpuId, LogicalCpu};
 use densa_poc::{resolve_pin, write_cpu_table, Args, Mode, PinRequest};
 

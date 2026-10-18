@@ -21,13 +21,16 @@ use std::hint::black_box;
 pub struct AllocStats {
     /// `alloc` + `alloc_zeroed` calls.
     pub allocs: u64,
+    /// `dealloc` calls.
     pub deallocs: u64,
+    /// `realloc` calls.
     pub reallocs: u64,
     /// Bytes requested by `alloc`, `alloc_zeroed` and `realloc` (new size).
     pub bytes_allocated: u64,
 }
 
 impl AllocStats {
+    /// No operations: the starting point for counters and deltas.
     pub const ZERO: Self = Self {
         allocs: 0,
         deallocs: 0,
@@ -102,6 +105,7 @@ impl CountingAllocator<System> {
 }
 
 impl<A> CountingAllocator<A> {
+    /// Counting wrapper around any other allocator.
     pub const fn new(inner: A) -> Self {
         Self { inner }
     }

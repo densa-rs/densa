@@ -3,6 +3,7 @@
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_data::{MarketTable, Tick, TickGenerator, ViewportSnapshot};
 use std::hint::black_box;
+use std::num::NonZeroU32;
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
@@ -19,7 +20,7 @@ fn generate_apply_snapshot_perform_zero_heap_operations() {
     );
 
     // Startup: every buffer is allocated here, outside the measurement.
-    let mut generator = TickGenerator::new(SYMBOLS, 42);
+    let mut generator = TickGenerator::new(NonZeroU32::new(SYMBOLS).expect("non-zero"), 42);
     let mut table = MarketTable::new(SYMBOLS);
     let mut batch = vec![Tick::default(); BATCH];
     let mut snapshot = Box::new(ViewportSnapshot::<50>::new());

@@ -24,6 +24,7 @@ pub fn cpu_registry() -> &'static CpuRegistry {
 }
 
 impl CpuRegistry {
+    /// An empty registry. Production code uses the process-wide [`cpu_registry`].
     pub const fn new() -> Self {
         Self {
             claimed: Mutex::new(Vec::new()),
@@ -82,6 +83,7 @@ pub struct CpuClaim<'a> {
 }
 
 impl CpuClaim<'_> {
+    /// The claimed CPU.
     pub fn cpu(&self) -> LogicalCpu {
         self.cpu
     }

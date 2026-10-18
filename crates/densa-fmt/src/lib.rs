@@ -34,6 +34,7 @@ pub struct FmtBuf<const N: usize> {
 }
 
 impl<const N: usize> FmtBuf<N> {
+    /// An empty buffer.
     pub const fn new() -> Self {
         Self {
             bytes: [0; N],
@@ -41,26 +42,32 @@ impl<const N: usize> FmtBuf<N> {
         }
     }
 
+    /// Empties the buffer; the capacity is unchanged.
     pub fn clear(&mut self) {
         self.len = 0;
     }
 
+    /// Bytes currently written.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// `true` if nothing is written.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Maximum bytes the buffer holds (`N`).
     pub const fn capacity(&self) -> usize {
         N
     }
 
+    /// The written bytes.
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes[..self.len]
     }
 
+    /// The written text. Always valid UTF-8: only whole `&str` values are ever appended.
     pub fn as_str(&self) -> &str {
         std::str::from_utf8(self.as_bytes())
             .expect("FmtBuf only ever appends whole `str` values, so it is valid UTF-8")
@@ -112,13 +119,15 @@ pub fn write_grouped<const N: usize>(
     value: u64,
     separator: char,
 ) -> Result<(), FmtError> {
+    const DIGITS: [&str; 10] = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+
     // u64::MAX has 20 decimal digits. Collected least-significant first.
     let mut digits = [0u8; 20];
     let mut count = 0;
     let mut rest = value;
     loop {
         // Lossless: `rest % 10` is a single decimal digit.
-        digits[count] = b'0' + (rest % 10) as u8;
+        digits[count] = (rest % 10) as u8;
         count += 1;
         rest /= 10;
         if rest == 0 {
@@ -130,9 +139,8 @@ pub fn write_grouped<const N: usize>(
     let sep: &str = separator.encode_utf8(&mut sep_bytes);
     let mark = buf.len;
     let result = (0..count).rev().try_for_each(|i| {
-        let digit = std::str::from_utf8(&digits[i..=i]).expect("ASCII digit");
-        buf.push_str(digit)?;
-        if i > 0 && i % 3 == 0 {
+        buf.push_str(DIGITS[usize::from(digits[i])])?;
+        if i > 0 && i.is_multiple_of(3) {
             buf.push_str(sep)?;
         }
         Ok(())

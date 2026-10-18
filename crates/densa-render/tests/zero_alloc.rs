@@ -25,7 +25,7 @@ fn painting_frames_performs_zero_heap_operations() {
             symbol_id: i as u32,
             bid: 100.0 + i as f64,
             ask: 100.5 + i as f64,
-            last: if i % 7 == 0 {
+            last: if i.is_multiple_of(7) {
                 f64::NAN
             } else {
                 100.25 + i as f64

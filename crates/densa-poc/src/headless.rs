@@ -24,12 +24,17 @@ const NANOS_PER_SEC: u64 = 1_000_000_000;
 /// Totals of a headless run.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RunSummary {
+    /// Final worker counters.
     pub worker: WorkerMetrics,
+    /// Frames rendered.
     pub frames: u64,
     /// Heap operations inside the measured per-frame work (excludes reporting).
     pub reader_heap_ops: u64,
+    /// Wall-clock run time in seconds.
     pub elapsed_s: f64,
+    /// Publish-to-display latency over the whole run.
     pub snapshot_age: LatencySummary,
+    /// Tick-to-display latency of the newest visible tick, over the whole run.
     pub tick_age: LatencySummary,
 }
 

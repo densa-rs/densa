@@ -3,15 +3,21 @@ use crate::Direction;
 /// One row of a viewport snapshot (array-of-structs: the renderer consumes whole rows).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct RowSnapshot {
+    /// Symbol (row) id.
     pub symbol_id: u32,
     /// `NaN` until the symbol's first quote arrives.
     pub bid: f64,
+    /// Best ask; `NaN` until the first quote.
     pub ask: f64,
+    /// Last traded price; `NaN` until the first trade.
     pub last: f64,
+    /// Cumulative traded quantity.
     pub volume: u64,
+    /// Time of the most recent tick (ns since the engine epoch); 0 if none yet.
     pub updated_at_ns: u64,
     /// Time of the last change in `last`; drives the up/down flash fade.
     pub last_change_ns: u64,
+    /// Direction of the most recent change in `last`.
     pub direction: Direction,
 }
 
@@ -42,10 +48,12 @@ pub struct ViewportSnapshot<const N: usize> {
     pub first_row: u32,
     /// Number of valid entries at the front of `rows`.
     pub len: u32,
+    /// Row storage; only the first `len` entries are meaningful.
     pub rows: [RowSnapshot; N],
 }
 
 impl<const N: usize> ViewportSnapshot<N> {
+    /// An empty snapshot (`len == 0`, `seq == 0`).
     pub const fn new() -> Self {
         Self {
             seq: 0,

@@ -17,14 +17,21 @@ pub fn srgb(hex: u32, alpha: f32) -> [f32; 4] {
 /// Grid colors (dark theme), in linear space. Built once at startup.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Palette {
+    /// Window background (the render-pass clear color).
     pub background: [f32; 4],
+    /// Header row bar.
     pub header_background: [f32; 4],
+    /// Column titles.
     pub header_text: [f32; 4],
+    /// Every other data row.
     pub stripe: [f32; 4],
+    /// Cell text.
     pub text: [f32; 4],
     /// Placeholders such as `-` for a symbol without quotes yet.
     pub dim_text: [f32; 4],
+    /// Price went up: LAST text and its flash.
     pub up: [f32; 4],
+    /// Price went down: LAST text and its flash.
     pub down: [f32; 4],
 }
 
@@ -32,6 +39,7 @@ impl Palette {
     /// Opacity of a row flash at the moment the price changes.
     pub const FLASH_MAX_ALPHA: f32 = 0.25;
 
+    /// The default dark palette.
     pub fn new() -> Self {
         Self {
             background: srgb(0x0D1117, 1.0),

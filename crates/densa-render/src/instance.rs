@@ -15,6 +15,7 @@ pub struct Instance {
 }
 
 impl Instance {
+    /// A filled rectangle.
     pub const fn solid(rect: [f32; 4], color: [f32; 4]) -> Self {
         Self {
             rect,
@@ -23,10 +24,12 @@ impl Instance {
         }
     }
 
+    /// A glyph: `uv` selects its atlas cell, `color` tints its coverage.
     pub const fn glyph(rect: [f32; 4], uv: [f32; 4], color: [f32; 4]) -> Self {
         Self { rect, uv, color }
     }
 
+    /// `true` for glyphs, `false` for solid rectangles.
     pub fn is_glyph(&self) -> bool {
         self.uv[2] > self.uv[0]
     }
@@ -44,6 +47,7 @@ pub struct InstanceBuffer {
 }
 
 impl InstanceBuffer {
+    /// An empty buffer holding up to `capacity` instances. Allocates once, here.
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
             items: vec![Instance::zeroed(); capacity].into_boxed_slice(),
@@ -74,18 +78,22 @@ impl InstanceBuffer {
         }
     }
 
+    /// Instances pushed since the last [`clear`](Self::clear).
     pub fn as_slice(&self) -> &[Instance] {
         &self.items[..self.len]
     }
 
+    /// Number of instances pushed.
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// `true` if nothing was pushed.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Maximum number of instances.
     pub fn capacity(&self) -> usize {
         self.items.len()
     }

@@ -4,7 +4,9 @@ use font8x8::legacy::BASIC_LEGACY;
 pub const GLYPH_PX: u32 = 8;
 const ATLAS_COLS: u32 = 16;
 const ATLAS_ROWS: u32 = 8;
+/// Atlas texture width in texels (16 glyph cells).
 pub const ATLAS_WIDTH: u32 = ATLAS_COLS * GLYPH_PX;
+/// Atlas texture height in texels (8 glyph cells).
 pub const ATLAS_HEIGHT: u32 = ATLAS_ROWS * GLYPH_PX;
 
 /// 8-bit coverage atlas of the 128 ASCII glyphs of the public-domain font8x8.
@@ -17,6 +19,7 @@ pub struct GlyphAtlas {
 }
 
 impl GlyphAtlas {
+    /// Builds the atlas from font8x8's 128 ASCII glyphs.
     pub fn font8x8() -> Self {
         let mut pixels = vec![0u8; (ATLAS_WIDTH * ATLAS_HEIGHT) as usize];
         for (code, rows) in (0u32..).zip(BASIC_LEGACY.iter()) {
@@ -42,6 +45,7 @@ impl GlyphAtlas {
         &self.pixels
     }
 
+    /// Coverage (0 or 255) of texel (`x`, `y`).
     pub fn pixel(&self, x: u32, y: u32) -> u8 {
         self.pixels[(y * ATLAS_WIDTH + x) as usize]
     }

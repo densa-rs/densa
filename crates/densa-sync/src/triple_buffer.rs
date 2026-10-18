@@ -256,7 +256,7 @@ mod tests {
                 writer.publish();
                 check(&writer, &reader);
             }
-            if step % 2 == 0 {
+            if step.is_multiple_of(2) {
                 reader.update();
                 check(&writer, &reader);
             }
@@ -271,7 +271,7 @@ mod tests {
         for round in 0..64usize {
             writer.write(|v| *v = round);
             writer.publish();
-            if round % 3 == 0 {
+            if round.is_multiple_of(3) {
                 reader.update();
             }
             assert_ne!(writer.back, reader.front);

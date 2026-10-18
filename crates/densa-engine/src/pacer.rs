@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 const NANOS_PER_SEC: u128 = 1_000_000_000;
 
 /// If the worker falls this far behind schedule, it restarts the schedule from "now"
@@ -11,7 +13,7 @@ pub const MAX_PACER_LAG_NS: u64 = 10_000_000;
 /// waits: callers spin until [`Pacer::deadline_ns`] (the worker must not yield).
 #[derive(Debug, Clone)]
 pub struct Pacer {
-    rate_per_sec: u64,
+    rate_per_sec: NonZeroU64,
     batch_size: u64,
     origin_ns: u64,
     batches: u64,
@@ -19,11 +21,11 @@ pub struct Pacer {
 }
 
 impl Pacer {
-    /// # Panics
+    /// Paces batches of `batch_size` ticks at `rate_per_sec`, first batch at `start_ns`.
     ///
-    /// If `rate_per_sec == 0` (validated earlier by `WorkerConfig::validate`).
-    pub fn new(rate_per_sec: u64, batch_size: usize, start_ns: u64) -> Self {
-        assert!(rate_per_sec > 0, "rate must be positive");
+    /// The rate is `NonZeroU64` because a zero rate has no schedule; the type rules it out
+    /// instead of a runtime panic.
+    pub fn new(rate_per_sec: NonZeroU64, batch_size: usize, start_ns: u64) -> Self {
         Self {
             rate_per_sec,
             // Lossless on every supported target (usize <= 64 bits).
@@ -38,7 +40,7 @@ impl Pacer {
     #[inline]
     pub fn deadline_ns(&self) -> u64 {
         let ticks = u128::from(self.batches) * u128::from(self.batch_size);
-        let offset = ticks * NANOS_PER_SEC / u128::from(self.rate_per_sec);
+        let offset = ticks * NANOS_PER_SEC / u128::from(self.rate_per_sec.get());
         self.origin_ns
             .saturating_add(u64::try_from(offset).unwrap_or(u64::MAX))
     }

@@ -1,3 +1,5 @@
+//! Ingestion worker: config validation, publishing, viewport, pacing, pinning, shutdown.
+
 use std::time::{Duration, Instant};
 
 use densa_data::ViewportSnapshot;

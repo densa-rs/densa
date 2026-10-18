@@ -7,6 +7,7 @@ use densa_platform::{
 };
 use densa_sync::{triple_buffer, Reader, Writer};
 use std::fmt;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
@@ -14,7 +15,9 @@ use std::thread::{self, JoinHandle};
 /// Ingestion worker settings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkerConfig {
+    /// Number of instruments; must be at least 1.
     pub symbols: u32,
+    /// Seed of the synthetic feed; equal seeds replay the same ticks.
     pub seed: u64,
     /// Ticks generated and applied per loop iteration.
     pub batch_size: usize,
@@ -54,6 +57,11 @@ impl Default for WorkerConfig {
 }
 
 impl WorkerConfig {
+    /// Checks the settings without spawning anything.
+    ///
+    /// # Errors
+    ///
+    /// The first [`ConfigError`] found.
     pub fn validate(&self) -> Result<(), ConfigError> {
         if self.symbols == 0 {
             return Err(ConfigError::NoSymbols);
@@ -68,10 +76,14 @@ impl WorkerConfig {
     }
 }
 
+/// Why a [`WorkerConfig`] is invalid.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConfigError {
+    /// `symbols` is 0.
     NoSymbols,
+    /// `batch_size` is 0.
     EmptyBatch,
+    /// `rate` is `Some(0)`; use `None` to run unbounded.
     ZeroRate,
 }
 
@@ -87,9 +99,12 @@ impl fmt::Display for ConfigError {
 
 impl std::error::Error for ConfigError {}
 
+/// Why [`spawn_worker`] failed.
 #[derive(Debug)]
 pub enum SpawnError {
+    /// The configuration is invalid.
     Config(ConfigError),
+    /// The OS refused to create the thread.
     Thread(std::io::Error),
     /// Pinning to `WorkerConfig::pin` failed; the worker was stopped.
     Pin(CpuError),
@@ -130,10 +145,15 @@ impl std::error::Error for WorkerPanicked {}
 /// Cumulative worker counters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorkerMetrics {
+    /// Ticks written into the table.
     pub ticks_applied: u64,
+    /// Ticks dropped as invalid (unknown symbol, non-finite price).
     pub ticks_rejected: u64,
+    /// Loop iterations, one batch each.
     pub batches: u64,
+    /// Snapshots published to the reader.
     pub publishes: u64,
+    /// Times the pacer restarted its schedule after falling over 10 ms behind.
     pub lag_resets: u64,
     /// Heap operations (alloc + dealloc + realloc) on the worker thread since its loop
     /// started. Always 0 unless `densa_alloc::CountingAllocator` is the global allocator.
@@ -312,9 +332,11 @@ pub fn spawn_worker<const N: usize>(
 
     let (writer, reader) = triple_buffer(ViewportSnapshot::<N>::new());
     let shared = Arc::new(Shared::default());
+    let symbols =
+        NonZeroU32::new(config.symbols).ok_or(SpawnError::Config(ConfigError::NoSymbols))?;
     let claim = claim_cpu(config.pin);
     let worker = Worker {
-        generator: TickGenerator::new(config.symbols, config.seed),
+        generator: TickGenerator::new(symbols, config.seed),
         table: MarketTable::new(config.symbols),
         batch: vec![Tick::default(); config.batch_size].into_boxed_slice(),
         writer,
@@ -368,8 +390,10 @@ impl<const N: usize> Worker<N> {
         let stopping = || shared.stop.load(Ordering::Relaxed);
 
         let heap_baseline = thread_stats();
+        // A zero rate was already rejected by `WorkerConfig::validate`.
         let mut pacer = config
             .rate
+            .and_then(NonZeroU64::new)
             .map(|rate| Pacer::new(rate, config.batch_size, clock.now_ns()));
         let mut metrics = WorkerMetrics::default();
         let mut seq = 0u64;

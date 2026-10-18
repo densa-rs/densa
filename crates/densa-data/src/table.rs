@@ -4,6 +4,7 @@ use std::ops::AddAssign;
 /// Outcome of applying a batch of ticks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ApplyStats {
+    /// Ticks written into the table.
     pub applied: u64,
     /// Ticks dropped for an unknown `symbol_id` or a non-finite price.
     pub rejected: u64,
@@ -67,11 +68,13 @@ impl MarketTable {
         }
     }
 
+    /// Number of symbols (rows).
     pub fn len(&self) -> u32 {
         // Lossless: `new` takes the length as a u32.
         self.rows.len() as u32
     }
 
+    /// `true` for a table without symbols.
     pub fn is_empty(&self) -> bool {
         self.rows.is_empty()
     }

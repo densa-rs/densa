@@ -7,7 +7,9 @@ pub enum ScrollAction {
     Rows(i64),
     /// Move by this many viewport pages (negative is up).
     Pages(i64),
+    /// Jump to the first row.
     Top,
+    /// Jump to the last full page.
     Bottom,
 }
 
@@ -20,6 +22,7 @@ pub struct Scroll {
 }
 
 impl Scroll {
+    /// A viewport of `visible_rows` over `total_rows`, scrolled to the top.
     pub fn new(total_rows: u32, visible_rows: u32) -> Self {
         Self {
             first_row: 0,
@@ -28,6 +31,7 @@ impl Scroll {
         }
     }
 
+    /// First visible row.
     pub fn first_row(&self) -> u32 {
         self.first_row
     }

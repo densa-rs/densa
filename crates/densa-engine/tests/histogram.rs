@@ -1,3 +1,5 @@
+//! Latency histogram: exact small values, bounded relative error, merge and reset.
+
 use densa_engine::{LatencyHistogram, LatencySummary};
 
 fn assert_within_bucket_error(actual: u64, expected: u64) {

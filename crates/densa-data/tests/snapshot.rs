@@ -1,3 +1,5 @@
+//! Viewport snapshots: window copy, clamping, partial tables, stale-row reset.
+
 use densa_data::{MarketTable, RowSnapshot, Tick, ViewportSnapshot};
 
 /// Table where row `i` has last price `i` so rows are easy to identify.

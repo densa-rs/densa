@@ -1,3 +1,5 @@
+use std::num::NonZeroU32;
+
 use crate::{Tick, WyRand};
 
 /// Price grid: all generated prices are integer multiples of this.
@@ -23,18 +25,19 @@ pub struct TickGenerator {
 }
 
 impl TickGenerator {
-    /// # Panics
+    /// A feed over symbols `0..symbols`, reproducible for a given `seed`.
     ///
-    /// If `symbols == 0` (a feed needs at least one instrument). Startup-only.
-    pub fn new(symbols: u32, seed: u64) -> Self {
-        assert!(symbols > 0, "TickGenerator needs at least one symbol");
+    /// `NonZeroU32` because a feed without instruments cannot pick a symbol: the type
+    /// rules that state out instead of a runtime panic.
+    pub fn new(symbols: NonZeroU32, seed: u64) -> Self {
         let mut rng = WyRand::new(seed);
-        let mid_ticks = (0..symbols)
+        let mid_ticks = (0..symbols.get())
             .map(|_| INITIAL_MID_MIN + i64::from(rng.below(INITIAL_MID_SPAN)))
             .collect();
         Self { rng, mid_ticks }
     }
 
+    /// Number of symbols the feed draws from.
     pub fn symbols(&self) -> u32 {
         // Lossless: built from a u32 count.
         self.mid_ticks.len() as u32

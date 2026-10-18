@@ -8,6 +8,7 @@ use densa_platform::{find_cpu, logical_cpus, pick_performance_cpu, CoreKind, Log
 /// What `--pin` asked for, before it is checked against the machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PinRequest {
+    /// Leave placement to the OS (`--pin none`).
     None,
     /// Let the engine claim a free performance core.
     Auto,
@@ -16,7 +17,9 @@ pub enum PinRequest {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+/// Why a `--pin` request cannot be satisfied.
 pub enum PinError {
+    /// The requested CPU index does not exist.
     NoSuchCpu(u8),
 }
 

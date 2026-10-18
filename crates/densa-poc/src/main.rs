@@ -1,3 +1,5 @@
+//! densa-poc binary: installs the counting allocator and dispatches to window or headless mode.
+
 use densa_alloc::{is_active, CountingAllocator};
 use densa_platform::logical_cpus;
 use densa_poc::{run_headless, run_window, write_cpu_table, Args, Mode, USAGE};

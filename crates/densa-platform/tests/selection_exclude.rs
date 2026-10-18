@@ -1,3 +1,5 @@
+//! CPU selection that skips physical cores already in use.
+
 use densa_platform::{pick_performance_cpu_excluding, CpuId, LogicalCpu};
 
 fn cpu(index: u8, core: u8, efficiency_class: u8) -> LogicalCpu {

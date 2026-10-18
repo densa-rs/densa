@@ -3,20 +3,27 @@ use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_fmt::{write_fixed, write_grouped, FmtBuf};
 use std::fmt::Write as _;
 
+/// Horizontal alignment of text within a column.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Align {
+    /// Flush with the column's left edge (labels).
     Left,
+    /// Flush with the column's right edge (numbers).
     Right,
 }
 
 /// A grid column: header title, width in characters, alignment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Column {
+    /// Header text.
     pub title: &'static str,
+    /// Width in characters.
     pub chars: u32,
+    /// Text alignment.
     pub align: Align,
 }
 
+/// The grid's columns, left to right: SYMBOL, BID, ASK, LAST, VOLUME.
 pub const COLUMNS: [Column; 5] = [
     Column {
         title: "SYMBOL",
@@ -70,13 +77,16 @@ pub struct GridLayout {
     pub rows: u32,
     /// Screen pixels per font pixel; integer so the bitmap font stays crisp.
     pub glyph_scale: u32,
+    /// Row pitch in pixels.
     pub row_height: u32,
+    /// Margin around the grid in pixels.
     pub padding: u32,
     /// Blank characters between columns.
     pub gap_chars: u32,
 }
 
 impl GridLayout {
+    /// Layout for `rows` data rows with the PoC defaults: 2x glyphs, 18 px rows.
     pub const fn new(rows: u32) -> Self {
         Self {
             rows,
@@ -87,10 +97,12 @@ impl GridLayout {
         }
     }
 
+    /// Width of one character cell in pixels.
     pub const fn char_width(&self) -> u32 {
         GLYPH_PX * self.glyph_scale
     }
 
+    /// Height of a drawn glyph in pixels.
     pub const fn glyph_height(&self) -> u32 {
         GLYPH_PX * self.glyph_scale
     }
@@ -99,10 +111,12 @@ impl GridLayout {
         COLUMNS.iter().map(|c| c.chars).sum::<u32>() + self.gap_chars * (COLUMNS.len() as u32 - 1)
     }
 
+    /// Total grid width in pixels, padding included.
     pub fn width(&self) -> u32 {
         self.padding * 2 + self.total_chars() * self.char_width()
     }
 
+    /// Total grid height in pixels: header plus data rows, padding included.
     pub fn height(&self) -> u32 {
         self.padding * 2 + (self.rows + 1) * self.row_height
     }
@@ -136,6 +150,7 @@ pub struct GridPainter {
 }
 
 impl GridPainter {
+    /// A painter for `layout`, caching each glyph's UV rectangle from `atlas`.
     pub fn new(layout: GridLayout, atlas: &GlyphAtlas) -> Self {
         let mut uvs = [[0.0; 4]; 128];
         for (code, uv) in (0u8..).zip(uvs.iter_mut()) {
@@ -149,10 +164,12 @@ impl GridPainter {
         }
     }
 
+    /// The geometry this painter draws with.
     pub fn layout(&self) -> &GridLayout {
         &self.layout
     }
 
+    /// The colors this painter draws with.
     pub fn palette(&self) -> &Palette {
         &self.palette
     }
@@ -204,7 +221,7 @@ impl GridPainter {
             self.layout.width() as f32,
             self.layout.row_height as f32,
         ];
-        if grid_row % 2 == 0 {
+        if grid_row.is_multiple_of(2) {
             out.push(Instance::solid(full_row, self.palette.stripe));
         }
 

@@ -1,6 +1,14 @@
+//! Synthetic feed: determinism, well-formed ticks, coverage of every symbol.
+
+use std::num::NonZeroU32;
+
 use densa_data::{MarketTable, Tick, TickGenerator, WyRand};
 
 const SYMBOLS: u32 = 100;
+
+fn nz(n: u32) -> NonZeroU32 {
+    NonZeroU32::new(n).expect("test symbol counts are non-zero")
+}
 
 fn empty_batch(n: usize) -> Vec<Tick> {
     vec![
@@ -46,19 +54,13 @@ fn rng_below_stays_in_range_and_is_roughly_uniform() {
 
 #[test]
 fn generator_reports_symbol_count() {
-    assert_eq!(TickGenerator::new(SYMBOLS, 0).symbols(), SYMBOLS);
-}
-
-#[test]
-#[should_panic(expected = "at least one symbol")]
-fn generator_rejects_zero_symbols() {
-    let _ = TickGenerator::new(0, 0);
+    assert_eq!(TickGenerator::new(nz(SYMBOLS), 0).symbols(), SYMBOLS);
 }
 
 #[test]
 fn generator_is_deterministic_per_seed() {
-    let mut a = TickGenerator::new(SYMBOLS, 1);
-    let mut b = TickGenerator::new(SYMBOLS, 1);
+    let mut a = TickGenerator::new(nz(SYMBOLS), 1);
+    let mut b = TickGenerator::new(nz(SYMBOLS), 1);
     let (mut xa, mut xb) = (empty_batch(256), empty_batch(256));
     a.fill(&mut xa, 5);
     b.fill(&mut xb, 5);
@@ -67,7 +69,7 @@ fn generator_is_deterministic_per_seed() {
 
 #[test]
 fn generated_ticks_are_well_formed() {
-    let mut generator = TickGenerator::new(SYMBOLS, 3);
+    let mut generator = TickGenerator::new(nz(SYMBOLS), 3);
     let mut batch = empty_batch(1024);
     for round in 0..200u64 {
         generator.fill(&mut batch, round);
@@ -88,7 +90,7 @@ fn generated_ticks_are_well_formed() {
 
 #[test]
 fn every_symbol_gets_ticks() {
-    let mut generator = TickGenerator::new(SYMBOLS, 9);
+    let mut generator = TickGenerator::new(nz(SYMBOLS), 9);
     let mut batch = empty_batch(10_000);
     generator.fill(&mut batch, 0);
     let mut hit = [false; SYMBOLS as usize];
@@ -100,7 +102,7 @@ fn every_symbol_gets_ticks() {
 
 #[test]
 fn prices_move_over_time() {
-    let mut generator = TickGenerator::new(1, 11);
+    let mut generator = TickGenerator::new(nz(1), 11);
     let mut batch = empty_batch(1_000);
     generator.fill(&mut batch, 0);
     let first = batch[0].last;
@@ -112,7 +114,7 @@ fn prices_move_over_time() {
 
 #[test]
 fn generated_feed_is_fully_accepted_by_table() {
-    let mut generator = TickGenerator::new(SYMBOLS, 5);
+    let mut generator = TickGenerator::new(nz(SYMBOLS), 5);
     let mut table = MarketTable::new(SYMBOLS);
     let mut batch = empty_batch(1024);
     for round in 1..=50 {

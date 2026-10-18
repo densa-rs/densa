@@ -10,6 +10,7 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// A clock whose epoch is now.
     pub fn new() -> Self {
         Self {
             epoch: Instant::now(),

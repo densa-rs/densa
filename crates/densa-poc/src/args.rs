@@ -2,6 +2,7 @@ use crate::PinRequest;
 use densa_engine::WorkerConfig;
 use std::fmt;
 
+/// `--help` text.
 pub const USAGE: &str = "\
 Usage: densa-poc [OPTIONS]
 
@@ -26,22 +27,31 @@ Options:
   -h, --help                 Print this help
 ";
 
+/// Whether to open a window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Mode {
+    /// Render the grid in a window (default).
     Window,
+    /// Run the frame loop without a window and print metrics.
     Headless,
 }
 
+/// Parsed command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Args {
+    /// Window or headless.
     pub mode: Mode,
+    /// `-h`/`--help` was given; the other arguments are not validated.
     pub help: bool,
     /// `None`: headless runs `DEFAULT_HEADLESS_SECONDS`, a window runs until closed.
     pub seconds: Option<u64>,
+    /// Frame rate of the headless loop; a window follows the display's refresh rate.
     pub fps: u32,
+    /// Ingestion worker settings.
     pub worker: WorkerConfig,
     /// Resolved into `worker.pin` against the live CPU topology at startup.
     pub pin: PinRequest,
+    /// `--list-cpus` was given.
     pub list_cpus: bool,
 }
 
@@ -62,6 +72,12 @@ fn error(message: impl Into<String>) -> ArgsError {
 }
 
 impl Args {
+    /// Parses arguments (without the program name).
+    ///
+    /// # Errors
+    ///
+    /// [`ArgsError`] with a user-facing message for unknown flags, missing or malformed
+    /// values, and invalid combinations.
     pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Self, ArgsError> {
         let mut parsed = Self {
             mode: Mode::Window,

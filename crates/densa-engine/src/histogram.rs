@@ -8,9 +8,13 @@ const BUCKETS: usize = GROUPS * SUB_BUCKETS as usize;
 /// p50 / p99 / max digest of a histogram (all zero when empty).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct LatencySummary {
+    /// Samples recorded.
     pub count: u64,
+    /// Median (bucket upper bound).
     pub p50: u64,
+    /// 99th percentile (bucket upper bound).
     pub p99: u64,
+    /// Exact maximum.
     pub max: u64,
 }
 
@@ -30,6 +34,7 @@ pub struct LatencyHistogram {
 }
 
 impl LatencyHistogram {
+    /// An empty histogram.
     pub const fn new() -> Self {
         Self {
             counts: [0; BUCKETS],
@@ -41,6 +46,7 @@ impl LatencyHistogram {
     }
 
     #[inline]
+    /// Adds one sample. O(1) and allocation-free.
     pub fn record(&mut self, value: u64) {
         self.counts[bucket_index(value)] += 1;
         self.total += 1;
@@ -49,18 +55,22 @@ impl LatencyHistogram {
         self.max = self.max.max(value);
     }
 
+    /// Samples recorded since creation or the last [`reset`](Self::reset).
     pub fn count(&self) -> u64 {
         self.total
     }
 
+    /// Exact minimum, or `None` when empty.
     pub fn min(&self) -> Option<u64> {
         (self.total > 0).then_some(self.min)
     }
 
+    /// Exact maximum, or `None` when empty.
     pub fn max(&self) -> Option<u64> {
         (self.total > 0).then_some(self.max)
     }
 
+    /// Arithmetic mean, or `None` when empty.
     pub fn mean(&self) -> Option<f64> {
         (self.total > 0).then(|| self.sum as f64 / self.total as f64)
     }
@@ -83,6 +93,7 @@ impl LatencyHistogram {
         Some(self.max)
     }
 
+    /// p50, p99 and max in one value; all zero when empty.
     pub fn summary(&self) -> LatencySummary {
         match (self.quantile(0.5), self.quantile(0.99), self.max()) {
             (Some(p50), Some(p99), Some(max)) => LatencySummary {
@@ -95,6 +106,7 @@ impl LatencyHistogram {
         }
     }
 
+    /// Adds every sample of `other` to `self`.
     pub fn merge(&mut self, other: &Self) {
         for (mine, theirs) in self.counts.iter_mut().zip(other.counts.iter()) {
             *mine += theirs;
@@ -105,6 +117,7 @@ impl LatencyHistogram {
         self.max = self.max.max(other.max);
     }
 
+    /// Forgets every sample.
     pub fn reset(&mut self) {
         *self = Self::new();
     }

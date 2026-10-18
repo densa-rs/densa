@@ -1,3 +1,5 @@
+//! Grid painter: layout, alignment, placeholders, overflow, flashes, capacity.
+
 use densa_data::{Direction, RowSnapshot, ViewportSnapshot};
 use densa_render::{
     flash_alpha, GlyphAtlas, GridLayout, GridPainter, Instance, InstanceBuffer, Palette, COLUMNS,

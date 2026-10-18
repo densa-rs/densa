@@ -1,3 +1,5 @@
+//! Glyph atlas: layout, bit order (no mirrored glyphs), UV rectangles.
+
 use densa_render::{GlyphAtlas, ATLAS_HEIGHT, ATLAS_WIDTH, GLYPH_PX};
 
 /// Pixel of glyph `ch` at (`x`, `y`) inside its 8x8 cell.

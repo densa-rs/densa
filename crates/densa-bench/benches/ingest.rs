@@ -11,6 +11,10 @@ use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use densa_data::{Direction, MarketTable, Tick, TickGenerator, ViewportSnapshot};
 use std::hint::black_box;
 
+fn nz(n: u32) -> std::num::NonZeroU32 {
+    std::num::NonZeroU32::new(n).expect("bench symbol counts are non-zero")
+}
+
 const BATCH: usize = 1024;
 /// 10k symbols fit in L2; 1M symbols (~56-64 MB) exceed this machine's 33 MB L3.
 const SYMBOL_COUNTS: [u32; 2] = [10_000, 1_000_000];
@@ -166,7 +170,7 @@ fn bench_layout(
     symbols: u32,
     mut apply: impl FnMut(&[Tick]) -> u64,
 ) {
-    let mut generator = TickGenerator::new(symbols, 42);
+    let mut generator = TickGenerator::new(nz(symbols), 42);
     let mut batch = vec![Tick::default(); BATCH];
     group.bench_with_input(BenchmarkId::new(name, symbols), &symbols, |b, _| {
         b.iter(|| {
@@ -198,7 +202,7 @@ fn generate(c: &mut Criterion) {
     let mut group = c.benchmark_group("generator_fill_1024");
     group.throughput(Throughput::Elements(BATCH as u64));
     for symbols in SYMBOL_COUNTS {
-        let mut generator = TickGenerator::new(symbols, 7);
+        let mut generator = TickGenerator::new(nz(symbols), 7);
         let mut batch = vec![Tick::default(); BATCH];
         group.bench_with_input(BenchmarkId::from_parameter(symbols), &symbols, |b, _| {
             b.iter(|| generator.fill(black_box(&mut batch), 1))
@@ -210,7 +214,7 @@ fn generate(c: &mut Criterion) {
 fn snapshot(c: &mut Criterion) {
     let symbols = 10_000;
     let mut table = MarketTable::new(symbols);
-    let mut generator = TickGenerator::new(symbols, 3);
+    let mut generator = TickGenerator::new(nz(symbols), 3);
     let mut batch = vec![Tick::default(); BATCH];
     for round in 1..=64 {
         generator.fill(&mut batch, round);

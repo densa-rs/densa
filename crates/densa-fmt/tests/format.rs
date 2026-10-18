@@ -1,3 +1,5 @@
+//! Formatting: exact parity with `format!`, grouping, all-or-nothing appends.
+
 use densa_fmt::{write_fixed, write_grouped, FmtBuf, FmtError};
 use std::fmt::Write as _;
 
@@ -20,7 +22,7 @@ fn grouped_oracle(value: u64, sep: char) -> String {
     let digits = value.to_string();
     let mut out = String::new();
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(sep);
         }
         out.push(ch);

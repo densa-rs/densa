@@ -7,10 +7,12 @@ pub struct WyRand {
 }
 
 impl WyRand {
+    /// A generator seeded with `seed`; equal seeds give equal sequences.
     pub const fn new(seed: u64) -> Self {
         Self { state: seed }
     }
 
+    /// The next 64 pseudo-random bits.
     #[inline]
     pub fn next_u64(&mut self) -> u64 {
         self.state = self.state.wrapping_add(0xa076_1d64_78bd_642f);

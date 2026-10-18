@@ -6,7 +6,9 @@ members = ["crates/*"]
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-rust-version = "1.80"
+# Verified with `cargo +1.90 check --workspace --all-targets`; set by wgpu-hal's
+# ordered-float dependency (wgpu 30 itself needs 1.87).
+rust-version = "1.90"
 
 [workspace.dependencies]
 densa-alloc = { path = "crates/densa-alloc" }
@@ -28,6 +30,7 @@ windows-sys = "0.61.2"
 winit = "0.30.13"
 
 [workspace.lints.rust]
+missing_docs = "warn"
 unsafe_op_in_unsafe_fn = "deny"
 unexpected_cfgs = { level = "warn", check-cfg = ["cfg(loom)"] }
 

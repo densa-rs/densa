@@ -1,3 +1,5 @@
+//! Market table: tick application, direction tracking, rejection of invalid ticks.
+
 use densa_data::{ApplyStats, Direction, MarketTable, Tick};
 
 fn tick(symbol_id: u32, bid: f64, ask: f64, last: f64, qty: u64, ts_ns: u64) -> Tick {

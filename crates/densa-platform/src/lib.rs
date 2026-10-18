@@ -26,7 +26,9 @@ pub use registry::{cpu_registry, CpuClaim, CpuRegistry};
 /// A logical processor: processor group plus index within the group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct CpuId {
+    /// Processor group (Windows groups CPUs in sets of up to 64).
     pub group: u16,
+    /// Index within the group.
     pub index: u8,
 }
 
@@ -43,6 +45,7 @@ impl fmt::Display for CpuId {
 /// One logical processor as reported by the OS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct LogicalCpu {
+    /// Which logical processor this is.
     pub id: CpuId,
     /// Physical core; hyper-threads of one core share it.
     pub core: u8,
@@ -53,13 +56,16 @@ pub struct LogicalCpu {
 /// Where a CPU sits relative to the rest of this machine.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CoreKind {
+    /// In the fastest efficiency class (a P-core on hybrid CPUs).
     Performance,
+    /// In a slower efficiency class (an E-core).
     Efficiency,
     /// Non-hybrid machine: every CPU has the same efficiency class.
     Uniform,
 }
 
 impl CoreKind {
+    /// Classifies `cpu` relative to every CPU in `all`.
     pub fn of(cpu: &LogicalCpu, all: &[LogicalCpu]) -> Self {
         let classes = all.iter().map(|c| c.efficiency_class);
         let (min, max) = (classes.clone().min(), classes.max());
@@ -86,14 +92,20 @@ impl fmt::Display for CoreKind {
     }
 }
 
+/// Why a CPU topology query or pinning request failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CpuError {
     /// No implementation for this OS.
     Unsupported,
     /// The CPU index does not fit in an affinity mask on this target.
     InvalidCpu(CpuId),
-    /// An OS call failed with the given error code.
-    Os { call: &'static str, code: u32 },
+    /// An OS call failed.
+    Os {
+        /// The failing OS function.
+        call: &'static str,
+        /// The OS error code (`GetLastError` on Windows).
+        code: u32,
+    },
 }
 
 impl fmt::Display for CpuError {

@@ -1,3 +1,5 @@
+//! Instance layout, fixed-capacity buffer and sRGB conversion.
+
 use densa_render::{srgb, Instance, InstanceBuffer};
 
 #[test]

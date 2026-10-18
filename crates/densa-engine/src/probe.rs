@@ -4,6 +4,7 @@ use densa_data::ViewportSnapshot;
 /// Digest of one reporting window of [`FrameProbe`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ProbeReport {
+    /// Frames observed in this window.
     pub frames: u64,
     /// Frames that picked up a snapshot newer than the previous frame's.
     pub fresh_frames: u64,
@@ -28,6 +29,7 @@ pub struct FrameProbe {
 }
 
 impl FrameProbe {
+    /// A probe with an empty reporting window.
     pub fn new() -> Self {
         Self::default()
     }
@@ -64,6 +66,7 @@ impl FrameProbe {
         }
     }
 
+    /// Digest of the current reporting window.
     pub fn report(&self) -> ProbeReport {
         ProbeReport {
             frames: self.frames,
