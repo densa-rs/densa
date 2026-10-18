@@ -83,6 +83,11 @@ impl Reader {
         }
     }
 
+    /// Rows in the column.
+    pub(crate) fn len(&self) -> usize {
+        self.array.len()
+    }
+
     /// Whether this column's type can be formatted.
     pub(crate) fn is_supported(&self) -> bool {
         self.supported

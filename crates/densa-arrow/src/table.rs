@@ -213,11 +213,30 @@ impl ArrowTable {
     /// Appends the value at `row` of `column` to `text`, or a placeholder (see
     /// [`CellState`]), never a partial value. Never allocates.
     pub fn write_cell(&self, row: usize, column: usize, text: &mut CellText) -> CellState {
-        let (Some(reader), Some(format)) = (self.reader(row, column), self.formats.get(column))
-        else {
+        if row >= self.rows {
+            return CellState::OutOfRange;
+        }
+        // At least one start is <= row, since row < rows and starts[0] == 0.
+        let batch = self.starts.partition_point(|&start| start <= row) - 1;
+        self.write_at(batch, row - self.starts[batch], column, text)
+    }
+
+    /// [`write_cell`](Self::write_cell) for row `local` of stored batch `batch` (the batches
+    /// with rows, in the order pushed).
+    pub(crate) fn write_at(
+        &self,
+        batch: usize,
+        local: usize,
+        column: usize,
+        text: &mut CellText,
+    ) -> CellState {
+        let reader = self.batches.get(batch).and_then(|b| b.get(column));
+        let (Some(reader), Some(format)) = (reader, self.formats.get(column)) else {
             return CellState::OutOfRange;
         };
-        let (reader, local) = reader;
+        if local >= reader.len() {
+            return CellState::OutOfRange;
+        }
         if reader.is_null(local) {
             // A cell always has room for `null`.
             let _ = text.push_str("null");
@@ -295,15 +314,16 @@ impl ArrowTable {
         self.sized = true;
     }
 
-    /// The reader holding `row` of `column`, and the row's index within its batch.
-    fn reader(&self, row: usize, column: usize) -> Option<(&Reader, usize)> {
-        if row >= self.rows {
-            return None;
-        }
-        // At least one start is <= row, since row < rows and starts[0] == 0.
-        let batch = self.starts.partition_point(|&start| start <= row) - 1;
-        let reader = self.batches[batch].get(column)?;
-        Some((reader, row - self.starts[batch]))
+    /// Batches with rows held, in the order pushed.
+    pub(crate) fn stored_batches(&self) -> usize {
+        self.batches.len()
+    }
+
+    /// Drops every batch, keeping the schema and the column formats and widths.
+    pub(crate) fn clear_batches(&mut self) {
+        self.batches.clear();
+        self.starts.clear();
+        self.rows = 0;
     }
 
     fn format_mut(&mut self, column: usize) -> Result<&mut Format, TableError> {

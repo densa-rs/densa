@@ -91,3 +91,41 @@ fn painting_scrolled_frames_of_an_arrow_table_performs_zero_heap_operations() {
     assert!(stats.is_zero(), "painting allocated: {stats:?}");
     assert_eq!(buf.dropped(), 0);
 }
+
+#[test]
+fn painting_a_live_view_between_changes_performs_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut table = densa_data::LiveTable::new(batch(0, 1).schema(), "id").unwrap();
+    let by_price = table
+        .add_view(densa_data::ViewSpec::new().sort_by("price", densa_data::Order::Descending))
+        .unwrap();
+    for start in (0..ROWS).step_by(BATCH as usize) {
+        table.upsert(batch(start, BATCH.min(ROWS - start))).unwrap();
+    }
+    let mut grid = densa_arrow::LiveGrid::new(&table);
+    grid.set_decimals(3, Some(2)).unwrap();
+    let palette = Palette::new();
+    let font = Font::bundled_mono().unwrap();
+    let mut painter = GridPainter::new(grid.columns(), 50, font, 13.0, palette);
+    let mut buf = InstanceBuffer::with_capacity(painter.layout().max_instances());
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let printable: String = (' '..='~').chain(['…']).collect();
+    painter.prewarm(&mut cache, &printable);
+
+    let mut paint = |grid: &mut densa_arrow::LiveGrid, cache: &mut GlyphCache| {
+        for frame in 0..1_000 {
+            let first_row = (frame * 7_919) % ROWS as usize;
+            let view = grid.view(&table, by_price, first_row, &palette).unwrap();
+            let mut canvas = Canvas::begin(cache, &mut buf);
+            painter.paint(&view, &mut canvas);
+        }
+    };
+    paint(&mut grid, &mut cache); // warm-up: every glyph at every subpixel position
+    cache.drain_updates().for_each(drop);
+
+    let ((), stats) = measure(|| paint(&mut grid, &mut cache));
+    assert!(stats.is_zero(), "painting a live view allocated: {stats:?}");
+}

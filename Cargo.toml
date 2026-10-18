@@ -17,6 +17,7 @@ rust-version = "1.90"
 densa-alloc = { path = "crates/densa-alloc", version = "0.1.0" }
 densa-arrow = { path = "crates/densa-arrow", version = "0.1.0" }
 densa-core = { path = "crates/densa-core", version = "0.1.0" }
+densa-data = { path = "crates/densa-data", version = "0.1.0" }
 densa-draw = { path = "crates/densa-draw", version = "0.1.0" }
 densa-fmt = { path = "crates/densa-fmt", version = "0.1.0" }
 densa-grid = { path = "crates/densa-grid", version = "0.1.0" }
@@ -32,6 +33,7 @@ trading-demo = { path = "examples/trading-demo" }
 arrow-array = { version = "60.0.0", default-features = false }
 arrow-buffer = { version = "60.0.0", default-features = false }
 arrow-schema = { version = "60.0.0", default-features = false }
+arrow-select = { version = "60.0.0", default-features = false }
 bytemuck = "1.25.2"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }
 crossbeam-utils = "0.8.23"

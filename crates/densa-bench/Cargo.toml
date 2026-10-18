@@ -15,6 +15,7 @@ trading-demo.workspace = true
 arrow-array.workspace = true
 criterion.workspace = true
 densa-arrow.workspace = true
+densa-data.workspace = true
 densa-draw.workspace = true
 densa-grid.workspace = true
 densa-platform.workspace = true
@@ -27,6 +28,10 @@ harness = false
 
 [[bench]]
 name = "arrow"
+harness = false
+
+[[bench]]
+name = "live"
 harness = false
 
 [[bench]]

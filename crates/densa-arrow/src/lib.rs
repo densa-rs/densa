@@ -36,7 +36,9 @@ pub use arrow_array;
 pub use arrow_schema;
 
 mod calendar;
+mod live;
 mod reader;
 mod table;
 
+pub use live::{LiveGrid, LiveGridView};
 pub use table::{ArrowGrid, ArrowTable, CellState, TableError};
