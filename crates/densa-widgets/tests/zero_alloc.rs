@@ -12,7 +12,9 @@ use densa_ui::{
     Align, Key, KeyEvent, Length, NamedKey, PointerButton, PointerEvent, PointerKind, ScrollDelta,
     Style, Ui,
 };
-use densa_widgets::{Button, Label, Panel, ScrollView, Splitter, TextInput};
+use densa_widgets::{
+    Button, DockArea, DockAt, DockSide, Label, Panel, ScrollView, Splitter, TextInput,
+};
 
 #[global_allocator]
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
@@ -107,4 +109,187 @@ fn widget_frames_pointer_and_caret_moves_perform_zero_heap_operations() {
     });
     assert!(stats.is_zero(), "widgets allocated: {stats:?}");
     assert_eq!(out.dropped(), 0);
+}
+
+#[test]
+fn dock_frames_and_tab_drags_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let (mut ui, dock) = workspace();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(65_536);
+    let mut frame = |ui: &mut Ui| {
+        black_box(ui.cursor());
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    };
+    warm_up(&mut ui, &mut frame);
+    let quotes = shown_tab(&ui, dock);
+
+    let ((), stats) = measure(|| {
+        for step in 0..100u16 {
+            send(
+                &mut ui,
+                PointerKind::Move,
+                f32::from(step * 9 % 1000),
+                f32::from(step * 7 % 700),
+            );
+            frame(&mut ui);
+        }
+        // The shown tab dragged around: the drop preview follows, nothing moves.
+        send(&mut ui, DOWN, quotes.0, quotes.1);
+        for step in 0..100u16 {
+            send(
+                &mut ui,
+                PointerKind::Move,
+                f32::from(step * 9 % 1000),
+                f32::from(step * 5 % 700),
+            );
+            frame(&mut ui);
+        }
+        ui.cancel_pointer();
+        frame(&mut ui);
+    });
+    assert!(stats.is_zero(), "the dock allocated: {stats:?}");
+    black_box(dock);
+}
+
+/// Dragging a divider resizes panels, so every move lays them out again, and layout (taffy's
+/// flexbox) allocates. The dock itself must add nothing: a divider move costs what laying
+/// out the same panels again costs.
+#[test]
+fn a_divider_move_costs_no_more_than_laying_its_panels_out() {
+    assert!(is_active(), "counting allocator not installed");
+    let (mut ui, dock) = workspace();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(65_536);
+    let mut frame = |ui: &mut Ui| {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    };
+    warm_up(&mut ui, &mut frame);
+    let styles: Vec<_> = ui
+        .children(dock)
+        .iter()
+        .map(|&id| (id, ui.style(id).unwrap().clone()))
+        .collect();
+
+    let ((), relayout) = measure(|| {
+        for _ in 0..100 {
+            for (id, style) in &styles {
+                ui.set_style(*id, style.clone());
+            }
+            frame(&mut ui);
+        }
+    });
+    let ((), dragged) = measure(|| {
+        send(&mut ui, DOWN, 500.0, 350.0);
+        for step in 0..100u16 {
+            send(
+                &mut ui,
+                PointerKind::Move,
+                300.0 + f32::from(step * 4),
+                350.0,
+            );
+            frame(&mut ui);
+        }
+    });
+    assert!(
+        relayout.allocs > 0,
+        "layout no longer allocates: make the dock test strict"
+    );
+    assert!(
+        dragged.allocs <= relayout.allocs,
+        "dragging a divider allocated {dragged:?}, laying out the panels {relayout:?}"
+    );
+}
+
+/// A divider held against its limit does not move, so its moves change no style and lay
+/// nothing out: they allocate nothing at all.
+#[test]
+fn a_divider_held_at_its_limit_performs_zero_heap_operations() {
+    assert!(is_active(), "counting allocator not installed");
+    let (mut ui, _) = workspace();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(65_536);
+    let mut frame = |ui: &mut Ui| {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    };
+    warm_up(&mut ui, &mut frame);
+    send(&mut ui, DOWN, 500.0, 350.0);
+    send(&mut ui, PointerKind::Move, 0.0, 350.0);
+    frame(&mut ui);
+
+    let ((), stats) = measure(|| {
+        for step in 0..100u16 {
+            send(&mut ui, PointerKind::Move, f32::from(step % 20), 350.0);
+            frame(&mut ui);
+        }
+    });
+    assert!(
+        stats.is_zero(),
+        "a divider at its limit allocated: {stats:?}"
+    );
+}
+
+const DOWN: PointerKind = PointerKind::Down(PointerButton::Primary);
+
+fn send(ui: &mut Ui, kind: PointerKind, x: f32, y: f32) {
+    ui.pointer(PointerEvent::new(kind, Point::new(x, y)));
+}
+
+/// Four panels in three groups, laid out.
+fn workspace() -> (Ui, densa_ui::WidgetId) {
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(1000.0, 700.0));
+    let dock = ui
+        .add(ui.root(), DockArea::new(), DockArea::style())
+        .unwrap();
+    let add = |ui: &mut Ui, title: &str, at| {
+        DockArea::add_panel(ui, dock, Panel::new(), title, at).unwrap()
+    };
+    let quotes = add(&mut ui, "Quotes", DockAt::First);
+    add(&mut ui, "Trades", DockAt::With(quotes));
+    let chart = add(&mut ui, "Chart", DockAt::Beside(quotes, DockSide::Right));
+    add(&mut ui, "Orders", DockAt::Beside(chart, DockSide::Bottom));
+    DockArea::show_panel(&mut ui, dock, quotes).unwrap();
+    ui.layout();
+    (ui, dock)
+}
+
+/// The middle of the Quotes tab, the one its group shows.
+fn shown_tab(ui: &Ui, dock: densa_ui::WidgetId) -> (f32, f32) {
+    let area = ui.widget::<DockArea>(dock).unwrap();
+    let quotes = area.panels().next().unwrap();
+    assert!(area.is_shown(quotes));
+    let r = area
+        .tab_rect(quotes, ui.rect(dock).unwrap(), ui.scale())
+        .unwrap();
+    ((r.left() + r.right()) / 2.0, (r.top() + r.bottom()) / 2.0)
+}
+
+/// One round of hovering, a divider drag and a tab drag, so glyphs are cached and buffers
+/// (the action queue among them) have their size.
+fn warm_up(ui: &mut Ui, frame: &mut impl FnMut(&mut Ui)) {
+    let up = PointerKind::Up(PointerButton::Primary);
+    for (kind, x) in [
+        (PointerKind::Move, 300.0),
+        (DOWN, 500.0),
+        (PointerKind::Move, 450.0),
+        (up, 450.0),
+    ] {
+        send(ui, kind, x, 350.0);
+        frame(ui);
+    }
+    let dock = ui.children(ui.root())[0];
+    let (x, y) = shown_tab(ui, dock);
+    send(ui, DOWN, x, y);
+    send(ui, PointerKind::Move, 900.0, 300.0);
+    frame(ui);
+    ui.cancel_pointer();
+    frame(ui);
+    ui.actions().for_each(drop);
 }

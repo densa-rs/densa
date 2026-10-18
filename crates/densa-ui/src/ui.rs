@@ -134,6 +134,27 @@ impl State {
         style
     }
 
+    /// Gives `id` a new, childless layout node in its old one's place. taffy keeps the
+    /// absolutely positioned descendants it lays out on their container ("hoisted children")
+    /// and clears that list only when it lays the container out as one: a container whose
+    /// last child is removed is laid out as a leaf from then on, and rounding the layout
+    /// panicked on the removed child's id.
+    fn renew_layout_node(&mut self, id: WidgetId) {
+        let old = self.nodes[id.slot()].taffy;
+        let fresh = sync(self.taffy.new_leaf_with_context(self.taffy_style(id), id));
+        if let Some(parent) = self.taffy.parent(old) {
+            let index = sync(self.taffy.children(parent))
+                .iter()
+                .position(|child| *child == old);
+            if let Some(index) = index {
+                sync(self.taffy.replace_child_at_index(parent, index, fresh));
+            }
+        }
+        sync(self.taffy.remove(old));
+        self.nodes[id.slot()].taffy = fresh;
+        self.nodes[id.slot()].dirty = true;
+    }
+
     pub(crate) fn set_style(&mut self, id: WidgetId, style: Style) -> bool {
         if !self.is_live(id) {
             return false;
@@ -381,7 +402,8 @@ impl Ui {
             self.mark_hovered(Some(hover), false);
             self.state.hover = None;
         }
-        if let Some(parent) = self.state.nodes[id.slot()].parent {
+        let parent = self.state.nodes[id.slot()].parent;
+        if let Some(parent) = parent {
             self.state.nodes[parent.slot()]
                 .children
                 .retain(|child| *child != id);
@@ -397,6 +419,9 @@ impl Ui {
             sync(self.state.taffy.remove(taffy));
             self.widgets[gone.slot()] = None;
             self.state.free.push(gone.index);
+        }
+        if let Some(parent) = parent.filter(|p| self.state.nodes[p.slot()].children.is_empty()) {
+            self.state.renew_layout_node(parent);
         }
         let state = &mut self.state;
         let live = |slot: &mut Option<WidgetId>, nodes: &[Node]| {
@@ -603,12 +628,12 @@ impl Ui {
             );
             sync(computed);
             self.state.needs_layout = false;
-            self.place(self.state.root, Point::ORIGIN, true);
+            self.place(self.state.root, Point::ORIGIN, true, true);
             self.state.needs_place = false;
             self.after_moves();
         }
         if self.state.needs_place {
-            self.place(self.state.root, Point::ORIGIN, false);
+            self.place(self.state.root, Point::ORIGIN, false, true);
             self.state.needs_place = false;
             self.after_moves();
         }
@@ -628,7 +653,7 @@ impl Ui {
 
     /// Computes `id`'s rectangle (and its children's) from the last layout, its parent's
     /// content starting at `origin`; `notify` tells widgets their sizes.
-    fn place(&mut self, id: WidgetId, origin: Point, notify: bool) {
+    fn place(&mut self, id: WidgetId, origin: Point, notify: bool, shown: bool) {
         let state = &mut self.state;
         let node = &mut state.nodes[id.slot()];
         let layout = *sync(state.taffy.layout(node.taffy));
@@ -648,14 +673,21 @@ impl Ui {
         // Measured from the padding box's corner: how far the content reaches.
         let overflow = layout.scrollable_overflow_rect;
         node.content_size = Size::new(overflow.right, overflow.bottom);
-        // Content that shrank, or a view that grew, leaves less to scroll.
-        let room = |content: f32, shown: f32| (content - shown).max(0.0);
-        let clamped = Point::new(
-            node.scroll.x.clamp(0.0, room(overflow.right, rect.width())),
+        // Content that shrank, or a view that grew, leaves less to scroll. A hidden widget
+        // has no size, so it keeps its scroll for when it is shown again (a tab switched
+        // away and back).
+        let shown = shown && !node.style.hidden;
+        let room = |content: f32, view: f32| (content - view).max(0.0);
+        let clamped = if !shown {
             node.scroll
-                .y
-                .clamp(0.0, room(overflow.bottom, rect.height())),
-        );
+        } else {
+            Point::new(
+                node.scroll.x.clamp(0.0, room(overflow.right, rect.width())),
+                node.scroll
+                    .y
+                    .clamp(0.0, room(overflow.bottom, rect.height())),
+            )
+        };
         if clamped != node.scroll {
             node.scroll = clamped;
             state.needs_paint = true;
@@ -686,7 +718,7 @@ impl Ui {
         }
         for index in 0..self.state.nodes[id.slot()].children.len() {
             let child = self.state.nodes[id.slot()].children[index];
-            self.place(child, inner, notify);
+            self.place(child, inner, notify, shown);
         }
     }
 

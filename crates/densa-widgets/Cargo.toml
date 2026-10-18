@@ -1,6 +1,6 @@
 [package]
 name = "densa-widgets"
-description = "Standard widgets for densa: labels, buttons, text inputs, scroll views, splitters"
+description = "Standard widgets for densa: labels, buttons, text inputs, scroll views, splitters, docking"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

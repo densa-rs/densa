@@ -1,5 +1,5 @@
 //! Standard widgets for `densa_ui`: [`Label`], [`Button`], [`TextInput`], [`ScrollView`],
-//! [`Splitter`] and [`Panel`].
+//! [`Splitter`], [`Panel`] and [`DockArea`] (panels in tab groups the user rearranges).
 //!
 //! Each is a [`Widget`](densa_ui::Widget): add it to a [`Ui`](densa_ui::Ui) with a
 //! [`Style`](densa_ui::Style), and read what the user did from the actions it reports.
@@ -28,6 +28,7 @@
 //! ```
 
 mod button;
+mod dock;
 mod label;
 mod paint;
 mod panel;
@@ -37,6 +38,7 @@ mod text;
 mod text_input;
 
 pub use button::Button;
+pub use dock::{DockArea, DockAt, DockPanel, DockSide};
 pub use label::Label;
 pub use panel::Panel;
 pub use scroll::ScrollView;

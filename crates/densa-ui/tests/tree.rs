@@ -214,3 +214,73 @@ fn a_widget_restyles_itself_and_what_it_holds_but_nothing_else() {
     assert_eq!(ui.rect(child).unwrap().width(), 10.0);
     assert_eq!(ui.rect(stranger).unwrap().width(), 50.0);
 }
+
+#[test]
+fn removing_the_only_absolute_child_leaves_its_parent_laid_out() {
+    let log = log();
+    let mut ui = ui(400.0, 300.0);
+    let parent = ui
+        .add(
+            ui.root(),
+            Probe::new("parent", &log),
+            Style::column().grow(1.0),
+        )
+        .unwrap();
+    let inset = densa_ui::Edges::all(densa_ui::Length::Px(10.0));
+    let child = ui
+        .add(
+            parent,
+            Probe::new("child", &log),
+            Style::column().absolute(inset),
+        )
+        .unwrap();
+    ui.layout();
+    assert!(ui.remove(child));
+    ui.layout();
+    let again = ui
+        .add(
+            parent,
+            Probe::new("again", &log),
+            Style::column().absolute(inset),
+        )
+        .unwrap();
+    ui.layout();
+    assert_eq!(
+        ui.rect(again),
+        ui.rect(parent).map(|r| Rect::from_edges(
+            r.left() + 10.0,
+            r.top() + 10.0,
+            r.right() - 10.0,
+            r.bottom() - 10.0
+        ))
+    );
+}
+
+#[test]
+fn a_hidden_widget_keeps_the_scroll_inside_it_until_shown_again() {
+    let log = log();
+    let mut ui = ui(400.0, 300.0);
+    let page = ui
+        .add(ui.root(), Probe::new("page", &log), Style::column())
+        .unwrap();
+    let frame = Style::column()
+        .size(100.0, 100.0)
+        .overflow(Overflow::Scroll);
+    let frame = ui.add(page, Scroller, frame).unwrap();
+    let rows: Vec<_> = (0..10)
+        .map(|_| {
+            let row = Style::row().size(100.0, 30.0).shrink(0.0);
+            ui.add(frame, Probe::new("row", &log), row).unwrap()
+        })
+        .collect();
+    ui.layout();
+    let kind = PointerKind::Scroll(ScrollDelta::Pixels(0.0, 45.0));
+    ui.pointer(densa_ui::PointerEvent::new(kind, Point::new(50.0, 50.0)));
+    ui.layout();
+    let scrolled = ui.rect(rows[1]);
+    ui.set_style(page, Style::column().hidden(true));
+    ui.layout();
+    ui.set_style(page, Style::column());
+    ui.layout();
+    assert_eq!(ui.rect(rows[1]), scrolled);
+}

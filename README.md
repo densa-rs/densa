@@ -71,6 +71,7 @@ You need Rust 1.90 or later and a GPU with Vulkan, Metal or DirectX 12.
 git clone https://github.com/densa-rs/densa
 cd densa
 cargo run --release -p densa-widgets --example gallery      # widgets in a window
+cargo run --release -p densa-widgets --example dock         # a docking workspace
 cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
 cargo run --release -p densa-arrow --example table           # a million-row Arrow table
 cargo run --release -p densa-paragraph --example editor      # editable text
@@ -93,7 +94,7 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes; no window or GPU needed |
-| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels |
+| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridSource`): columns, alignment, cell styles |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
@@ -262,6 +263,9 @@ if reader.update() {
   <img alt="The widget gallery: a toolbar with a filter input and buttons, a scrolling list beside a details pane in a splitter, and a status bar" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/gallery.png" width="660">
 </p>
 <p align="center">
+  <img alt="A docking workspace: a watchlist beside a details pane above log and notes tabs, with a dragged tab's drop preview over the right half of the log and notes group" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/dock.png" width="660">
+</p>
+<p align="center">
   <img alt="A live table of instruments sorted by percent change" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/live-table.png" width="260">
   &nbsp;
   <img alt="A million-row Arrow table of orders" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="380">
@@ -273,6 +277,7 @@ if reader.update() {
 | Example | Shows |
 |---|---|
 | [`densa-widgets` `gallery`](crates/densa-widgets/examples/gallery.rs) | A toolbar, a filterable list in a scroll view beside a details pane in a splitter, Tab between controls; `--light` for the light theme |
+| [`densa-widgets` `dock`](crates/densa-widgets/examples/dock.rs) | Panels in tab groups: drag tabs to join or split groups, drag the gaps to resize; `--demo` starts mid-drag |
 | [`densa-arrow` `live`](crates/densa-arrow/examples/live.rs) | A live table updated continuously, its "top movers" view kept sorted |
 | [`densa-arrow` `table`](crates/densa-arrow/examples/table.rs) | A million-row Arrow table; `--live` appends batches while it is shown |
 | [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |
@@ -302,9 +307,11 @@ if reader.update() {
 
 ## Limitations
 
-- **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels and a data grid,
-  with flexbox layout, events and focus. Not there yet: accessibility, docking, tabs, menus,
-  undo, redo and the clipboard in text inputs; the grid is not yet a widget.
+- **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels, docking and a
+  data grid, with flexbox layout, events and focus. Not there yet: accessibility, menus, undo,
+  redo and the clipboard in text inputs; the grid is not yet a widget. Docking does not yet
+  save and restore layouts (panels already carry stable keys for it) or float panels in
+  their own windows.
 - **Live data:** views sort and filter, groups count, sum, average and find extremes; time
   windows and joins are not there yet. A table is used from one thread at a time.
 - **Text:** grid cells are single-line, unshaped text in the bundled font. Word breaks in

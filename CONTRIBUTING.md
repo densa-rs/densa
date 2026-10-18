@@ -26,7 +26,7 @@ Every `densa-*` crate in `crates/` is a library; applications live in `examples/
 | `densa-paragraph` | Shaped paragraphs, selection, `TextEditor` (on parley) |
 | `densa-draw` | The GPU-free display list: `Canvas` (with clipping), `InstanceBuffer` |
 | `densa-ui` | The widget tree: layout (flexbox, via taffy), events, focus, themes |
-| `densa-widgets` | Labels, buttons, text inputs, scroll views, splitters, panels |
+| `densa-widgets` | Labels, buttons, text inputs, scroll views, splitters, panels, docking |
 | `densa-grid` | The data grid widget over a `GridSource` |
 | `densa-render` | wgpu: draws a frame's instances in one call |
 | `densa-window` | Runs a `Ui` in a winit window, drawing with `densa-render` |
