@@ -8,7 +8,7 @@ const ADVANCE: f32 = 0.6 * PX;
 
 fn layout(text: &str, max_width: Option<f32>) -> Paragraph {
     let style = ParagraphStyle::new(PX).with_max_width(max_width);
-    TextSystem::new()
+    TextSystem::bundled()
         .unwrap()
         .paragraph(text, &style, &[])
         .unwrap()

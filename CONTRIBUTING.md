@@ -83,7 +83,8 @@ Run these before opening a pull request; CI runs them on Linux, macOS and Window
 cargo fmt --all --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-cargo clippy -p densa-paragraph --features system-fonts --all-targets -- -D warnings
+cargo clippy -p densa-paragraph --no-default-features --all-targets -- -D warnings
+cargo clippy -p densa-paragraph --features complex-scripts --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
 cargo +1.90 check --workspace --all-targets   # minimum supported Rust version
 cargo tree -d -e normal                       # must not list skrifa or read-fonts

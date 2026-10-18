@@ -18,7 +18,7 @@ use densa_widgets::{Button, Label, Panel, ScrollView, Splitter, TextInput};
 static ALLOCATOR: CountingAllocator = CountingAllocator::system();
 
 fn interface() -> (Ui, densa_ui::WidgetId) {
-    let mut ui = Ui::new(TextSystem::new().unwrap());
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
     ui.resize(Size::new(1000.0, 700.0));
     let root = ui.root();
     let bar = Style::row()

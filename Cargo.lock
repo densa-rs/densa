@@ -644,6 +644,7 @@ dependencies = [
  "densa-grid",
  "densa-render",
  "densa-text",
+ "fontique",
  "parley",
  "pollster",
  "rustc-hash 2.1.3",

@@ -62,7 +62,7 @@ impl Widget for Cell {
 
 /// A scrolling column of 200 rows of 5 cells.
 fn interface() -> Ui {
-    let mut ui = Ui::new(TextSystem::new().unwrap());
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
     ui.resize(Size::new(800.0, 600.0));
     let list = Style::column().grow(1.0).overflow(Overflow::Scroll);
     let list = ui.add(ui.root(), Cell { presses: 0 }, list).unwrap();

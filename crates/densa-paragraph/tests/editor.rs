@@ -9,7 +9,7 @@ const PX: f32 = 14.0;
 const ADVANCE: f32 = 0.6 * PX;
 
 fn editor(text: &str) -> (TextSystem, TextEditor) {
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let editor = TextEditor::new(&mut system, text, ParagraphStyle::new(PX)).unwrap();
     (system, editor)
 }
@@ -37,7 +37,7 @@ mod construction {
 
     #[test]
     fn an_invalid_style_is_rejected() {
-        let mut system = TextSystem::new().unwrap();
+        let mut system = TextSystem::bundled().unwrap();
         let e = TextEditor::new(&mut system, "x", ParagraphStyle::new(0.0)).unwrap_err();
         assert_eq!(e, ParagraphError::InvalidSize(0.0));
     }
@@ -113,7 +113,7 @@ mod inserting {
 
     #[test]
     fn typing_rewraps_the_text() {
-        let mut system = TextSystem::new().unwrap();
+        let mut system = TextSystem::bundled().unwrap();
         let style = ParagraphStyle::new(PX).with_max_width(Some(10.5 * ADVANCE));
         let mut e = TextEditor::new(&mut system, "hello", style).unwrap();
         assert_eq!(e.paragraph().lines().len(), 1);
@@ -232,7 +232,7 @@ mod navigation {
 
     #[test]
     fn a_selection_from_another_text_is_clamped() {
-        let mut system = TextSystem::new().unwrap();
+        let mut system = TextSystem::bundled().unwrap();
         let longer = system
             .paragraph("a much longer text", &ParagraphStyle::new(PX), &[])
             .unwrap();
@@ -421,7 +421,7 @@ mod composition {
 
     #[test]
     fn the_input_method_area_spans_every_line_of_a_wrapped_preedit() {
-        let mut s = TextSystem::new().unwrap();
+        let mut s = TextSystem::bundled().unwrap();
         let style = ParagraphStyle::new(PX).with_max_width(Some(8.5 * ADVANCE));
         let mut e = TextEditor::new(&mut s, "abcd ", style).unwrap();
         e.set_composition(&mut s, "efgh ijkl", Some(9..9)).unwrap();

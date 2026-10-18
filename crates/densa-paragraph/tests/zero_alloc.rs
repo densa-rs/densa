@@ -17,7 +17,7 @@ fn drawing_a_paragraph_performs_zero_heap_operations() {
         is_active(),
         "counting allocator not installed: test would be vacuous"
     );
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
     let spans = [Span::new(0.."Crème brûlée".len()).with_color(Color::linear(1.0, 0.5, 0.0, 1.0))];
@@ -57,7 +57,7 @@ fn hit_testing_and_moving_selections_perform_zero_heap_operations() {
         is_active(),
         "counting allocator not installed: test would be vacuous"
     );
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
     let paragraph = system.paragraph(text, &style, &[]).unwrap();
@@ -98,7 +98,7 @@ fn moving_the_caret_and_querying_an_editor_perform_zero_heap_operations() {
         is_active(),
         "counting allocator not installed: test would be vacuous"
     );
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let text = "Crème brûlée, à la carte, wrapped across several lines of a narrow column.";
     let style = ParagraphStyle::new(14.0).with_max_width(Some(160.0));
     let mut editor = TextEditor::new(&mut system, text, style).unwrap();

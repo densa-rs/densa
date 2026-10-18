@@ -2,7 +2,10 @@ use std::borrow::Cow;
 
 use densa_core::Color;
 use densa_text::{Font, FontBytes, FontError};
-use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
+use parley::fontique::{
+    Blob, Collection, CollectionOptions, FallbackKey, FamilyId, GenericFamily, Language, Script,
+    SourceCache,
+};
 use parley::{FontContext, FontData, FontFamily, LayoutContext, LineHeight, StyleProperty};
 use rustc_hash::FxHashMap;
 
@@ -24,6 +27,57 @@ const GENERICS: [GenericFamily; 9] = [
     GenericFamily::UiRounded,
     GenericFamily::Emoji,
 ];
+
+/// Generic families that stay the bundled font with system fonts on, so turning them on only
+/// adds characters: text the bundled font could draw looks the same.
+const MONOSPACE: [GenericFamily; 2] = [GenericFamily::Monospace, GenericFamily::UiMonospace];
+
+/// Han locales whose system fallback fonts are tried, in order, after the default one.
+const HAN_LOCALES: [&str; 4] = ["zh-TW", "zh-HK", "ja", "ko"];
+
+/// Simplified Chinese families tried last. fontique's Windows backend answers the default Han
+/// key (which is simplified Chinese) with Yu Gothic UI, a Japanese font without many
+/// simplified forms; these fill them in on Windows, macOS and Linux.
+const SIMPLIFIED_CHINESE: [&str; 5] = [
+    "Microsoft YaHei UI",
+    "Microsoft YaHei",
+    "PingFang SC",
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+];
+
+/// Makes the default Han fallback a chain of every locale's font, so a Han character any
+/// installed CJK font has is drawn: no single font has the characters of every locale, and
+/// fontique gives each script and locale one. Parley also falls back to this chain for
+/// punctuation in every script.
+fn chain_han_fallbacks(collection: &mut Collection) {
+    let han = Script::from_bytes(*b"Hani");
+    let mut chain: Vec<FamilyId> = collection
+        .fallback_families(FallbackKey::new(han, None))
+        .collect();
+    let add = |chain: &mut Vec<FamilyId>, family: FamilyId| {
+        if !chain.contains(&family) {
+            chain.push(family);
+        }
+    };
+    for tag in HAN_LOCALES {
+        let Ok(locale) = Language::parse(tag) else {
+            continue;
+        };
+        let families: Vec<FamilyId> = collection
+            .fallback_families(FallbackKey::new(han, Some(&locale)))
+            .collect();
+        for family in families {
+            add(&mut chain, family);
+        }
+    }
+    for name in SIMPLIFIED_CHINESE {
+        if let Some(family) = collection.family_id(name) {
+            add(&mut chain, family);
+        }
+    }
+    collection.set_fallbacks(FallbackKey::new(han, None), chain.into_iter());
+}
 
 /// Fonts plus layout scratch space: builds [`Paragraph`]s.
 ///
@@ -48,24 +102,27 @@ impl std::fmt::Debug for TextSystem {
 }
 
 impl TextSystem {
-    /// A text system with only the bundled JetBrains Mono, which also stands in for every
-    /// generic family (`monospace`, `sans-serif`, ...). Deterministic on every machine;
-    /// add fonts with [`register_font`](Self::register_font).
+    /// The text system applications want: the bundled JetBrains Mono for `monospace` (the
+    /// default family), and the operating system's fonts for other families and for every
+    /// character the bundled font lacks (Korean, Japanese, Chinese, symbols, ...).
+    ///
+    /// Without the `system-fonts` feature (on by default) this is [`bundled`](Self::bundled).
     ///
     /// # Errors
     /// Only if the bundled font were corrupt.
     pub fn new() -> Result<Self, FontError> {
-        Self::build(false)
+        Self::build(cfg!(feature = "system-fonts"))
     }
 
-    /// A text system that also finds the operating system's fonts, for named families and
-    /// for fallback when a font lacks a character (CJK, symbols, ...).
+    /// A text system with only the bundled JetBrains Mono, which also stands in for every
+    /// generic family (`monospace`, `sans-serif`, ...): the same text lays out the same on
+    /// every machine, for tests and screenshots. Characters it lacks are drawn as its
+    /// missing-glyph box; add fonts with [`register_font`](Self::register_font).
     ///
     /// # Errors
     /// Only if the bundled font were corrupt.
-    #[cfg(feature = "system-fonts")]
-    pub fn with_system_fonts() -> Result<Self, FontError> {
-        Self::build(true)
+    pub fn bundled() -> Result<Self, FontError> {
+        Self::build(false)
     }
 
     fn build(system_fonts: bool) -> Result<Self, FontError> {
@@ -83,12 +140,14 @@ impl TextSystem {
         let Some(&(family, _)) = registered.first() else {
             return Err(FontError::Parse);
         };
-        if !system_fonts {
-            for generic in GENERICS {
-                fonts
-                    .collection
-                    .set_generic_families(generic, std::iter::once(family));
-            }
+        let generics: &[GenericFamily] = if system_fonts { &MONOSPACE } else { &GENERICS };
+        for &generic in generics {
+            fonts
+                .collection
+                .set_generic_families(generic, std::iter::once(family));
+        }
+        if system_fonts {
+            chain_han_fallbacks(&mut fonts.collection);
         }
         let mut faces = FxHashMap::default();
         // The bundled font keeps its process-wide identity, shared with its other users.

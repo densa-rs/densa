@@ -12,12 +12,18 @@ keywords = ["text", "layout", "paragraph", "bidi", "selection"]
 categories = ["gui", "text-processing"]
 
 [features]
-# Discover the operating system's fonts for families and fallback (CJK, symbols, ...).
-system-fonts = ["parley/system"]
+default = ["system-fonts"]
+# Find the operating system's fonts: fallback for characters the bundled font lacks (Korean,
+# Japanese, Chinese, symbols, ...) and named families. `TextSystem::new` uses them.
+system-fonts = ["parley/system", "dep:fontique", "fontique/fontconfig-dlopen"]
+# Dictionary data for word breaks in Chinese and Japanese and line breaks in Thai, Lao, Khmer
+# and Burmese (adds several MB to the binary). Without it those break as other scripts do.
+complex-scripts = ["parley/complex-scripts"]
 
 [dependencies]
 densa-core.workspace = true
 densa-text.workspace = true
+fontique = { workspace = true, optional = true }
 parley.workspace = true
 rustc-hash.workspace = true
 

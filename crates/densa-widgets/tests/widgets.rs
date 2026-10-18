@@ -11,7 +11,7 @@ use densa_ui::{
 use densa_widgets::{Button, Label, Panel, ScrollView, Splitter, TextInput};
 
 fn ui() -> Ui {
-    let mut ui = Ui::new(TextSystem::new().unwrap());
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
     ui.resize(Size::new(800.0, 600.0));
     ui
 }

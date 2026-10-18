@@ -114,7 +114,7 @@ fn wrapped_lines_are_drawn_inside_their_boxes_and_the_width() {
     };
     let max_width = 120.0;
     let style = ParagraphStyle::new(14.0).with_max_width(Some(max_width));
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let paragraph = system
         .paragraph("Ünïcödé text wraps onto several lines here", &style, &[])
         .unwrap();
@@ -146,7 +146,7 @@ fn centered_lines_are_drawn_around_the_middle() {
     let style = ParagraphStyle::new(14.0)
         .with_max_width(Some(max_width))
         .with_align(TextAlign::Center);
-    let mut system = TextSystem::new().unwrap();
+    let mut system = TextSystem::bundled().unwrap();
     let paragraph = system.paragraph("centre", &style, &[]).unwrap();
     let red = render(&device, &queue, &paragraph);
 

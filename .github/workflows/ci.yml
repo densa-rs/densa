@@ -37,11 +37,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: System font discovery headers (system-fonts feature)
-        run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev pkg-config
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - run: cargo clippy -p densa-paragraph --features system-fonts --all-targets --locked -- -D warnings
+      # No fontconfig headers are installed: system fonts load fontconfig at run time.
+      - run: cargo clippy -p densa-paragraph --no-default-features --all-targets --locked -- -D warnings
+      - run: cargo clippy -p densa-paragraph --features complex-scripts --all-targets --locked -- -D warnings
       - name: One font parser in the dependency tree
         run: |
           if cargo tree -d -e normal --locked | grep -E '^(skrifa|read-fonts) '; then

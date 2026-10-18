@@ -10,7 +10,7 @@ const PX: f32 = 14.0;
 const ADVANCE: f32 = 0.6 * PX;
 
 fn system() -> TextSystem {
-    TextSystem::new().unwrap()
+    TextSystem::bundled().unwrap()
 }
 
 fn layout(text: &str, style: ParagraphStyle) -> Paragraph {

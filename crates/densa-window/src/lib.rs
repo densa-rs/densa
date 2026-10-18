@@ -8,6 +8,10 @@
 //! Frames are painted when something changed, when another thread asks for one through a
 //! [`Waker`] (new data arrived), or continuously while the app asks for it (animation).
 //!
+//! The [`Ui`]'s text uses `densa_paragraph::TextSystem::new`: the bundled font, and the
+//! system's fonts for characters it lacks (Korean, Japanese, Chinese, ...). Turning off the
+//! default `system-fonts` feature leaves the bundled font alone.
+//!
 //! ```no_run
 //! use std::error::Error;
 //! use densa_ui::{Ui, Style};

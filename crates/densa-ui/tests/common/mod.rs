@@ -142,7 +142,7 @@ impl Widget for Probe {
 }
 
 pub fn ui(width: f32, height: f32) -> Ui {
-    let mut ui = Ui::new(TextSystem::new().unwrap());
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
     ui.resize(Size::new(width, height));
     ui
 }

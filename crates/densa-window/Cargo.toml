@@ -11,6 +11,11 @@ readme.workspace = true
 keywords = ["gui", "window", "wgpu", "winit", "ui"]
 categories = ["gui"]
 
+[features]
+default = ["system-fonts"]
+# Windows draw every script the operating system has fonts for; off, only the bundled font's.
+system-fonts = ["densa-paragraph/system-fonts"]
+
 [dependencies]
 densa-core.workspace = true
 densa-draw.workspace = true

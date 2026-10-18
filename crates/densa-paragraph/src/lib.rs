@@ -15,6 +15,19 @@
 //!
 //! Laying out allocates and happens when text, style or width change; drawing a laid-out
 //! paragraph, hit-testing and moving a selection or a caret do not allocate.
+//!
+//! # Fonts and scripts
+//!
+//! [`TextSystem::new`] draws the default `monospace` family with the bundled JetBrains Mono
+//! and every character it lacks (Korean, Japanese, Chinese, symbols, ...) with the operating
+//! system's fonts; [`TextSystem::bundled`] uses the bundled font alone, the same on every
+//! machine. Features:
+//!
+//! - `system-fonts` (default): find the operating system's fonts. On Linux, fontconfig is
+//!   loaded at run time; without it, text falls back to the bundled font.
+//! - `complex-scripts`: dictionaries for word breaks in Chinese and Japanese and line breaks
+//!   in Thai, Lao, Khmer and Burmese (several MB). Without it, a double-click in Japanese
+//!   selects one character.
 
 mod editor;
 mod paragraph;

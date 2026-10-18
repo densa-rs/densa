@@ -59,7 +59,8 @@ or windowing crate.
 - **No locks between threads.** A wait-free triple buffer hands the newest data to the UI
   thread; its memory orderings are model-checked with loom.
 - **Real text.** Shaping, wrapping, bidirectional text, selection, editing and input methods
-  (IME), built on [parley](https://github.com/linebender/parley).
+  (IME), built on [parley](https://github.com/linebender/parley). Characters the bundled
+  font lacks, such as Korean, Japanese and Chinese, come from the system's fonts.
 - **One draw call per frame**, with a glyph atlas whose memory is bounded.
 
 ## Quick start
@@ -306,8 +307,10 @@ if reader.update() {
   undo, redo and the clipboard in text inputs; the grid is not yet a widget.
 - **Live data:** views sort and filter, groups count, sum, average and find extremes; time
   windows and joins are not there yet. A table is used from one thread at a time.
-- **Text:** grid cells are single-line, unshaped text. Paragraphs use only the bundled font
-  unless the `system-fonts` feature is enabled. Not supported yet: inline boxes,
+- **Text:** grid cells are single-line, unshaped text in the bundled font. Word breaks in
+  Chinese and Japanese and line breaks in Thai, Lao, Khmer and Burmese need densa-paragraph's
+  `complex-scripts` feature (several MB of dictionaries). Not supported yet: choosing a
+  language per paragraph (it picks the regional forms of Han characters), inline boxes,
   variable-font axes, synthetic bold and italic, color emoji.
 - **Threads:** placement and priority are implemented on Windows only.
 
