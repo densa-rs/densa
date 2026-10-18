@@ -1,11 +1,15 @@
 [package]
 name = "densa-alloc"
-description = "Per-thread allocation counting allocator for proving zero-allocation hot paths"
+description = "Per-thread counting global allocator for proving that hot paths allocate nothing"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["allocator", "allocation", "testing", "zero-alloc", "counting"]
+categories = ["development-tools::testing", "memory-management"]
 
 [dependencies]
 

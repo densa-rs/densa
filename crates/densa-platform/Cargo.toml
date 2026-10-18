@@ -1,11 +1,15 @@
 [package]
 name = "densa-platform"
-description = "OS services for low-latency threads: CPU topology, thread pinning, current CPU"
+description = "OS services for low-latency threads: CPU topology, thread pinning and priority"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["cpu", "affinity", "pinning", "thread", "priority"]
+categories = ["os", "concurrency"]
 
 [dependencies]
 

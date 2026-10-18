@@ -1,11 +1,15 @@
 [package]
 name = "densa-render"
-description = "wgpu renderer for dense data grids: one instanced-quad draw call, zero per-frame allocation in densa code"
+description = "wgpu renderer for densa: a Canvas for every painter, one instanced draw call and a generic data grid"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["wgpu", "gpu", "grid", "renderer", "gui"]
+categories = ["gui", "rendering", "graphics"]
 
 [dependencies]
 densa-core.workspace = true

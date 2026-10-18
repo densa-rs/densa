@@ -1,11 +1,15 @@
 [package]
 name = "densa-text"
-description = "Real text for densa: font loading, glyph rasterization and an allocation-free glyph atlas cache"
+description = "Text for densa: font loading, glyph rasterization and a growable, allocation-free glyph atlas cache"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["font", "glyph", "atlas", "text", "gpu"]
+categories = ["gui", "rendering", "text-processing"]
 # The bundled JetBrains Mono font is under the SIL Open Font License 1.1 (fonts/OFL.txt).
 include = ["src/**", "tests/**", "fonts/**", "Cargo.toml"]
 

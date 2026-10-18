@@ -1,11 +1,15 @@
 [package]
 name = "densa-sync"
-description = "Lock-free synchronization primitives for low-latency UI/data pipelines"
+description = "Wait-free SPSC triple buffer for low-latency data and UI pipelines, loom-verified"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["triple-buffer", "lock-free", "wait-free", "spsc", "concurrency"]
+categories = ["concurrency", "data-structures"]
 
 [dependencies]
 crossbeam-utils.workspace = true

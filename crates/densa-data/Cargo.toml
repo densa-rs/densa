@@ -6,6 +6,8 @@ edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+# Demo application code (the trading grid), not part of the published framework.
+publish = false
 
 [dependencies]
 

@@ -7,21 +7,23 @@ version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://densa.dev"
+repository = "https://github.com/densa-rs/densa"
+readme = "README.md"
 # Verified with `cargo +1.90 check --workspace --all-targets`; set by wgpu-hal's
 # ordered-float dependency (wgpu 30 itself needs 1.87).
 rust-version = "1.90"
 
 [workspace.dependencies]
-densa-alloc = { path = "crates/densa-alloc" }
-densa-core = { path = "crates/densa-core" }
+densa-alloc = { path = "crates/densa-alloc", version = "0.1.0" }
+densa-core = { path = "crates/densa-core", version = "0.1.0" }
 densa-data = { path = "crates/densa-data" }
 densa-engine = { path = "crates/densa-engine" }
-densa-fmt = { path = "crates/densa-fmt" }
-densa-paragraph = { path = "crates/densa-paragraph" }
-densa-platform = { path = "crates/densa-platform" }
-densa-render = { path = "crates/densa-render" }
-densa-sync = { path = "crates/densa-sync" }
-densa-text = { path = "crates/densa-text" }
+densa-fmt = { path = "crates/densa-fmt", version = "0.1.0" }
+densa-paragraph = { path = "crates/densa-paragraph", version = "0.1.0" }
+densa-platform = { path = "crates/densa-platform", version = "0.1.0" }
+densa-render = { path = "crates/densa-render", version = "0.1.0" }
+densa-sync = { path = "crates/densa-sync", version = "0.1.0" }
+densa-text = { path = "crates/densa-text", version = "0.1.0" }
 
 bytemuck = "1.25.2"
 criterion = { version = "0.8.2", default-features = false, features = ["cargo_bench_support"] }

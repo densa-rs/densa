@@ -1,11 +1,15 @@
 [package]
 name = "densa-core"
-description = "Primitive types shared by every densa crate, such as Color"
+description = "Primitive types shared by every densa crate: Color, Point, Rect"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 homepage.workspace = true
 rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "color", "geometry", "densa"]
+categories = ["gui", "graphics"]
 
 [lints]
 workspace = true
