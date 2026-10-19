@@ -10,6 +10,11 @@
 //! Layout runs only when a style, a widget's content or the viewport changes; painting,
 //! hit-testing and delivering events run every frame and do not allocate.
 //!
+//! Popups (menus, completion lists) open above every other widget with [`Ui::open_popup`],
+//! placed next to an [`Anchor`] and kept inside the viewport; a press outside closes them. A
+//! secondary press or the context menu key reports [`ActionKind::ContextMenu`], where an
+//! application opens its context menu.
+//!
 //! Widgets also describe themselves to assistive technology ([`Widget::accessibility`]):
 //! [`Ui::access_tree`] is what a screen reader reads, and [`Ui::access_action`] does what it
 //! asks. Both are platform-neutral; `densa-window` connects them to the operating system.
@@ -54,6 +59,7 @@ mod context;
 mod dispatch;
 mod event;
 mod id;
+mod popup;
 mod style;
 mod theme;
 mod ui;
@@ -66,6 +72,7 @@ pub use event::{
     PointerKind, ScrollDelta,
 };
 pub use id::WidgetId;
+pub use popup::Anchor;
 pub use style::{Align, Direction, Edges, Justify, Length, Overflow, Position, Style};
 pub use theme::Theme;
 pub use ui::{Ui, UiError};

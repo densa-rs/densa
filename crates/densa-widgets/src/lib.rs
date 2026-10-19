@@ -1,7 +1,8 @@
 //! Standard widgets for `densa_ui`: [`Label`], [`Button`], [`TextInput`], [`ScrollView`],
 //! [`Splitter`], [`Panel`], [`DockArea`] (panels in tab groups the user rearranges),
-//! [`DataGrid`] (rows of a model, scrolled, selected and sorted) and [`Chart`] (time series,
-//! candles and volume, panned and zoomed).
+//! [`DataGrid`] (rows of a model, scrolled, selected and sorted), [`Chart`] (time series,
+//! candles and volume, panned and zoomed), and [`Menu`] and [`MenuBar`] (commands in menus
+//! that pop up, with submenus, check marks and keyboard navigation).
 //!
 //! Each is a [`Widget`](densa_ui::Widget): add it to a [`Ui`](densa_ui::Ui) with a
 //! [`Style`](densa_ui::Style), and read what the user did from the actions it reports.
@@ -34,6 +35,7 @@ mod chart;
 mod dock;
 mod grid;
 mod label;
+mod menu;
 mod paint;
 mod panel;
 mod scroll;
@@ -46,6 +48,7 @@ pub use chart::Chart;
 pub use dock::{DockArea, DockAt, DockPanel, DockSide};
 pub use grid::DataGrid;
 pub use label::Label;
+pub use menu::{Menu, MenuBar, MenuItem};
 pub use panel::Panel;
 pub use scroll::ScrollView;
 pub use splitter::Splitter;

@@ -40,6 +40,15 @@ impl<M: GridModel> DataGrid<M> {
         match pointer.kind {
             PointerKind::Scroll(delta) => self.wheel(cx, delta, pointer.modifiers.shift()),
             PointerKind::Down(PointerButton::Primary) => self.press(cx, at, pointer.clicks),
+            // A secondary press selects its row first, so the context menu the Ui reports
+            // after it is for that row.
+            PointerKind::Down(PointerButton::Secondary) => match self.row_at(cx, at) {
+                Some(row) => {
+                    self.select_row(cx, row);
+                    Handled::Yes
+                }
+                None => Handled::No,
+            },
             PointerKind::Move => {
                 match self.drag {
                     Some(Drag::Column { column, chars, x }) => {

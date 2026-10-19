@@ -436,10 +436,17 @@ impl Session {
         match event {
             WindowEvent::Resized(size) => {
                 self.gpu.resize(size.width, size.height);
-                self.ui
-                    .resize(Size::new(size.width as f32, size.height as f32));
+                let size = Size::new(size.width as f32, size.height as f32);
+                // Menus are placed against what they opened from, which may have moved; the
+                // event also comes when the window is first shown, at the same size.
+                if size != self.ui.viewport() {
+                    self.ui.close_popups();
+                }
+                self.ui.resize(size);
             }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                // Popups were placed in the old pixels.
+                self.ui.close_popups();
                 self.ui.set_scale(*scale_factor as f32);
             }
             WindowEvent::ModifiersChanged(state) => self.modifiers = state.state(),
@@ -452,6 +459,8 @@ impl Session {
             // Alt+Tab mid-drag: no release will come, and modifiers may be released elsewhere.
             WindowEvent::Focused(false) => {
                 self.ui.cancel_pointer();
+                // As native menus do when another window is chosen.
+                self.ui.close_popups();
                 self.modifiers = ModifiersState::empty();
             }
             WindowEvent::MouseInput { state, button, .. } => {

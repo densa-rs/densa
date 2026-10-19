@@ -115,7 +115,7 @@ densa-window = "0.1"
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
-| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, a data grid widget, a chart widget |
+| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, menus and context menus, a data grid widget, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
 | [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
@@ -378,9 +378,10 @@ if reader.update() {
 
 ## Limitations
 
-- **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels, docking and a
-  data grid, with flexbox layout, events, focus and accessibility. Not there yet: menus, undo,
-  redo and the clipboard in text inputs, and text inputs' caret and selection for screen
+- **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels, docking, menus
+  and a data grid, with flexbox layout, events, focus and accessibility. Not there yet: undo,
+  redo and the clipboard in text inputs, keyboard shortcuts handled for menus (a menu shows
+  them; the application handles the keys), and text inputs' caret and selection for screen
   readers. The grid selects one row at a time (kept on its record when the model gives
   rows keys), with no multiple selection, cell selection or editing yet. Docking does not yet
   save and restore layouts (panels already carry stable keys for it) or float panels in

@@ -9,6 +9,7 @@ use densa_paragraph::TextSystem;
 use taffy::style::AvailableSpace;
 use taffy::{TaffyResult, TaffyTree};
 
+use crate::popup::{Incoming, Popup};
 use crate::{
     Action, Available, Constraints, Cursor, EventCx, LayoutCx, Overflow, PaintCx, PointerButton,
     Style, Theme, Widget, WidgetId,
@@ -86,6 +87,14 @@ pub(crate) struct State {
     pub(crate) next_access: u64,
     taffy: TaffyTree<WidgetId>,
     pub(crate) root: WidgetId,
+    /// The popup layer: a second root over the first, laid out against the viewport.
+    pub(crate) layer: WidgetId,
+    /// Open popups, oldest first.
+    pub(crate) popups: Vec<Popup>,
+    /// Widgets added during an event, given to the `Ui` after it.
+    pub(crate) incoming: Incoming,
+    /// Popups closed during an event, removed after it.
+    pub(crate) closing: Vec<WidgetId>,
     pub(crate) theme: Theme,
     pub(crate) scale: f32,
     viewport: Size,
@@ -126,10 +135,14 @@ impl State {
         self.is_live(id).then(|| &self.nodes[id.slot()])
     }
 
-    /// `id`'s layout engine style: the root fills the viewport.
+    pub(crate) fn viewport(&self) -> Size {
+        self.viewport
+    }
+
+    /// `id`'s layout engine style: the root and the popup layer fill the viewport.
     fn taffy_style(&self, id: WidgetId) -> taffy::Style {
         let mut style = self.nodes[id.slot()].style.to_taffy(self.scale);
-        if id == self.root {
+        if id == self.root || id == self.layer {
             style.size = taffy::Size {
                 width: taffy::style::Dimension::length(self.viewport.width),
                 height: taffy::style::Dimension::length(self.viewport.height),
@@ -157,6 +170,63 @@ impl State {
         sync(self.taffy.remove(old));
         self.nodes[id.slot()].taffy = fresh;
         self.nodes[id.slot()].dirty = true;
+    }
+
+    /// Adds a node for a new widget as child number `position` of `parent` (past the end:
+    /// the last); the caller puts the widget in the `Ui`'s slot for it.
+    pub(crate) fn new_node(
+        &mut self,
+        parent: WidgetId,
+        position: usize,
+        style: Style,
+    ) -> Result<WidgetId, UiError> {
+        if !self.is_live(parent) {
+            return Err(UiError::NoSuchWidget(parent));
+        }
+        let position = position.min(self.nodes[parent.slot()].children.len());
+        let index = match self.free.pop() {
+            Some(index) => index,
+            None => u32::try_from(self.nodes.len()).map_err(|_| UiError::TooManyWidgets)?,
+        };
+        let slot = index as usize;
+        let generation = self.nodes.get(slot).map_or(0, |node| node.generation);
+        let id = WidgetId { index, generation };
+        let taffy = sync(
+            self.taffy
+                .new_leaf_with_context(style.to_taffy(self.scale), id),
+        );
+        sync(
+            self.taffy
+                .insert_child_at_index(self.nodes[parent.slot()].taffy, position, taffy),
+        );
+        self.next_access += 1;
+        let node = Node {
+            generation,
+            access: self.next_access,
+            live: true,
+            parent: Some(parent),
+            children: Vec::new(),
+            taffy,
+            style,
+            rect: Rect::default(),
+            content: Rect::default(),
+            content_size: Size::ZERO,
+            scroll: Point::ORIGIN,
+            hovered: false,
+            cursor: None,
+            extent: Rect::default(),
+            dirty: true,
+            notified: None,
+        };
+        if slot == self.nodes.len() {
+            self.nodes.push(node);
+        } else {
+            self.nodes[slot] = node;
+        }
+        self.nodes[parent.slot()].children.insert(position, id);
+        self.needs_layout = true;
+        self.needs_paint = true;
+        Ok(id)
     }
 
     pub(crate) fn set_style(&mut self, id: WidgetId, style: Style) -> bool {
@@ -250,6 +320,11 @@ impl fmt::Debug for Ui {
 /// The widget at the root: the window's background.
 struct Root;
 
+/// The widget holding the popups: paints nothing of its own.
+struct Layer;
+
+impl Widget for Layer {}
+
 impl Widget for Root {
     fn paint(&mut self, cx: &PaintCx<'_>, canvas: &mut Canvas<'_>) {
         canvas.fill_rect(cx.rect(), cx.theme().background);
@@ -264,32 +339,43 @@ impl Ui {
             index: 0,
             generation: 0,
         };
+        let layer = WidgetId {
+            index: 1,
+            generation: 0,
+        };
         let style = Style::column();
         let mut taffy = TaffyTree::new();
         let node = sync(taffy.new_leaf_with_context(style.to_taffy(1.0), root));
+        let layer_node = sync(taffy.new_leaf_with_context(style.to_taffy(1.0), layer));
+        let top = |taffy: taffy::NodeId| Node {
+            generation: 0,
+            // The layer is never in the accessibility tree (its popups join the window's).
+            access: 0,
+            live: true,
+            parent: None,
+            children: Vec::new(),
+            taffy,
+            style: style.clone(),
+            rect: Rect::default(),
+            content: Rect::default(),
+            content_size: Size::ZERO,
+            scroll: Point::ORIGIN,
+            hovered: false,
+            cursor: None,
+            extent: Rect::default(),
+            dirty: true,
+            notified: None,
+        };
         let mut state = State {
-            nodes: vec![Node {
-                generation: 0,
-                access: 0,
-                live: true,
-                parent: None,
-                children: Vec::new(),
-                taffy: node,
-                style,
-                rect: Rect::default(),
-                content: Rect::default(),
-                content_size: Size::ZERO,
-                scroll: Point::ORIGIN,
-                hovered: false,
-                cursor: None,
-                extent: Rect::default(),
-                dirty: true,
-                notified: None,
-            }],
+            nodes: vec![top(node), top(layer_node)],
             free: Vec::new(),
             next_access: 0,
             taffy,
             root,
+            layer,
+            popups: Vec::new(),
+            incoming: Incoming::default(),
+            closing: Vec::new(),
             theme: Theme::default(),
             scale: 1.0,
             viewport: Size::ZERO,
@@ -306,10 +392,12 @@ impl Ui {
             last_press: None,
             pointer: None,
         };
-        let style = state.taffy_style(root);
-        sync(state.taffy.set_style(node, style));
+        for (id, taffy) in [(root, node), (layer, layer_node)] {
+            let style = state.taffy_style(id);
+            sync(state.taffy.set_style(taffy, style));
+        }
         Self {
-            widgets: vec![Some(Box::new(Root))],
+            widgets: vec![Some(Box::new(Root)), Some(Box::new(Layer))],
             state,
         }
     }
@@ -345,65 +433,29 @@ impl Ui {
         widget: impl Widget,
         style: Style,
     ) -> Result<WidgetId, UiError> {
-        if !self.state.is_live(parent) {
-            return Err(UiError::NoSuchWidget(parent));
+        let id = self.state.new_node(parent, index, style)?;
+        let slot = id.slot();
+        if slot >= self.widgets.len() {
+            self.widgets.resize_with(slot + 1, || None);
         }
-        let position = index.min(self.state.nodes[parent.slot()].children.len());
-        let index = match self.state.free.pop() {
-            Some(index) => index,
-            None => u32::try_from(self.state.nodes.len()).map_err(|_| UiError::TooManyWidgets)?,
-        };
-        let slot = index as usize;
-        let generation = self.state.nodes.get(slot).map_or(0, |node| node.generation);
-        let id = WidgetId { index, generation };
-        let taffy = sync(
-            self.state
-                .taffy
-                .new_leaf_with_context(style.to_taffy(self.state.scale), id),
-        );
-        sync(self.state.taffy.insert_child_at_index(
-            self.state.nodes[parent.slot()].taffy,
-            position,
-            taffy,
-        ));
-        self.state.next_access += 1;
-        let node = Node {
-            generation,
-            access: self.state.next_access,
-            live: true,
-            parent: Some(parent),
-            children: Vec::new(),
-            taffy,
-            style,
-            rect: Rect::default(),
-            content: Rect::default(),
-            content_size: Size::ZERO,
-            scroll: Point::ORIGIN,
-            hovered: false,
-            cursor: None,
-            extent: Rect::default(),
-            dirty: true,
-            notified: None,
-        };
-        if slot == self.state.nodes.len() {
-            self.state.nodes.push(node);
-            self.widgets.push(Some(Box::new(widget)));
-        } else {
-            self.state.nodes[slot] = node;
-            self.widgets[slot] = Some(Box::new(widget));
-        }
-        self.state.nodes[parent.slot()]
-            .children
-            .insert(position, id);
-        self.state.needs_layout = true;
-        self.state.needs_paint = true;
+        self.widgets[slot] = Some(Box::new(widget));
         Ok(id)
     }
 
     /// Removes `id` and everything inside it; `false` if it was already gone, or is the
-    /// root.
+    /// root. An open popup is closed as [`close_popup`](Self::close_popup) closes it: with
+    /// the popups opened after it, focus going back.
     pub fn remove(&mut self, id: WidgetId) -> bool {
-        if !self.state.is_live(id) || id == self.state.root {
+        if self.state.close_popup(id) {
+            self.settle();
+            return true;
+        }
+        self.remove_widget(id)
+    }
+
+    /// Removes `id` and everything inside it.
+    pub(crate) fn remove_widget(&mut self, id: WidgetId) -> bool {
+        if !self.state.is_live(id) || id == self.state.root || id == self.state.layer {
             return false;
         }
         if let Some(hover) = self.state.hover.filter(|h| self.state.is_within(*h, id)) {
@@ -442,6 +494,10 @@ impl Ui {
         live(&mut state.focus, &state.nodes);
         live(&mut state.hover, &state.nodes);
         live(&mut state.capture, &state.nodes);
+        let nodes = &state.nodes;
+        state.popups.retain(|popup| {
+            nodes[popup.id.slot()].live && nodes[popup.id.slot()].generation == popup.id.generation
+        });
         if state.ime_area.is_some_and(|(w, _)| !state.is_live(w)) {
             state.ime_area = None;
         }
@@ -481,7 +537,7 @@ impl Ui {
         if !self.state.is_live(id) {
             return None;
         }
-        let widget: &dyn Widget = self.widgets[id.slot()].as_deref()?;
+        let widget: &dyn Widget = self.widgets.get(id.slot())?.as_deref()?;
         (widget as &dyn Any).downcast_ref::<T>()
     }
 
@@ -495,7 +551,7 @@ impl Ui {
         if !self.state.is_live(id) {
             return None;
         }
-        let widget: &mut dyn Widget = self.widgets[id.slot()].as_deref_mut()?;
+        let widget: &mut dyn Widget = self.widgets.get_mut(id.slot())?.as_deref_mut()?;
         let widget = (widget as &mut dyn Any).downcast_mut::<T>()?;
         let mut cx = EventCx {
             state: &mut self.state,
@@ -598,8 +654,32 @@ impl Ui {
     /// methods call it first; call it to read [`rect`](Self::rect)s before painting.
     pub fn layout(&mut self) {
         if self.state.needs_layout {
+            self.compute(self.state.root);
+            if !self.state.nodes[self.state.layer.slot()]
+                .children
+                .is_empty()
+            {
+                self.compute(self.state.layer);
+            }
+            self.state.needs_layout = false;
+            self.place(self.state.root, Point::ORIGIN, true, true);
+            self.place(self.state.layer, Point::ORIGIN, true, true);
+            self.state.needs_place = false;
+            self.after_moves();
+        }
+        if self.state.needs_place {
+            self.place(self.state.root, Point::ORIGIN, false, true);
+            self.place(self.state.layer, Point::ORIGIN, false, true);
+            self.state.needs_place = false;
+            self.after_moves();
+        }
+    }
+
+    /// Lays out the tree under `top` (the root, or the popup layer) in the viewport.
+    fn compute(&mut self, top: WidgetId) {
+        {
             let Self { widgets, state } = self;
-            let root = state.nodes[state.root.slot()].taffy;
+            let root = state.nodes[top.slot()].taffy;
             let available = taffy::Size {
                 width: AvailableSpace::Definite(state.viewport.width),
                 height: AvailableSpace::Definite(state.viewport.height),
@@ -635,15 +715,6 @@ impl Ui {
                 },
             );
             sync(computed);
-            self.state.needs_layout = false;
-            self.place(self.state.root, Point::ORIGIN, true, true);
-            self.state.needs_place = false;
-            self.after_moves();
-        }
-        if self.state.needs_place {
-            self.place(self.state.root, Point::ORIGIN, false, true);
-            self.state.needs_place = false;
-            self.after_moves();
         }
     }
 
@@ -654,7 +725,7 @@ impl Ui {
             self.set_focus(None);
         }
         if let (Some(at), None) = (self.state.pointer, self.state.capture) {
-            let hit = self.hit(self.state.root, at);
+            let (hit, _) = self.hit_top(at);
             self.set_hover(hit, at);
         }
     }
@@ -663,14 +734,22 @@ impl Ui {
     /// content starting at `origin`; `notify` tells widgets their sizes.
     fn place(&mut self, id: WidgetId, origin: Point, notify: bool, shown: bool) {
         let state = &mut self.state;
-        let node = &mut state.nodes[id.slot()];
-        let layout = *sync(state.taffy.layout(node.taffy));
-        let rect = Rect::new(
+        let (taffy, parent) = (state.nodes[id.slot()].taffy, state.nodes[id.slot()].parent);
+        let layout = *sync(state.taffy.layout(taffy));
+        let size = Size::new(layout.size.width, layout.size.height);
+        let corner = match parent.filter(|parent| *parent == state.layer) {
+            // On whole pixels, as their text and borders are.
+            Some(_) => state
+                .popup_origin(id, size)
+                .map(|at| Point::new(at.x.round(), at.y.round())),
+            None => None,
+        }
+        .unwrap_or(Point::new(
             origin.x + layout.location.x,
             origin.y + layout.location.y,
-            layout.size.width,
-            layout.size.height,
-        );
+        ));
+        let node = &mut state.nodes[id.slot()];
+        let rect = Rect::new(corner.x, corner.y, size.width, size.height);
         node.rect = rect;
         node.content = Rect::from_edges(
             rect.left() + layout.border.left + layout.padding.left,
@@ -715,7 +794,7 @@ impl Ui {
         if notify && changed {
             node.dirty = false;
             node.notified = Some(rect.size());
-            if let Some(widget) = self.widgets[id.slot()].as_mut() {
+            if let Some(widget) = self.widgets.get_mut(id.slot()).and_then(Option::as_mut) {
                 let mut cx = LayoutCx {
                     text: &mut state.text,
                     theme: &state.theme,
@@ -734,6 +813,7 @@ impl Ui {
     pub fn paint(&mut self, canvas: &mut Canvas<'_>) {
         self.layout();
         self.paint_node(self.state.root, canvas);
+        self.paint_node(self.state.layer, canvas);
         self.state.needs_paint = false;
     }
 
@@ -749,7 +829,7 @@ impl Ui {
             return;
         }
         let saved = canvas.state();
-        if let Some(widget) = self.widgets[id.slot()].as_mut() {
+        if let Some(widget) = self.widgets.get_mut(id.slot()).and_then(Option::as_mut) {
             widget.paint(
                 &PaintCx {
                     state: &self.state,
@@ -766,7 +846,7 @@ impl Ui {
             self.paint_node(child, canvas);
         }
         canvas.restore(saved);
-        if let Some(widget) = self.widgets[id.slot()].as_mut() {
+        if let Some(widget) = self.widgets.get_mut(id.slot()).and_then(Option::as_mut) {
             widget.paint_over(
                 &PaintCx {
                     state: &self.state,
@@ -797,13 +877,17 @@ impl Ui {
 
     /// Gives focus a widget asked for while handling an event, and re-places scrolled widgets.
     pub(crate) fn settle(&mut self) {
-        // Focus events can ask for focus again: give up after a few rounds.
+        // Focus events can ask for focus again, or open and close popups: give up after a
+        // few rounds.
         for _ in 0..4 {
+            self.adopt();
             match self.state.requested_focus.take() {
                 Some(focus) => self.give_focus(focus),
                 None => break,
             }
         }
+        // What the last focus events opened or closed.
+        self.adopt();
         self.state.requested_focus = None;
     }
 }

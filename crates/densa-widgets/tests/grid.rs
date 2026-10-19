@@ -374,3 +374,29 @@ fn rows_that_go_away_take_the_selection_and_scroll_with_them() {
     assert_eq!(view(&ui, id).selected(), None);
     assert_eq!(view(&ui, id).first_row(), 0);
 }
+
+#[test]
+fn a_secondary_press_selects_its_row_then_asks_for_a_context_menu() {
+    let (mut ui, id) = grid(100);
+    let rows = seen(&mut ui, id).rows;
+    let at = middle(rows[4].2);
+    ui.actions().count();
+    pointer(
+        &mut ui,
+        PointerKind::Down(densa_ui::PointerButton::Secondary),
+        at,
+    );
+    pointer(
+        &mut ui,
+        PointerKind::Up(densa_ui::PointerButton::Secondary),
+        at,
+    );
+    assert_eq!(view(&ui, id).selected(), Some(4));
+    let asked: Vec<_> = ui
+        .actions()
+        .filter(|a| a.source == id)
+        .map(|a| a.kind)
+        .filter(|k| matches!(k, ActionKind::ContextMenu { .. }))
+        .collect();
+    assert_eq!(asked, [ActionKind::ContextMenu { at }]);
+}

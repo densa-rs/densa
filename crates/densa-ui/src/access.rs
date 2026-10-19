@@ -42,6 +42,14 @@ pub enum Role {
     Cell,
     /// A picture of data, such as a chart: read by its label.
     Image,
+    /// A row of menu titles.
+    MenuBar,
+    /// A list of commands that pops up.
+    Menu,
+    /// A command in a menu.
+    MenuItem,
+    /// A menu command that is on or off (see [`AccessNode::set_checked`]).
+    MenuItemCheckBox,
 }
 
 /// Something assistive technology can ask a widget to do.
@@ -108,6 +116,8 @@ pub struct AccessNode {
     bounds: Rect,
     actions: u16,
     selected: Option<bool>,
+    checked: Option<bool>,
+    expanded: Option<bool>,
     disabled: bool,
     clips: bool,
     placeholder: Option<String>,
@@ -155,6 +165,27 @@ impl AccessNode {
     /// Sets whether it is the chosen one of its kind, such as the shown tab.
     pub fn set_selected(&mut self, selected: bool) {
         self.selected = Some(selected);
+    }
+
+    /// Sets whether it is on, for something that is on or off (a check menu item).
+    pub fn set_checked(&mut self, checked: bool) {
+        self.checked = Some(checked);
+    }
+
+    /// Sets whether what it opens is open, for something that opens more (a menu title, an
+    /// item with a submenu).
+    pub fn set_expanded(&mut self, expanded: bool) {
+        self.expanded = Some(expanded);
+    }
+
+    /// Whether it is on, if it is something that is on or off.
+    pub fn checked(&self) -> Option<bool> {
+        self.checked
+    }
+
+    /// Whether what it opens is open, if it opens something.
+    pub fn expanded(&self) -> Option<bool> {
+        self.expanded
     }
 
     /// Sets whether it is unavailable.

@@ -23,6 +23,16 @@ impl Ui {
         let mut nodes = Vec::new();
         let root = self.state.root;
         let root_id = self.access_node(root, &mut nodes);
+        // Popups belong to the window, after everything else.
+        for index in 0..self.state.nodes[self.state.layer.slot()].children.len() {
+            let popup = self.state.nodes[self.state.layer.slot()].children[index];
+            if !self.state.nodes[popup.slot()].style.hidden {
+                let id = self.access_node(popup, &mut nodes);
+                if let Some((_, window)) = nodes.iter_mut().find(|(i, _)| *i == root_id) {
+                    window.push_child(id);
+                }
+            }
+        }
         let focus = match self.state.focus.filter(|f| self.state.is_shown(*f)) {
             Some(widget) => {
                 let id = AccessId::widget(self.state.nodes[widget.slot()].access);
@@ -56,7 +66,7 @@ impl Ui {
         let mut node = AccessNode::new(role);
         node.set_bounds(state.rect);
         node.set_clips_children(state.style.overflow != Overflow::Visible);
-        if let Some(widget) = self.widgets[id.slot()].as_ref() {
+        if let Some(widget) = self.widgets.get(id.slot()).and_then(Option::as_ref) {
             widget.accessibility(
                 &PaintCx {
                     state: &self.state,

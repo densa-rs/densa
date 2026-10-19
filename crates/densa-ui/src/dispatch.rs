@@ -6,8 +6,8 @@ use densa_core::Point;
 
 use crate::ui::Press;
 use crate::{
-    Event, EventCx, Handled, Ime, Key, KeyEvent, NamedKey, Overflow, PointerEvent, PointerKind, Ui,
-    WidgetId,
+    Event, EventCx, Handled, Ime, Key, KeyEvent, NamedKey, Overflow, PointerButton, PointerEvent,
+    PointerKind, Ui, WidgetId,
 };
 
 /// Presses closer than this in time count as one multi-click.
@@ -27,7 +27,15 @@ impl Ui {
     /// pointer, except while a widget holds it: `Enter` and `Leave` go to the topmost widget
     /// the pointer comes over and leaves (its parents see [`PaintCx::is_hovered`]).
     ///
+    /// Open popups are over everything. A press or a scroll outside all of them closes them
+    /// and goes no further, unless it is on the widget that opened them: that widget gets it
+    /// with the popups still open (a menu bar closing its menu, or switching to another),
+    /// and they close only if it does not handle it. A secondary press also reports
+    /// [`ActionKind::ContextMenu`], except inside a popup (outside them it closes them and
+    /// reports it for the widget under the pointer).
+    ///
     /// [`PaintCx::is_hovered`]: crate::PaintCx::is_hovered
+    /// [`ActionKind::ContextMenu`]: crate::ActionKind::ContextMenu
     pub fn pointer(&mut self, mut event: PointerEvent) -> Handled {
         self.layout();
         match event.kind {
@@ -37,9 +45,34 @@ impl Ui {
             _ => {}
         }
         self.state.pointer = Some(event.position);
-        let hit = self.hit(self.state.root, event.position);
+        let (hit, in_popup) = self.hit_top(event.position);
         if self.state.capture.is_none() {
             self.set_hover(hit, event.position);
+        }
+        let outside = !in_popup
+            && !self.state.popups.is_empty()
+            && self.state.capture.is_none()
+            && matches!(event.kind, PointerKind::Down(_) | PointerKind::Scroll(_));
+        if outside {
+            let on_opener = hit.is_some_and(|hit| {
+                self.state.popups.iter().any(|popup| {
+                    popup
+                        .opener
+                        .is_some_and(|opener| self.state.is_within(hit, opener))
+                })
+            });
+            if !on_opener {
+                self.state.close_from(0);
+                // A press that only closed popups does not begin a double click.
+                self.state.last_press = None;
+                // A right-click elsewhere closes a context menu and asks for one there, as
+                // native menus do.
+                if event.kind == PointerKind::Down(PointerButton::Secondary) {
+                    self.context_menu(hit.unwrap_or(self.state.root), event.position);
+                }
+                self.settle();
+                return Handled::Yes;
+            }
         }
         let delivered = Event::Pointer(event);
         let handled = match (event.kind, self.state.capture) {
@@ -52,13 +85,27 @@ impl Ui {
                 handled
             }
             (_, Some(holder)) => self.deliver(holder, &delivered) == Handled::Yes,
-            (PointerKind::Down(_), None) => {
+            (PointerKind::Down(button), None) => {
                 self.focus_from(hit);
                 let handler = self.bubble(hit, &delivered);
                 self.state.capture = handler;
+                if button == PointerButton::Secondary && !in_popup {
+                    let source = handler.or(hit).unwrap_or(self.state.root);
+                    self.context_menu(source, event.position);
+                }
+                if outside && handler.is_none() {
+                    // The opener let the press go: it closes the popups as any press would.
+                    self.state.close_from(0);
+                }
                 handler.is_some()
             }
-            (_, None) => self.bubble(hit, &delivered).is_some(),
+            (_, None) => {
+                let handled = self.bubble(hit, &delivered).is_some();
+                if outside && !handled {
+                    self.state.close_from(0);
+                }
+                handled
+            }
         };
         self.settle();
         handled.into()
@@ -90,11 +137,28 @@ impl Ui {
 
     /// Delivers a key event to the focused widget (the root if none), then up its parents
     /// until one handles it. An unhandled Tab moves focus to the next widget that accepts it
-    /// (Shift+Tab to the previous), in tree order.
+    /// (Shift+Tab to the previous), in tree order (within the topmost popup while popups are
+    /// open). An unhandled context menu key (or Shift+F10) reports
+    /// [`ActionKind::ContextMenu`](crate::ActionKind::ContextMenu) for the focused widget.
     pub fn key(&mut self, event: &KeyEvent<'_>) -> Handled {
         self.layout();
         let target = self.state.focus.or(Some(self.state.root));
-        let mut handled = self.bubble(target, &Event::Key(*event)).is_some();
+        let mut handled = self.bubble_key(target, &Event::Key(*event)).is_some();
+        let menu_key = event.key == Key::Named(NamedKey::ContextMenu)
+            || (event.key == Key::Named(NamedKey::F(10)) && event.modifiers.shift());
+        if !handled && event.pressed && menu_key {
+            let in_popup = self.state.focus.is_some_and(|focus| {
+                self.state
+                    .popups
+                    .iter()
+                    .any(|p| self.state.is_within(focus, p.id))
+            });
+            if let Some(focus) = self.state.focus.filter(|_| !in_popup) {
+                let rect = self.state.nodes[focus.slot()].rect;
+                self.context_menu(focus, Point::new(rect.left(), rect.top()));
+                handled = true;
+            }
+        }
         if !handled && event.pressed && event.key == Key::Named(NamedKey::Tab) {
             let next = self.next_focus(!event.modifiers.shift());
             if next.is_some() {
@@ -153,7 +217,26 @@ impl Ui {
     /// widget that clips hides its children outside it.
     pub fn hit_test(&mut self, at: Point) -> Option<WidgetId> {
         self.layout();
-        self.hit(self.state.root, at)
+        self.hit_top(at).0
+    }
+
+    /// The topmost widget at `at`, popups first; and whether it is in a popup.
+    pub(crate) fn hit_top(&self, at: Point) -> (Option<WidgetId>, bool) {
+        let layer = &self.state.nodes[self.state.layer.slot()];
+        for &popup in layer.children.iter().rev() {
+            if let Some(hit) = self.hit(popup, at) {
+                return (Some(hit), true);
+            }
+        }
+        (self.hit(self.state.root, at), false)
+    }
+
+    /// Reports a context menu request for `source` at `at`.
+    fn context_menu(&mut self, source: WidgetId, at: Point) {
+        self.state.actions.push_back(crate::Action {
+            source,
+            kind: crate::ActionKind::ContextMenu { at },
+        });
     }
 
     pub(crate) fn hit(&self, id: WidgetId, at: Point) -> Option<WidgetId> {
@@ -185,6 +268,28 @@ impl Ui {
             id,
         };
         widget.event(&mut cx, event)
+    }
+
+    /// Delivers a key `event` to `target`, then its parents, until one handles it; from a
+    /// popup it goes on to the widget that opened the popup (a menu passing Left and Right on
+    /// to its menu bar, a submenu passing them to its menu).
+    fn bubble_key(&mut self, mut target: Option<WidgetId>, event: &Event<'_>) -> Option<WidgetId> {
+        while let Some(id) = target.filter(|id| self.state.is_live(*id)) {
+            if self.deliver(id, event) == Handled::Yes {
+                return Some(id);
+            }
+            let parent = self.state.nodes[id.slot()].parent;
+            target = match parent {
+                Some(layer) if layer == self.state.layer => self
+                    .state
+                    .popups
+                    .iter()
+                    .find(|popup| popup.id == id)
+                    .and_then(|popup| popup.opener),
+                _ => parent,
+            };
+        }
+        None
     }
 
     /// Delivers `event` to `target`, then its parents, until one handles it.
@@ -284,7 +389,13 @@ impl Ui {
             before: None,
             after: None,
         };
-        self.visit_focusable(self.state.root, &mut order);
+        // While popups are open, Tab stays in the topmost.
+        let within = self
+            .state
+            .popups
+            .last()
+            .map_or(self.state.root, |popup| popup.id);
+        self.visit_focusable(within, &mut order);
         if forward {
             order.after.or(order.first)
         } else {

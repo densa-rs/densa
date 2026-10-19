@@ -520,3 +520,70 @@ fn chart_frames_zooming_panning_and_the_crosshair_perform_zero_heap_operations()
     assert!(stats.is_zero(), "the chart allocated: {stats:?}");
     black_box(chart);
 }
+
+#[test]
+fn an_open_menu_follows_the_pointer_and_keys_with_zero_heap_operations() {
+    use densa_widgets::{MenuBar, MenuItem};
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(1000.0, 700.0));
+    let items = || {
+        let mut items: Vec<MenuItem> = (0..12)
+            .map(|i| MenuItem::new(format!("Command {i}"), i).with_shortcut("Ctrl+K"))
+            .collect();
+        items.push(MenuItem::separator());
+        items.push(MenuItem::new("Wrap", 50).checked(true));
+        items.push(MenuItem::submenu(
+            "More",
+            [MenuItem::new("One", 60), MenuItem::new("Two", 61)],
+        ));
+        items
+    };
+    let bar = MenuBar::new()
+        .with_menu("File", items())
+        .with_menu("Edit", items());
+    let bar = ui.add(ui.root(), bar, MenuBar::style()).unwrap();
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(16_384);
+    let mut frame = |ui: &mut Ui| {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+        black_box(out.as_slice());
+    };
+    frame(&mut ui);
+    let title = ui.rect(bar).unwrap();
+    let file = Point::new(title.left() + 10.0, title.top() + 5.0);
+    let down = PointerKind::Down(PointerButton::Primary);
+    ui.pointer(PointerEvent::new(down, file));
+    frame(&mut ui);
+    let menu = ui.popups().next().unwrap();
+    let rect = ui.rect(menu).unwrap();
+    // Warm up: open the submenu once (opening allocates), then leave it.
+    let more = Point::new(rect.left() + 20.0, rect.bottom() - 10.0);
+    ui.pointer(PointerEvent::new(PointerKind::Move, more));
+    frame(&mut ui);
+    let up = KeyEvent::down(Key::Named(NamedKey::ArrowUp));
+    let down_key = KeyEvent::down(Key::Named(NamedKey::ArrowDown));
+    ui.key(&up);
+    ui.key(&down_key);
+    frame(&mut ui);
+
+    let ((), stats) = measure(|| {
+        for step in 0..400u16 {
+            // Down and up the first twelve commands: highlighting moves, nothing opens.
+            let row = f32::from(step % 200) * 0.5;
+            let at = Point::new(rect.left() + 30.0, rect.top() + 8.0 + row);
+            ui.pointer(PointerEvent::new(PointerKind::Move, at));
+            if step % 40 == 0 {
+                ui.key(&down_key);
+                ui.key(&up);
+            }
+            frame(&mut ui);
+        }
+    });
+    assert!(ui.is_popup_open(menu));
+    assert!(stats.is_zero(), "menu frames allocated: {stats:?}");
+}

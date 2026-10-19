@@ -58,6 +58,16 @@ fn node_of(node: &AccessNode) -> Node {
     if let Some(selected) = node.selected() {
         kit.set_selected(selected);
     }
+    if let Some(checked) = node.checked() {
+        kit.set_toggled(if checked {
+            accesskit::Toggled::True
+        } else {
+            accesskit::Toggled::False
+        });
+    }
+    if let Some(expanded) = node.expanded() {
+        kit.set_expanded(expanded);
+    }
     if node.is_disabled() {
         kit.set_disabled();
     }
@@ -89,6 +99,10 @@ fn role(role: Role) -> KitRole {
         Role::ColumnHeader => KitRole::ColumnHeader,
         Role::Cell => KitRole::Cell,
         Role::Image => KitRole::Image,
+        Role::MenuBar => KitRole::MenuBar,
+        Role::Menu => KitRole::Menu,
+        Role::MenuItem => KitRole::MenuItem,
+        Role::MenuItemCheckBox => KitRole::MenuItemCheckBox,
         _ => KitRole::GenericContainer,
     }
 }
@@ -271,6 +285,10 @@ mod tests {
             (Role::ColumnHeader, KitRole::ColumnHeader),
             (Role::Cell, KitRole::Cell),
             (Role::Image, KitRole::Image),
+            (Role::MenuBar, KitRole::MenuBar),
+            (Role::Menu, KitRole::Menu),
+            (Role::MenuItem, KitRole::MenuItem),
+            (Role::MenuItemCheckBox, KitRole::MenuItemCheckBox),
         ];
         for (densa, kit) in roles {
             assert_eq!(role(densa), kit);

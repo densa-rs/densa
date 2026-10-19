@@ -154,4 +154,13 @@ pub enum ActionKind {
     Submitted,
     /// An item was selected, by index.
     Selected(usize),
+    /// A command was chosen (a menu item), by the number the application gave it.
+    Command(u32),
+    /// The user asked for a context menu on the widget: a secondary press at `at`, or the
+    /// context menu key (or Shift+F10) while it has focus, `at` then its top-left corner.
+    /// The widget is the one that handled the press, else the one under the pointer.
+    ContextMenu {
+        /// Where, in physical pixels from the window's top-left corner.
+        at: densa_core::Point,
+    },
 }

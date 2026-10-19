@@ -123,3 +123,55 @@ fn frames_and_events_perform_zero_heap_operations() {
     assert!(stats.is_zero(), "frames or events allocated: {stats:?}");
     assert_eq!(out.dropped(), 0);
 }
+
+#[test]
+fn frames_and_events_over_an_open_popup_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let mut ui = interface();
+    let popup = ui
+        .open_popup(
+            Cell { presses: 0 },
+            densa_ui::Anchor::at(Point::new(100.0, 100.0)),
+            Style::column().size(300.0, 200.0),
+        )
+        .unwrap();
+    for _ in 0..10 {
+        let row = Style::row().height(densa_ui::Length::Px(20.0)).shrink(0.0);
+        ui.add(popup, Cell { presses: 0 }, row).unwrap();
+    }
+    let mut cache = GlyphCache::new(AtlasConfig::default());
+    let mut out = InstanceBuffer::with_capacity(8_192);
+    {
+        let mut canvas = Canvas::begin(&mut cache, &mut out);
+        ui.paint(&mut canvas);
+    }
+    let down = PointerKind::Down(PointerButton::Primary);
+    let up = PointerKind::Up(PointerButton::Primary);
+    let tab = KeyEvent::down(Key::Named(NamedKey::Tab));
+    ui.pointer(PointerEvent::new(down, Point::new(150.0, 150.0)));
+    ui.pointer(PointerEvent::new(up, Point::new(150.0, 150.0)));
+
+    let ((), stats) = measure(|| {
+        for frame in 0..500u16 {
+            // Over the popup and outside it, in turns: moves never close it.
+            let x = f32::from(frame % 800);
+            let y = f32::from((frame * 7) % 600);
+            ui.pointer(PointerEvent::new(PointerKind::Move, Point::new(x, y)));
+            if frame % 50 == 0 {
+                ui.pointer(PointerEvent::new(down, Point::new(200.0, 150.0)));
+                ui.pointer(PointerEvent::new(up, Point::new(200.0, 150.0)));
+                ui.key(&tab);
+            }
+            black_box(ui.cursor());
+            let mut canvas = Canvas::begin(&mut cache, &mut out);
+            ui.paint(&mut canvas);
+            black_box(out.as_slice());
+        }
+    });
+    assert!(ui.is_popup_open(popup));
+    assert!(stats.is_zero(), "frames or events allocated: {stats:?}");
+    assert_eq!(out.dropped(), 0);
+}
