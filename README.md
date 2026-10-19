@@ -8,6 +8,8 @@
 <p align="center"><b>Dense by design.</b></p>
 
 <p align="center">
+  <a href="https://crates.io/crates/densa"><img alt="crates.io" src="https://img.shields.io/crates/v/densa?color=2F5BEA"></a>
+  <a href="https://docs.rs/densa"><img alt="docs.rs" src="https://img.shields.io/docsrs/densa"></a>
   <a href="https://github.com/densa-rs/densa/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/densa-rs/densa/actions/workflows/ci.yml/badge.svg"></a>
   <a href="#license"><img alt="License: MIT or Apache-2.0" src="https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-2F5BEA"></a>
   <img alt="Rust 1.90+" src="https://img.shields.io/badge/rust-1.90%2B-2F5BEA">
@@ -19,8 +21,8 @@ monitoring consoles, operational dashboards, developer tools. It keeps live data
 it changes, and draws it on the GPU at the display's refresh rate, from the data stream to
 the pixel.
 
-> **Status: 0.x, experimental.** APIs will change between releases, and the crates are not on
-> crates.io yet. Builds and tests on Linux, macOS and Windows.
+> **Status: 0.x, experimental.** On [crates.io](https://crates.io/crates/densa); APIs will change
+> between releases. Builds and tests on Linux, macOS and Windows.
 
 ## Architecture
 
@@ -88,19 +90,28 @@ cargo run --release -p densa-paragraph --example editor      # editable text
 cargo run --release -p trading-demo                          # a streaming market grid
 ```
 
-To use the crates before they are published, depend on the repository:
+To use densa, depend on the `densa` crate, which gathers the libraries as modules
+(`densa::data`, `densa::widgets`, `densa::window`, ...):
 
 ```toml
 [dependencies]
-densa-data = { git = "https://github.com/densa-rs/densa" }
-densa-widgets = { git = "https://github.com/densa-rs/densa" }
-densa-window = { git = "https://github.com/densa-rs/densa" }
+densa = "0.1"
+```
+
+Or take only the crates you use, each on its own (`densa-data` needs no GPU or window):
+
+```toml
+[dependencies]
+densa-data = "0.1"
+densa-widgets = "0.1"
+densa-window = "0.1"
 ```
 
 ## Crates
 
 | Crate | Use it for |
 |---|---|
+| [`densa`](crates/densa) | All of the crates below under one name, as modules; the `window` and `data` features (on by default) leave out the GPU and Arrow when off |
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
