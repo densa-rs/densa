@@ -1,0 +1,40 @@
+[package]
+name = "densa"
+description = "A native Rust platform for data-dense, real-time applications: live Arrow tables, a GPU data grid and charts, widgets with docking and screen reader support, in one stack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+homepage.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+readme.workspace = true
+keywords = ["gui", "arrow", "realtime", "datagrid", "charts"]
+categories = ["gui", "visualization"]
+
+[dependencies]
+densa-alloc.workspace = true
+densa-chart.workspace = true
+densa-core.workspace = true
+densa-draw.workspace = true
+densa-fmt.workspace = true
+densa-grid.workspace = true
+densa-paragraph.workspace = true
+densa-platform.workspace = true
+densa-sync.workspace = true
+densa-text.workspace = true
+densa-ui.workspace = true
+densa-widgets.workspace = true
+densa-arrow = { workspace = true, optional = true }
+densa-data = { workspace = true, optional = true }
+densa-render = { workspace = true, optional = true }
+densa-window = { workspace = true, optional = true }
+
+[features]
+default = ["window", "data"]
+# A native window and the GPU renderer (winit, wgpu).
+window = ["dep:densa-window", "dep:densa-render"]
+# Live Arrow tables and their adapters for the grid and charts.
+data = ["dep:densa-data", "dep:densa-arrow"]
+
+[lints]
+workspace = true
