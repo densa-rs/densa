@@ -120,7 +120,9 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 
 Connectors that bring data in, with the large dependency trees their formats and protocols
 need, live in [densa-connectors](https://github.com/densa-rs/densa-connectors): today
-`densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread.
+`densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread, and
+`densa-ws`, which reads WebSocket streams of JSON rows or Arrow IPC as Arrow batches and
+reconnects on its own.
 
 ## Usage
 
@@ -386,7 +388,7 @@ if reader.update() {
   variable-font axes, synthetic bold and italic, color emoji.
 - **Threads:** placement and priority are implemented on Windows only.
 
-The [roadmap](https://densa.dev/vision) lists what comes next.
+The [roadmap](https://densa.dev/roadmap/) lists what comes next.
 
 ## Development
 
