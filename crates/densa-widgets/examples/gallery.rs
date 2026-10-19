@@ -11,9 +11,20 @@ use densa_ui::{Action, ActionKind, Align, Length, Style, Theme, Ui, WidgetId};
 use densa_widgets::{Button, Label, Panel, ScrollView, Splitter, TextInput};
 use densa_window::{App, Host, WindowOptions};
 
-/// Instruments in the list.
+/// Services in the list.
 const NAMES: [&str; 12] = [
-    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "AVGO", "ASML", "AMD", "INTC", "ORCL",
+    "gateway",
+    "auth",
+    "billing",
+    "catalog",
+    "checkout",
+    "search",
+    "ingest",
+    "reports",
+    "scheduler",
+    "storage",
+    "notify",
+    "metrics",
 ];
 
 struct Gallery {
@@ -35,11 +46,11 @@ struct Ids {
     status: WidgetId,
 }
 
-/// A list row: a name and a price, aligned in the monospaced font.
+/// A list row: a service, its instance and its uptime, aligned in the monospaced font.
 fn row(index: usize) -> String {
     let name = NAMES[index % NAMES.len()];
-    let price = 40.0 + (index * 37 % 500) as f64 + (index * 13 % 100) as f64 / 100.0;
-    format!("{name:<8}{:>4}  {price:>9.2}", index + 1)
+    let uptime = 99.0 + (index * 37 % 100) as f64 / 100.0;
+    format!("{name:<10}{:>3}  {uptime:>6.2}%", index / NAMES.len() + 1)
 }
 
 impl Gallery {
@@ -58,7 +69,7 @@ impl Gallery {
     fn filter(ui: &mut Ui, ids: &Ids) {
         let needle = ui
             .widget::<TextInput>(ids.filter)
-            .map(|input| input.text().to_uppercase())
+            .map(|input| input.text().to_lowercase())
             .unwrap_or_default();
         let rows: Vec<WidgetId> = ui.children(ids.list).to_vec();
         let mut shown = 0;

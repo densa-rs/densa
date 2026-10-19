@@ -76,6 +76,7 @@ You need Rust 1.90 or later and a GPU with Vulkan, Metal or DirectX 12.
 ```sh
 git clone https://github.com/densa-rs/densa
 cd densa
+cargo run --release -p densa-widgets --example monitor      # a live fleet monitor: grid and chart
 cargo run --release -p densa-widgets --example gallery      # widgets in a window
 cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid
 cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
@@ -304,6 +305,9 @@ if reader.update() {
 ## Examples
 
 <p align="center">
+  <img alt="A fleet monitor: a live grid of hosts sorted by p99 latency beside a chart of the selected host's latency, with an incident's spike, over its traffic" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/monitor.png" width="660">
+</p>
+<p align="center">
   <img alt="The widget gallery: a toolbar with a filter input and buttons, a scrolling list beside a details pane in a splitter, and a status bar" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/gallery.png" width="660">
 </p>
 <p align="center">
@@ -326,6 +330,7 @@ if reader.update() {
 
 | Example | Shows |
 |---|---|
+| [`densa-widgets` `monitor`](crates/densa-widgets/examples/monitor.rs) | 1,000 simulated hosts in a live grid, slowest first, and a chart of the selected host's latency and traffic from a live samples table |
 | [`densa-widgets` `gallery`](crates/densa-widgets/examples/gallery.rs) | A toolbar, a filterable list in a scroll view beside a details pane in a splitter, Tab between controls; `--light` for the light theme |
 | [`densa-widgets` `dock`](crates/densa-widgets/examples/dock.rs) | Panels in tab groups (drag tabs to join or split groups, the gaps to resize) around a live watchlist grid: click a title to sort, a row to select; `--demo` starts mid-drag |
 | [`densa-widgets` `live_table`](crates/densa-widgets/examples/live_table.rs) | 100,000 instruments in a live table, updated every frame: click a title to sort, type to filter, select a row and it follows its instrument |
