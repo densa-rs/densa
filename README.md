@@ -122,7 +122,7 @@ Connectors that bring data in, with the large dependency trees their formats and
 need, live in [densa-connectors](https://github.com/densa-rs/densa-connectors): today
 `densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread, and
 `densa-ws`, which reads WebSocket streams of JSON rows or Arrow IPC as Arrow batches and
-reconnects on its own.
+reconnects on its own, and `densa-flight`, which reads Arrow Flight and Flight SQL results.
 
 ## Usage
 
