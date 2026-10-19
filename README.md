@@ -117,6 +117,10 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 | [`densa-alloc`](crates/densa-alloc) | A counting global allocator, to prove a code path allocates nothing |
 | [`densa-core`](crates/densa-core) | Shared primitives: `Color`, `Point`, `Rect`, `Size` |
 
+Connectors that bring data in, with the large dependency trees their formats and protocols
+need, live in [densa-connectors](https://github.com/densa-rs/densa-connectors): today
+`densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread.
+
 ## Usage
 
 ### A live table, a sorted view and aggregates
