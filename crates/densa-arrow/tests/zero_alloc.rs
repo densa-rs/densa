@@ -165,3 +165,68 @@ fn frames_of_a_live_model_between_changes_perform_zero_heap_operations() {
     let ((), stats) = measure(|| (1..1_000).for_each(|f| frame(&mut model, f)));
     assert!(stats.is_zero(), "a live model frame allocated: {stats:?}");
 }
+
+#[test]
+fn drawing_a_live_series_performs_zero_heap_operations() {
+    use densa_chart::{paint_line, points_within, y_extent, Axis, LineStyle, Plot, Rect};
+    use densa_data::{LiveTable, Order, ViewSpec};
+
+    assert!(is_active(), "counting allocator not installed");
+    // A hundred thousand prices a second apart, in batches as they would stream in.
+    let mut table: Option<LiveTable> = None;
+    for start in (0..ROWS).step_by(8_192) {
+        let ids: Vec<i64> = (start..(start + 8_192).min(ROWS)).collect();
+        let times = ids.iter().map(|&i| 1_792_400_400_000 + i * 1_000);
+        let prices = ids.iter().map(|&i| 100.0 + (i as f64 / 500.0).sin());
+        let batch = RecordBatch::try_from_iter([
+            ("id", Arc::new(Int64Array::from(ids.clone())) as ArrayRef),
+            (
+                "time",
+                Arc::new(TimestampMillisecondArray::from_iter_values(times)) as ArrayRef,
+            ),
+            (
+                "price",
+                Arc::new(Float64Array::from_iter_values(prices)) as ArrayRef,
+            ),
+        ])
+        .unwrap();
+        let table = table.get_or_insert_with(|| LiveTable::new(batch.schema(), "id").unwrap());
+        table.upsert(batch).unwrap();
+    }
+    let mut table = table.unwrap();
+    let view = table
+        .add_view(ViewSpec::new().sort_by("time", Order::Ascending))
+        .unwrap();
+    let mut series = densa_arrow::LiveSeries::new(&table, "time", "price").unwrap();
+
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(16_384);
+    let ((), stats) = measure(|| {
+        for frame in 0..100 {
+            // As a chart's model does before every frame.
+            series.sync(&table);
+            let points = series.points(&table, view).unwrap();
+            let left = 1_792_400_400.0 + f64::from(frame) * 600.0;
+            let x = Axis::time(left, left + 3_600.0);
+            let (low, high) = y_extent(&points, points_within(&points, &x)).unwrap();
+            let plot = Plot::new(
+                Rect::new(0.0, 0.0, 1_000.0, 400.0),
+                x,
+                Axis::number(low, high),
+            );
+            let mut canvas = Canvas::begin(&mut cache, &mut out);
+            paint_line(
+                &mut canvas,
+                &plot,
+                &points,
+                LineStyle::new(densa_chart::Color::WHITE),
+            );
+            black_box(out.as_slice());
+        }
+    });
+    assert!(
+        stats.is_zero(),
+        "drawing a live series allocated: {stats:?}"
+    );
+    assert!(out.len() > 900, "the line was drawn: {}", out.len());
+}

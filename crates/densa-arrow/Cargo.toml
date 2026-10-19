@@ -15,6 +15,7 @@ categories = ["gui", "visualization"]
 arrow-array.workspace = true
 arrow-buffer.workspace = true
 arrow-schema.workspace = true
+densa-chart.workspace = true
 densa-data.workspace = true
 densa-fmt.workspace = true
 densa-grid.workspace = true

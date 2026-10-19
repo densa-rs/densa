@@ -9,7 +9,9 @@
 //!
 //! For live data, [`LiveModel`] makes a `densa_data::LiveTable` the model of the grid widget
 //! (`densa_widgets::DataGrid`): sorted by a click, filtered by the app, its selection kept on
-//! a row as the row moves. [`LiveGrid`] paints a view of one with `GridPainter` directly.
+//! a row as the row moves. [`LiveGrid`] paints a view of one with `GridPainter` directly,
+//! and [`LiveSeries`] reads two of its numeric columns as a `densa_chart` series (a price
+//! over time), so a chart follows the same live data.
 //!
 //! ```
 //! use std::sync::Arc;
@@ -43,8 +45,10 @@ mod calendar;
 mod live;
 mod model;
 mod reader;
+mod series;
 mod table;
 
 pub use live::{LiveGrid, LiveGridView};
 pub use model::LiveModel;
+pub use series::{LiveSeries, SeriesError, SeriesPoints};
 pub use table::{ArrowGrid, ArrowTable, CellState, TableError};

@@ -854,6 +854,7 @@ dependencies = [
  "arrow-buffer",
  "arrow-schema",
  "densa-alloc",
+ "densa-chart",
  "densa-data",
  "densa-draw",
  "densa-fmt",

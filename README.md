@@ -80,6 +80,7 @@ cargo run --release -p densa-widgets --example gallery      # widgets in a windo
 cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid
 cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
 cargo run --release -p densa-widgets --example chart        # live candles, volume, pan and zoom
+cargo run --release -p densa-widgets --example linked       # a grid and a chart over live tables
 cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
 cargo run --release -p densa-arrow --example table           # a million-row Arrow table
 cargo run --release -p densa-paragraph --example editor      # editable text
@@ -100,7 +101,7 @@ densa-window = { git = "https://github.com/densa-rs/densa" }
 | Crate | Use it for |
 |---|---|
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
-| [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid and the grid widget, with typed, allocation-free cell formatting |
+| [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, a data grid widget, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
@@ -250,6 +251,9 @@ paint_line(&mut canvas, &plot, &readings[..], LineStyle::new(Color::WHITE));
 draw candlesticks and volume. In a window, implement `ChartModel` (stacked panes on one time
 axis) and give it to the `Chart` widget, which follows new data, zooms with the wheel and
 pans by dragging: see the [`chart` example](crates/densa-widgets/examples/chart.rs).
+For live data, `densa_arrow::LiveSeries` reads two numeric columns of a live table's view
+(numbers, timestamps, dates) as a series, so a chart keeps up with the same table a grid
+shows: see the [`linked` example](crates/densa-widgets/examples/linked.rs).
 
 ### Text
 
@@ -305,6 +309,9 @@ if reader.update() {
   <img alt="A live chart: one-minute candles with a moving average over volume bars, with time labels below and prices on the right" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/chart.png" width="660">
 </p>
 <p align="center">
+  <img alt="A grid of live instruments beside a chart of the selected instrument's trades: a price line over trade sizes" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/linked.png" width="660">
+</p>
+<p align="center">
   <img alt="A live table of instruments sorted by percent change" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/live-table.png" width="260">
   &nbsp;
   <img alt="A million-row Arrow table of orders" src="https://raw.githubusercontent.com/densa-rs/densa/main/docs/arrow-table.png" width="380">
@@ -319,6 +326,7 @@ if reader.update() {
 | [`densa-widgets` `dock`](crates/densa-widgets/examples/dock.rs) | Panels in tab groups (drag tabs to join or split groups, the gaps to resize) around a live watchlist grid: click a title to sort, a row to select; `--demo` starts mid-drag |
 | [`densa-widgets` `live_table`](crates/densa-widgets/examples/live_table.rs) | 100,000 instruments in a live table, updated every frame: click a title to sort, type to filter, select a row and it follows its instrument |
 | [`densa-widgets` `chart`](crates/densa-widgets/examples/chart.rs) | Live one-minute candles with a moving average over volume: scroll to zoom, drag to pan, double-click to follow the newest candle |
+| [`densa-widgets` `linked`](crates/densa-widgets/examples/linked.rs) | A grid of 200 live instruments and a chart of the selected one's trades: a view of a live trades table, filtered by symbol and sorted by time |
 | [`densa-arrow` `live`](crates/densa-arrow/examples/live.rs) | A live table updated continuously, its "top movers" view kept sorted |
 | [`densa-arrow` `table`](crates/densa-arrow/examples/table.rs) | A million-row Arrow table; `--live` appends batches while it is shown |
 | [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |
@@ -356,9 +364,10 @@ if reader.update() {
   save and restore layouts (panels already carry stable keys for it) or float panels in
   their own windows.
 - **Charts:** lines, candlesticks and bars on number and time axes (UTC: no time zones yet),
-  in stacked panes. Not there yet: logarithmic axes, area fills, annotations and drawing
-  tools, several y axes in one pane, and a chart fed straight from a live table. A line is
-  one pixel column wide where it is steep, however thick it is set.
+  in stacked panes, fed from your data or a live table's view. Not there yet: logarithmic
+  axes, area fills, annotations and drawing tools, several y axes in one pane, and candles
+  built from a live table's trades (the app aggregates them). A line is one pixel column
+  wide where it is steep, however thick it is set.
 - **Live data:** views sort and filter, groups count, sum, average and find extremes; time
   windows and joins are not there yet. A table is used from one thread at a time.
 - **Text:** grid cells are single-line, unshaped text in the bundled font. Word breaks in
