@@ -1,6 +1,7 @@
-//! Standard widgets for `densa_ui`: [`Label`], [`Button`], [`TextInput`], [`ScrollView`],
-//! [`Splitter`], [`Panel`], [`DockArea`] (panels in tab groups the user rearranges),
-//! [`DataGrid`] (rows of a model, scrolled, selected and sorted), [`Chart`] (time series,
+//! Standard widgets for `densa_ui`: [`Label`], [`Button`], [`TextInput`] (with undo and the
+//! clipboard), [`ScrollView`], [`Splitter`], [`Panel`], [`DockArea`] (panels in tab groups
+//! the user rearranges), [`DataGrid`] (rows of a model, scrolled, selected, copied and
+//! sorted), [`Chart`] (time series,
 //! candles and volume, panned and zoomed), and [`Menu`] and [`MenuBar`] (commands in menus
 //! that pop up, with submenus, check marks and keyboard navigation).
 //!

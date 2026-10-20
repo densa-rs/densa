@@ -115,11 +115,11 @@ densa-window = "0.1"
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
-| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs, scroll views, splitters, panels, docking, menus and context menus, a data grid widget, a chart widget |
+| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
 | [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
-| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods |
+| [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods, undo and redo |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that fits the GPU's limits |
 | [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs, independent of any GPU API |
 | [`densa-render`](crates/densa-render) | Drawing a display list with wgpu in one draw call |
@@ -285,10 +285,11 @@ let style = ParagraphStyle::new(15.0).with_align(TextAlign::Justify).with_max_wi
 let mut paragraph = text.paragraph("Shaped once, wrapped to any width.", &style, &[])?;
 paragraph.reflow(Some(320.0))?;
 
-// Editable text: typing, deletion by character or word, input-method composition.
+// Editable text: typing, deletion by character or word, input-method composition, undo.
 let mut editor = TextEditor::new(&mut text, "Hello", ParagraphStyle::new(15.0))?;
 editor.insert(&mut text, ", brave world")?;
 editor.delete(&mut text, Motion::PreviousWord)?; // ctrl+Backspace
+editor.undo(&mut text)?; // ctrl+Z: "world" is back
 ```
 
 `TextSelection` turns clicks into caret positions and moves by character, word and line, in
@@ -383,14 +384,15 @@ all, so measure on the machines you target.
 
 ## Limitations
 
-- **Widgets:** labels, buttons, text inputs, scroll views, splitters, panels, docking, menus
-  and a data grid, with flexbox layout, events, focus and accessibility. Not there yet: undo,
-  redo and the clipboard in text inputs, keyboard shortcuts handled for menus (a menu shows
-  them; the application handles the keys), and text inputs' caret and selection for screen
-  readers. The grid selects one row at a time (kept on its record when the model gives
-  rows keys), with no multiple selection, cell selection or editing yet. Docking does not yet
-  save and restore layouts (panels already carry stable keys for it) or float panels in
-  their own windows.
+- **Widgets:** labels, buttons, text inputs (with undo, redo and the clipboard), scroll
+  views, splitters, panels, docking, menus and a data grid, with flexbox layout, events, focus
+  and accessibility. Not there yet: keyboard shortcuts handled for menus (a menu shows them;
+  the application handles the keys), and text inputs' caret and selection for screen
+  readers. The grid selects a row or a range of rows (kept on their records when the model
+  gives rows keys) and copies them as tab-separated text; it does not yet select cells or
+  scattered rows, paste or edit. On Linux the clipboard goes through X11 (XWayland under
+  Wayland). Docking does not yet save and restore layouts (panels already carry stable keys
+  for it) or float panels in their own windows.
 - **Charts:** lines, candlesticks and bars on number and time axes (UTC: no time zones yet),
   in stacked panes, fed from your data or a live table's view. Not there yet: logarithmic
   axes, area fills, annotations and drawing tools, several y axes in one pane, and candles

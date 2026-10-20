@@ -168,9 +168,11 @@ mod text_input {
         // Ctrl+Shift+Insert and Ctrl+Shift+Delete are not clipboard keys.
         let both = Modifiers::CONTROL | Modifiers::SHIFT;
         ui.clipboard().set_text("other").unwrap();
+        shortcut(&mut ui, "a", Modifiers::NONE);
         named(&mut ui, NamedKey::Insert, both);
-        named(&mut ui, NamedKey::Home, Modifiers::NONE);
+        assert_eq!(text_of(&ui, id), "abc");
         named(&mut ui, NamedKey::Delete, both);
+        assert_eq!(text_of(&ui, id), "", "deleted as Ctrl+Delete deletes");
         assert_eq!(clipboard(&mut ui).unwrap(), "other");
     }
 
@@ -252,6 +254,35 @@ mod text_input {
         input(&mut ui, "abc");
         assert_eq!(shortcut(&mut ui, "s", Modifiers::NONE), Handled::No);
     }
+
+    #[test]
+    fn nothing_is_cut_or_copied_while_an_input_method_composes() {
+        let mut ui = ui();
+        ui.clipboard().set_text("before").unwrap();
+        let id = input(&mut ui, "");
+        ui.ime(&densa_ui::Ime::Preedit {
+            text: "nihao",
+            cursor: Some((0, 2)),
+        });
+        assert!(!ui.update(id, |w: &mut TextInput, cx| w.copy(cx)).unwrap());
+        assert!(!ui.update(id, |w: &mut TextInput, cx| w.cut(cx)).unwrap());
+        assert_eq!(clipboard(&mut ui).unwrap(), "before");
+        assert_eq!(text_of(&ui, id), "nihao");
+    }
+
+    #[test]
+    fn shift_delete_without_a_selection_deletes_forward() {
+        let mut ui = ui();
+        ui.clipboard().set_text("before").unwrap();
+        let id = input(&mut ui, "abc");
+        named(&mut ui, NamedKey::Home, Modifiers::NONE);
+        assert_eq!(
+            named(&mut ui, NamedKey::Delete, Modifiers::SHIFT),
+            Handled::Yes
+        );
+        assert_eq!(text_of(&ui, id), "bc");
+        assert_eq!(clipboard(&mut ui).unwrap(), "before");
+    }
 }
 
 mod grid {
@@ -266,10 +297,13 @@ mod grid {
 
     use super::*;
 
-    /// Records with ids and names, keyed by id.
+    /// Records with ids and names, keyed by id. Records added to `pending` join when the
+    /// grid prepares the model; another `generation` is another table.
     struct Fruits {
         columns: Vec<Column>,
         ids: Vec<u64>,
+        pending: Vec<u64>,
+        generation: u64,
     }
 
     impl Fruits {
@@ -280,6 +314,8 @@ mod grid {
                     Column::new("Name", 10, Align::Left),
                 ],
                 ids: (0..rows).collect(),
+                pending: Vec::new(),
+                generation: 0,
             }
         }
     }
@@ -323,6 +359,14 @@ mod grid {
 
         fn row_of_key(&self, key: u64) -> Option<usize> {
             self.ids.iter().position(|id| *id == key)
+        }
+
+        fn prepare(&mut self) {
+            self.ids.append(&mut self.pending);
+        }
+
+        fn generation(&self) -> u64 {
+            self.generation
         }
     }
 
@@ -414,10 +458,8 @@ mod grid {
         key(&mut ui, NamedKey::ArrowDown, Modifiers::NONE);
         let row = ui.widget::<Grid>(id).unwrap().selected().unwrap();
         assert_eq!(rows(&ui, id), row..row + 1);
-        // Shift with Left, Right and Enter does nothing.
-        for k in [NamedKey::ArrowRight, NamedKey::Enter] {
-            assert_eq!(key(&mut ui, k, Modifiers::SHIFT), Handled::No);
-        }
+        // Shift with Enter does nothing.
+        assert_eq!(key(&mut ui, NamedKey::Enter, Modifiers::SHIFT), Handled::No);
     }
 
     #[test]
@@ -472,27 +514,119 @@ mod grid {
         update(&mut ui, id, |g, cx| g.select(cx, Some(0)));
         assert_eq!(super::shortcut(&mut ui, "c", Modifiers::NONE), Handled::No);
         assert!(!ui.update(id, |g: &mut Grid, cx| g.copy(cx)).unwrap());
-        // Ctrl+Shift+C is not copying.
-        assert_eq!(super::shortcut(&mut ui, "c", Modifiers::SHIFT), Handled::No);
     }
 
     #[test]
-    fn select_all_takes_every_row_without_scrolling() {
+    fn copying_takes_only_ctrl_c_and_ctrl_insert() {
+        let (mut ui, id) = grid(30);
+        ui.clipboard().set_text("before").unwrap();
+        update(&mut ui, id, |g, cx| g.select(cx, Some(0)));
+        for more in [Modifiers::SHIFT, Modifiers::ALT] {
+            assert_eq!(super::shortcut(&mut ui, "c", more), Handled::No);
+            assert_eq!(super::shortcut(&mut ui, "a", more), Handled::No);
+            assert_eq!(
+                key(&mut ui, NamedKey::Insert, Modifiers::CONTROL | more),
+                Handled::No
+            );
+        }
+        assert_eq!(key(&mut ui, NamedKey::Insert, Modifiers::NONE), Handled::No);
+        assert_eq!(clipboard(&mut ui).unwrap(), "before");
+        assert_eq!(rows(&ui, id), 0..1);
+    }
+
+    #[test]
+    fn copying_takes_in_what_the_model_has_not_shown_yet() {
+        let (mut ui, id) = grid(2);
+        super::shortcut(&mut ui, "a", Modifiers::NONE);
+        update(&mut ui, id, |g, cx| g.model_mut(cx).pending.push(9));
+        super::shortcut(&mut ui, "c", Modifiers::NONE);
+        assert_eq!(clipboard(&mut ui).unwrap(), "0\tn0\n1\tn1\n9\tn9");
+    }
+
+    #[test]
+    fn another_table_ends_every_selection() {
+        let (mut ui, id) = grid(30);
+        super::shortcut(&mut ui, "a", Modifiers::NONE);
+        update(&mut ui, id, |g, cx| g.model_mut(cx).generation += 1);
+        paint(&mut ui);
+        assert_eq!(rows(&ui, id), 0..0);
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 1, 4));
+        update(&mut ui, id, |g, cx| g.model_mut(cx).generation += 1);
+        paint(&mut ui);
+        assert_eq!(rows(&ui, id), 0..0);
+        update(&mut ui, id, |g, cx| g.select(cx, Some(2)));
+        assert_eq!(rows(&ui, id), 2..3, "no range left over from before");
+    }
+
+    #[test]
+    fn select_all_takes_every_row_and_keeps_the_selected_one() {
         let (mut ui, id) = grid(100);
+        update(&mut ui, id, |g, cx| g.select(cx, Some(45)));
         update(&mut ui, id, |g, cx| g.scroll_to_row(cx, 40));
         selections(&mut ui);
         assert_eq!(super::shortcut(&mut ui, "a", Modifiers::NONE), Handled::Yes);
         assert_eq!(rows(&ui, id), 0..100);
-        assert_eq!(ui.widget::<Grid>(id).unwrap().first_row(), 40);
-        assert_eq!(selections(&mut ui), [ActionKind::Selected(0)]);
+        let g = ui.widget::<Grid>(id).unwrap();
+        assert_eq!((g.selected(), g.first_row()), (Some(45), 40));
+        assert!(selections(&mut ui).is_empty());
+        // Rows added later are selected too, until the selection changes.
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids.push(100));
+        paint(&mut ui);
+        assert_eq!(rows(&ui, id), 0..101);
+        key(&mut ui, NamedKey::ArrowDown, Modifiers::SHIFT);
+        assert_eq!(rows(&ui, id), 45..47, "Shift extends from the selected row");
         super::shortcut(&mut ui, "a", Modifiers::NONE);
-        assert!(selections(&mut ui).is_empty(), "already selected");
-        let (mut empty, grid) = grid(0);
+        key(&mut ui, NamedKey::ArrowDown, Modifiers::NONE);
+        assert_eq!(rows(&ui, id), 47..48);
+        // Nothing selected: all the same, and an empty grid has nothing to select.
+        let (mut fresh, grid_id) = grid(5);
+        super::shortcut(&mut fresh, "a", Modifiers::NONE);
+        assert_eq!(rows(&fresh, grid_id), 0..5);
+        update(&mut fresh, grid_id, |g, cx| g.select(cx, None));
+        assert_eq!(rows(&fresh, grid_id), 0..0);
+        let (mut empty, grid_id) = grid(0);
         assert_eq!(
             super::shortcut(&mut empty, "a", Modifiers::NONE),
             Handled::No
         );
-        assert_eq!(rows(&empty, grid), 0..0);
+        assert_eq!(rows(&empty, grid_id), 0..0);
+    }
+
+    #[test]
+    fn rows_removed_since_the_last_frame_are_not_copied() {
+        let (mut ui, id) = grid(30);
+        ui.clipboard().set_text("before").unwrap();
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 20, 3));
+        // Fruits panics on a row past its end, as an application's model may.
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids.truncate(5));
+        assert_eq!(rows(&ui, id), 3..5, "never past the rows there are");
+        super::shortcut(&mut ui, "c", Modifiers::NONE);
+        assert_eq!(
+            clipboard(&mut ui).unwrap(),
+            "3\tn3",
+            "where the range started is gone"
+        );
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 1, 2));
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids.truncate(2));
+        assert_eq!(super::shortcut(&mut ui, "c", Modifiers::NONE), Handled::No);
+        assert_eq!(
+            clipboard(&mut ui).unwrap(),
+            "3\tn3",
+            "the selected record is gone"
+        );
+    }
+
+    #[test]
+    fn selecting_the_selected_row_again_keeps_its_range() {
+        let (mut ui, id) = grid(30);
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 2, 5));
+        update(&mut ui, id, |g, cx| g.select(cx, Some(5)));
+        assert_eq!(rows(&ui, id), 2..6, "an application echoing Selected back");
+        update(&mut ui, id, |g, cx| g.select(cx, Some(3)));
+        assert_eq!(rows(&ui, id), 3..4);
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 2, 5));
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 5, 5));
+        assert_eq!(rows(&ui, id), 5..6);
     }
 
     #[test]

@@ -76,6 +76,8 @@ pub struct DataGrid<M> {
     selected: Option<Selection>,
     /// Where a range of selected rows started (Shift), the selected row being its other end.
     anchor: Option<Selection>,
+    /// Every row is selected (Ctrl+A), whatever the anchor and the selected row.
+    all: bool,
     /// The sort a click made, for models that do not report theirs.
     sort: Option<(usize, SortOrder)>,
     drag: Option<Drag>,
@@ -100,6 +102,7 @@ impl<M: GridModel> DataGrid<M> {
             scroll_x: 0.0,
             selected: None,
             anchor: None,
+            all: false,
             sort: None,
             drag: None,
             built: None,
@@ -149,9 +152,20 @@ impl<M: GridModel> DataGrid<M> {
         self.selected.map(|s| s.row)
     }
 
-    /// Selects `row` alone (none for `None`) and scrolls it into view.
+    /// Selects `row` alone (none for `None`) and scrolls it into view. For the row already
+    /// selected, the rows selected with it stay selected (an application echoing
+    /// [`ActionKind::Selected`](densa_ui::ActionKind::Selected) back does not end a range);
+    /// [`select_rows`](Self::select_rows) with the row twice selects it alone.
     pub fn select(&mut self, cx: &mut EventCx<'_>, row: Option<usize>) {
+        if row.is_some() && row == self.selected() {
+            if let Some(row) = row {
+                self.reveal_row(row);
+            }
+            cx.request_paint();
+            return;
+        }
         self.anchor = None;
+        self.all = false;
         self.selected = row
             .filter(|r| *r < self.model.rows())
             .map(|row| self.selection_of(row));
@@ -249,8 +263,9 @@ impl<M: GridModel> DataGrid<M> {
             }
         }
         if generation != self.revisions.1 {
+            // The anchor goes with the selection in `clamp`.
             self.selected = None;
-            self.anchor = None;
+            self.all = false;
             self.sort = None;
             self.drag = None;
             self.first_row = 0;

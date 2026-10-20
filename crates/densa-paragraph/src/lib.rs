@@ -10,8 +10,9 @@
 //! caret and selection rectangles, and keyboard motions (by character, word and line, in
 //! visual order for mixed-direction text).
 //!
-//! [`TextEditor`] makes text editable: typing, deletion by character, word or line, and
-//! input-method (IME) composition, keeping a selection and a laid-out paragraph in step.
+//! [`TextEditor`] makes text editable: typing, deletion by character, word or line,
+//! input-method (IME) composition, and undo and redo, keeping a selection and a laid-out
+//! paragraph in step.
 //!
 //! Laying out allocates and happens when text, style or width change; drawing a laid-out
 //! paragraph, hit-testing and moving a selection or a caret do not allocate.

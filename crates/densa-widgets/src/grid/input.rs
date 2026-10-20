@@ -200,6 +200,7 @@ impl<M: GridModel> DataGrid<M> {
         self.first_row = 0;
         self.row_rest = 0.0;
         self.anchor = None;
+        self.all = false;
         self.selected = self.selected.filter(|s| s.key.is_some());
         self.clamp();
         if let Some(row) = self.selected() {
@@ -309,8 +310,9 @@ impl<M: GridModel> DataGrid<M> {
     }
 
     /// The selection keys (with Shift: extending it), Ctrl+A and Ctrl+C (Cmd on macOS),
-    /// Left and Right to scroll sideways, and Enter to activate the selected row, while the
-    /// grid has focus. Other keys with modifiers are left to the application.
+    /// Left and Right (with or without Shift) to scroll sideways, and Enter to activate the
+    /// selected row, while the grid has focus. Other keys with modifiers are left to the
+    /// application.
     fn key(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Handled {
         let m = key.modifiers;
         if let Some(handled) = self.command(cx, key) {
@@ -324,7 +326,7 @@ impl<M: GridModel> DataGrid<M> {
         let sideways = cx.px(SIDEWAYS);
         let max_x = self.max_scroll_x(cx.rect().width());
         match key.key {
-            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight) if !extend => {
+            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight) => {
                 let dx = if key.key == Key::Named(NamedKey::ArrowLeft) {
                     -sideways
                 } else {

@@ -8,6 +8,9 @@
 //! Frames are painted when something changed, when another thread asks for one through a
 //! [`Waker`] (new data arrived), or continuously while the app asks for it (animation).
 //!
+//! Widgets copy and paste through the system clipboard (on Linux, X11's; XWayland's under
+//! Wayland).
+//!
 //! Screen readers (Narrator, VoiceOver, Orca) read the interface through AccessKit: the
 //! window sends the [`Ui`]'s accessibility tree after each frame, only while one is
 //! listening, and carries out what it asks.

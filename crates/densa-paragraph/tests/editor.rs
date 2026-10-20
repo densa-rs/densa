@@ -506,6 +506,38 @@ mod undo {
     }
 
     #[test]
+    fn typing_after_an_undo_is_a_step_of_its_own() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "abc");
+        e.delete(&mut s, Motion::Previous).unwrap();
+        undo(&mut s, &mut e);
+        type_each(&mut s, &mut e, "d");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "abc");
+    }
+
+    #[test]
+    fn clicking_where_the_caret_already_is_ends_a_step() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "ab");
+        e.set_selection(TextSelection::caret_at(e.paragraph(), 2));
+        type_each(&mut s, &mut e, "c");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+    }
+
+    #[test]
+    fn inserting_nothing_is_no_step() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "a");
+        e.insert(&mut s, "").unwrap();
+        e.paste(&mut s, "").unwrap();
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "");
+        assert!(!e.can_undo());
+    }
+
+    #[test]
     fn undo_puts_the_caret_back_where_the_edit_was_made() {
         let (mut s, mut e) = editor("");
         type_each(&mut s, &mut e, "ab");
@@ -581,6 +613,17 @@ mod undo {
     }
 
     #[test]
+    fn backspace_after_deleting_a_selection_is_a_step_of_its_own() {
+        let (mut s, mut e) = editor("hello world");
+        e.set_selection(TextSelection::from_range(e.paragraph(), 6, 11));
+        e.delete(&mut s, Motion::Previous).unwrap();
+        e.delete(&mut s, Motion::Previous).unwrap();
+        assert_eq!(e.text(), "hello");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello ");
+    }
+
+    #[test]
     fn a_paste_is_a_step_of_its_own() {
         let (mut s, mut e) = editor("");
         type_each(&mut s, &mut e, "ab");
@@ -619,6 +662,10 @@ mod undo {
         e.redo(&mut s).unwrap();
         assert_eq!(e.text(), "abc");
         assert!(!e.can_redo());
+        // A redone step can be undone again.
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+        e.redo(&mut s).unwrap();
         // Typing after a redo starts a step of its own.
         type_each(&mut s, &mut e, "d");
         undo(&mut s, &mut e);

@@ -8,14 +8,20 @@ use densa_ui::{ActionKind, EventCx};
 use super::DataGrid;
 
 impl<M: GridModel> DataGrid<M> {
-    /// The selected rows: one, or the range from where a Shift selection started to the
-    /// [selected](Self::selected) row; empty for none.
+    /// The selected rows: one, the range from where a Shift selection started to the
+    /// [selected](Self::selected) row, or all of them; empty for none.
     pub fn selected_rows(&self) -> Range<usize> {
+        let rows = self.model.rows();
+        if self.all {
+            return 0..rows;
+        }
         let Some(focus) = self.selected() else {
             return 0..0;
         };
         let anchor = self.anchor.map_or(focus, |a| a.row);
-        anchor.min(focus)..anchor.max(focus) + 1
+        // Until the next layout or paint finds its records again, a row can be past the end.
+        let end = (anchor.max(focus) + 1).min(rows);
+        anchor.min(focus).min(end)..end
     }
 
     /// Selects the rows from `anchor` to `row` (either way round), `row` being the
@@ -25,29 +31,26 @@ impl<M: GridModel> DataGrid<M> {
         let Some(last) = self.model.rows().checked_sub(1) else {
             return;
         };
+        self.select(cx, None);
         self.select(cx, Some(row.min(last)));
         self.anchor = Some(self.selection_of(anchor.min(last)));
     }
 
-    /// Selects every row, the first being the [selected](Self::selected) one, without
-    /// scrolling.
+    /// Selects every row, and those added later, until the selection changes. The
+    /// [selected](Self::selected) row stays as it was, and nothing scrolls.
     pub fn select_all(&mut self, cx: &mut EventCx<'_>) {
-        let Some(last) = self.model.rows().checked_sub(1) else {
-            return;
-        };
-        if self.selected() != Some(0) {
-            self.selected = Some(self.selection_of(0));
-            cx.emit(ActionKind::Selected(0));
-        }
-        self.anchor = Some(self.selection_of(last));
+        self.all = true;
         cx.request_paint();
     }
 
     /// Puts the selected rows on the clipboard, as [`selected_text`](Self::selected_text)
     /// writes them; `false` if no row is selected or the clipboard would not take them.
+    ///
+    /// The text of every selected row is built at once, on the calling thread: a million
+    /// rows take a noticeable time and as much memory as their text.
     pub fn copy(&mut self, cx: &mut EventCx<'_>) -> bool {
-        let rows = self.selected_rows();
-        if rows.is_empty() {
+        self.catch_up();
+        if self.selected_rows().is_empty() {
             return false;
         }
         let text = self.selected_text(&super::palette(cx.theme()));
@@ -59,7 +62,7 @@ impl<M: GridModel> DataGrid<M> {
     /// the shape spreadsheets paste into cells. Tabs and line breaks within a cell become
     /// spaces.
     pub fn selected_text(&mut self, palette: &Palette) -> String {
-        self.model.prepare();
+        self.catch_up();
         let columns = self.model.columns().len();
         let mut out = String::new();
         let mut cell = CellText::new();
@@ -82,15 +85,24 @@ impl<M: GridModel> DataGrid<M> {
         out
     }
 
+    /// Takes in what the model changed since the last frame, as painting does.
+    fn catch_up(&mut self) {
+        self.model.prepare();
+        self.follow_model();
+        self.clamp();
+    }
+
     /// Selects `row` alone (reporting it if it was not selected) and shows it.
     pub(super) fn select_row(&mut self, cx: &mut EventCx<'_>, row: usize) {
         self.anchor = None;
+        self.all = false;
         self.move_selection(cx, row);
     }
 
     /// Selects from where the selection started (the selected row, if it was one row) to
     /// `row`: Shift with a click or a key.
     pub(super) fn extend_to(&mut self, cx: &mut EventCx<'_>, row: usize) {
+        self.all = false;
         if self.anchor.is_none() {
             self.anchor = Some(self.selected.unwrap_or_else(|| self.selection_of(row)));
         }

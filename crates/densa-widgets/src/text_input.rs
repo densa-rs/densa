@@ -105,10 +105,10 @@ impl TextInput {
         self.editor.as_ref().is_some_and(TextEditor::can_redo)
     }
 
-    /// Puts the selected text on the clipboard; `false` if none is selected or the clipboard
-    /// would not take it.
+    /// Puts the selected text on the clipboard; `false` if none is selected, an input
+    /// method is composing, or the clipboard would not take it.
     pub fn copy(&mut self, cx: &mut EventCx<'_>) -> bool {
-        let Some(editor) = &self.editor else {
+        let Some(editor) = self.editor.as_ref().filter(|e| e.composition().is_none()) else {
             return false;
         };
         let selected = editor.selected_text();
@@ -116,6 +116,8 @@ impl TextInput {
     }
 
     /// Copies the selected text and deletes it; nothing is deleted unless it was copied.
+    /// The edit methods return `false` when the text did not change, including when it could
+    /// not be laid out again (a font that cannot be read).
     pub fn cut(&mut self, cx: &mut EventCx<'_>) -> bool {
         self.copy(cx) && self.edit(cx, |e, s| e.delete(s, Motion::Previous).map(|()| true))
     }
@@ -177,7 +179,10 @@ impl TextInput {
                     (_, command) => command,
                 }
             }
-            Key::Named(NamedKey::Delete) if m.shift() && !m.control() => Command::Cut,
+            // Without a selection, Shift+Delete deletes as Delete does.
+            Key::Named(NamedKey::Delete) if m.shift() && !m.control() && self.has_selection() => {
+                Command::Cut
+            }
             Key::Named(NamedKey::Insert) if m.control() && !m.shift() => Command::Copy,
             Key::Named(NamedKey::Insert) if m.shift() && !m.control() => Command::Paste,
             _ => return None,
