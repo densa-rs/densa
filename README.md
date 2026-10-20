@@ -73,7 +73,7 @@ or windowing crate.
 
 ## Quick start
 
-You need Rust 1.90 or later and a GPU with Vulkan, Metal or DirectX 12.
+You need Rust 1.90 or later and a GPU with Vulkan, Metal, DirectX 12 or OpenGL.
 
 ```sh
 git clone https://github.com/densa-rs/densa
@@ -370,11 +370,16 @@ if reader.update() {
 
 | | Linux | macOS | Windows |
 |---|---|---|---|
-| Rendering (wgpu) | Vulkan | Metal | Vulkan, DirectX 12 |
+| Rendering (wgpu) | Vulkan, OpenGL | Metal | Vulkan, DirectX 12, OpenGL |
 | Text, paragraphs, editing | yes | yes | yes |
 | Live tables, grid, triple buffer | yes | yes | yes |
 | Widgets, layout, windows | yes | yes | yes |
 | Thread placement and priority | not yet | not yet | yes |
+
+A window draws with the best API the system offers unless the application picks one
+(`WindowOptions::with_backend`); the `WGPU_BACKEND` environment variable (`vulkan`, `dx12`,
+`metal`, `gl`) overrides both. Graphics drivers differ in what each API costs, memory most of
+all, so measure on the machines you target.
 
 ## Limitations
 

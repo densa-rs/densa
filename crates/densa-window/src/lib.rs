@@ -147,6 +147,30 @@ pub struct WindowOptions {
     pub theme: Theme,
     /// Rectangles and glyphs a frame can hold; more are dropped (and counted).
     pub instances: usize,
+    /// The graphics API that draws the window.
+    pub backend: Backend,
+}
+
+/// The graphics API a window draws with. The `WGPU_BACKEND` environment variable
+/// (`vulkan`, `dx12`, `metal`, `gl`, comma-separated) overrides it, to try another without
+/// rebuilding. When the chosen API gives no device, the window tries every API before
+/// [`run`] fails.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum Backend {
+    /// Whichever API the system offers best: Vulkan, Metal or DirectX 12, and OpenGL where
+    /// none of those is there.
+    #[default]
+    Auto,
+    /// Vulkan, on Linux and Windows.
+    Vulkan,
+    /// Metal, on macOS.
+    Metal,
+    /// DirectX 12, on Windows.
+    Dx12,
+    /// OpenGL, or OpenGL ES. On some drivers it takes much less memory than Vulkan or
+    /// DirectX 12 for an interface that draws little: measure on the machines you target.
+    Gl,
 }
 
 impl WindowOptions {
@@ -157,6 +181,7 @@ impl WindowOptions {
             size: Size::new(1280.0, 800.0),
             theme: Theme::default(),
             instances: 65_536,
+            backend: Backend::Auto,
         }
     }
 
@@ -171,6 +196,13 @@ impl WindowOptions {
     #[must_use]
     pub fn with_theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
+        self
+    }
+
+    /// The options drawing with `backend`; see [`Backend`].
+    #[must_use]
+    pub fn with_backend(mut self, backend: Backend) -> Self {
+        self.backend = backend;
         self
     }
 
@@ -289,7 +321,13 @@ impl<A: App> Shell<A> {
         let window = Arc::new(window);
         window.set_ime_allowed(true);
         let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
-        let gpu = Gpu::new(event_loop, &window, self.options.instances, &mut cache)?;
+        let gpu = Gpu::new(
+            event_loop,
+            &window,
+            self.options.instances,
+            &mut cache,
+            self.options.backend,
+        )?;
         let text = TextSystem::new().map_err(|e| WindowError::Text(e.to_string()))?;
         let mut ui = Ui::new(text);
         ui.set_theme(self.options.theme.clone());
