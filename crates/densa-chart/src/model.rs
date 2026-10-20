@@ -42,9 +42,8 @@ pub trait ChartModel {
     /// Draws the series of pane `pane` onto `plot`, in `palette`'s colors.
     fn paint(&self, pane: usize, plot: &Plot, canvas: &mut Canvas<'_>, palette: &ChartPalette);
 
-    /// The name of pane `pane`, written in its top left corner over its series ("Volume"),
-    /// on a box that hides what is under it, and cut off where the pane ends: keep it short.
-    /// Nothing is written for an empty name, the default.
+    /// The name of pane `pane` ("Volume"), written on a line of its own above the pane, cut
+    /// off where the pane ends. A pane without a name (empty, the default) has no such line.
     fn pane_title(&self, _pane: usize) -> &str {
         ""
     }

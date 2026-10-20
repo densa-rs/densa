@@ -444,6 +444,14 @@ impl<M: ChartModel> Chart<M> {
                 let bottom = f64::from(rect.top()) + f64::from(rect.height()) * before;
                 let bounds = Rect::from_edges(rect.left(), top as f32, rect.right(), bottom as f32);
                 top = bottom;
+                let title = self.model.pane_title(pane);
+                let bounds = if title.is_empty() {
+                    bounds
+                } else {
+                    // A pane shorter than the line keeps an empty plot, not an inverted one.
+                    let below = (bounds.y0 + painter.title_height()).min(bounds.y1);
+                    Rect::from_edges(bounds.x0, below, bounds.x1, bounds.y1)
+                };
                 let area = painter.plot_area(bounds, last);
                 let y = self
                     .model
@@ -452,7 +460,7 @@ impl<M: ChartModel> Chart<M> {
                 let plot = Plot::new(area, x, y);
                 painter.paint_axes(canvas, &plot, last);
                 self.model.paint(pane, &plot, canvas, painter.palette());
-                painter.paint_title(canvas, &plot, self.model.pane_title(pane));
+                painter.paint_title(canvas, &plot, title);
                 if let Some(at) = hover {
                     painter.paint_crosshair(canvas, &plot, at, last);
                 }

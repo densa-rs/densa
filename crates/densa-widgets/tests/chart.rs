@@ -517,44 +517,33 @@ fn a_pane_weight_that_is_not_a_number_counts_as_none() {
 }
 
 #[test]
-fn each_pane_has_its_title_in_its_top_left_corner() {
-    let glyphs_in = |instances: &[Instance], plot: &Plot| {
+fn each_pane_has_its_title_on_a_line_above_it() {
+    let glyphs_above = |instances: &[Instance], plot: &Plot| {
         let area = plot.area();
         instances
             .iter()
             .filter(|i| i.is_glyph())
-            .filter(|i| area.contains(Point::new(i.rect[0], i.rect[1])))
-            .map(|i| (i.rect[0] - area.x0, i.rect[1] - area.y0))
-            .collect::<Vec<_>>()
+            .filter(|i| i.rect[0] < area.x1 && i.rect[1] < area.y0)
+            .filter(|i| i.rect[1] + i.rect[3] > area.y0 - 20.0)
+            .count()
     };
     let (mut ui, id) = chart(Line::new(200));
-    let untitled = paint(&mut ui);
-    for pane in 0..2 {
-        assert!(
-            glyphs_in(&untitled, &plot(&ui, id, pane)).is_empty(),
-            "labels are outside"
-        );
-    }
+    paint(&mut ui);
+    let untitled = [plot(&ui, id, 0), plot(&ui, id, 1)];
 
     let mut line = Line::new(200);
     // Titles without spaces: one glyph per character.
-    line.titles = ["Price", "Volume"];
+    line.titles = ["Price", ""];
     let (mut ui, id) = chart(line);
     let titled = paint(&mut ui);
-    let background = Theme::dark().surface.to_array();
-    for (pane, title) in [(0, "Price"), (1, "Volume")] {
-        let plot = plot(&ui, id, pane);
-        let glyphs = glyphs_in(&titled, &plot);
-        assert_eq!(glyphs.len(), title.len(), "pane {pane}");
-        assert!(
-            glyphs.iter().all(|&(x, y)| x < 80.0 && y < 20.0),
-            "{glyphs:?}"
-        );
-        let corner = [plot.area().x0 + 1.0, plot.area().y0 + 1.0];
-        let backing = titled
-            .iter()
-            .filter(|i| !i.is_glyph() && i.color == background)
-            .any(|i| i.rect[..2] == corner);
-        assert!(backing, "pane {pane} has a box under its title");
-    }
+    let (price, volume) = (plot(&ui, id, 0), plot(&ui, id, 1));
+    assert_eq!(glyphs_above(&titled, &price), "Price".len());
+    let room = price.area().y0 - untitled[0].area().y0;
+    assert!(room > 10.0 && room < 25.0, "a line of room above: {room}");
+    assert_eq!(price.area().y1, untitled[0].area().y1, "the bottom stays");
+    assert_eq!(
+        volume.area(),
+        untitled[1].area(),
+        "a pane without a title has no line"
+    );
 }

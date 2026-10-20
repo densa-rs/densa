@@ -228,25 +228,27 @@ impl ChartPainter {
         }
     }
 
-    /// Writes `title` in the top left corner of `plot`, on a box of the background so the
-    /// series under it do not hide it, and cut off where the plot ends. Call it after the
-    /// series. An empty title draws nothing.
+    /// The height of the line a title takes above a plot: leave it out of the bounds given
+    /// to [`plot_area`](Self::plot_area) for a plot with a title.
+    pub fn title_height(&self) -> f32 {
+        self.glyphs.line_metrics().line_height().round()
+    }
+
+    /// Writes `title` on the line of [`title_height`](Self::title_height) above `plot`,
+    /// from its left edge, cut off where the plot ends: above the plot, it hides none of
+    /// it. An empty title draws nothing.
     pub fn paint_title(&mut self, canvas: &mut Canvas<'_>, plot: &Plot, title: &str) {
         let area = plot.area();
-        if title.is_empty() || area.is_empty() {
+        if area.is_empty() {
             return;
         }
-        let metrics = self.glyphs.line_metrics();
-        let (pad, line) = (self.pad(), metrics.line_height().round());
-        let palette = self.palette;
+        let line = self.title_height();
+        let top = area.y0 - line;
         let outside = canvas.state();
-        canvas.clip(area);
-        // One whole-pixel corner for the box and the text, so they line up at any size.
-        let (x, y) = ((area.x0 + 1.0).round(), (area.y0 + 1.0).round());
-        let width = (self.glyphs.measure(title) + 2.0 * pad).round();
-        canvas.fill_rect(Rect::new(x, y, width, line), palette.background);
-        let at = Point::new(x + pad, y + metrics.ascent.round());
-        draw_text(&mut self.glyphs, canvas, title, at, palette.label);
+        canvas.clip(Rect::new(area.x0, top, area.width(), line));
+        let ascent = self.glyphs.line_metrics().ascent.round();
+        let at = Point::new(area.x0, top + ascent);
+        draw_text(&mut self.glyphs, canvas, title, at, self.palette.label);
         canvas.restore(outside);
     }
 

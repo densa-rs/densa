@@ -345,63 +345,52 @@ fn axes_draw_gridlines_edges_and_labels_outside_the_plot() {
 }
 
 #[test]
-fn a_title_is_written_in_the_top_left_corner_on_the_background() {
-    let cases = [
-        (13.0, 20.0, 10.0),
-        (10.0, 20.4, 10.6),
-        (17.0, 3.5, 0.2),
-        (26.0, 0.0, 0.0),
-    ];
-    for (px, left, top) in cases {
+fn a_title_is_written_on_the_line_above_the_plot() {
+    for px in [10.0, 13.0, 17.0, 26.0] {
         let font = Font::bundled_mono().unwrap();
         let mut painter = ChartPainter::new(font, px, ChartPalette::new());
         let palette = *painter.palette();
-        let area = Rect::from_edges(left, top, 300.0, 200.0);
+        let line = painter.title_height();
+        assert!(
+            line >= px && line.fract() == 0.0,
+            "{px} px: a whole line, {line}"
+        );
+        let area = Rect::new(20.0, 50.0, 300.0, 200.0);
         let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
         let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "Volume (gq)"));
 
-        let backing = &instances[0];
-        assert!(!backing.is_glyph());
-        assert_eq!(backing.color, palette.background.to_array());
-        let corner = ((left + 1.0).round(), (top + 1.0).round());
         assert_eq!(
-            (backing.rect[0], backing.rect[1]),
-            corner,
-            "inside the edges, {px} px"
+            instances.len(),
+            10,
+            "{px} px: every character but the space, no box"
         );
-        assert!(
-            backing.rect.iter().all(|v| v.fract() == 0.0),
-            "whole pixels: {backing:?}"
-        );
-        let glyphs: Vec<&Instance> = instances.iter().filter(|i| i.is_glyph()).collect();
-        assert_eq!(glyphs.len(), 10, "every character but the space");
-        assert!(glyphs.iter().all(|g| g.color == palette.label.to_array()));
-        let [bx, by, bw, bh] = backing.rect;
-        for glyph in &glyphs {
+        for glyph in &instances {
+            assert!(glyph.is_glyph());
+            assert_eq!(glyph.color, palette.label.to_array());
             let [x, y, w, h] = glyph.rect;
+            assert!(x >= area.x0 && x + w <= area.x1, "{px} px: {glyph:?}");
             assert!(
-                x > bx && x + w <= bx + bw,
-                "{px} px: {glyph:?} across {backing:?}"
-            );
-            assert!(
-                y >= by && y + h <= by + bh,
-                "{px} px: {glyph:?} down {backing:?}"
+                y >= area.y0 - line && y + h <= area.y0,
+                "{px} px: above, {glyph:?}"
             );
         }
+        let first = instances.iter().map(|g| g.rect[0]).fold(f32::MAX, f32::min);
+        assert!(first < area.x0 + px, "{px} px: from the left edge, {first}");
     }
 }
 
 #[test]
 fn a_title_is_cut_off_where_the_plot_ends() {
     let mut painter = painter();
-    let area = Rect::new(0.0, 0.0, 40.0, 100.0);
+    let area = Rect::new(0.0, 30.0, 40.0, 100.0);
     let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
     let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "A rather long title"));
+    assert!(!instances.is_empty());
     assert!(
         instances.iter().all(|i| i.rect[0] + i.rect[2] <= 40.0),
         "{instances:?}"
     );
-    assert!(instances.iter().filter(|i| i.is_glyph()).count() < 19);
+    assert!(instances.len() < 16);
 
     let after = drawn(|canvas| {
         painter.paint_title(canvas, &plot, "A rather long title");
