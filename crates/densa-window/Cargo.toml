@@ -19,6 +19,7 @@ system-fonts = ["densa-paragraph/system-fonts"]
 [dependencies]
 accesskit.workspace = true
 accesskit_winit.workspace = true
+arboard.workspace = true
 densa-core.workspace = true
 densa-draw.workspace = true
 densa-paragraph.workspace = true

@@ -15,6 +15,9 @@
 //! secondary press or the context menu key reports [`ActionKind::ContextMenu`], where an
 //! application opens its context menu.
 //!
+//! Widgets copy and paste through the Ui's [`Clipboard`] ([`EventCx::clipboard`]): a
+//! [`MemoryClipboard`] until the window gives it the system's.
+//!
 //! Widgets also describe themselves to assistive technology ([`Widget::accessibility`]):
 //! [`Ui::access_tree`] is what a screen reader reads, and [`Ui::access_action`] does what it
 //! asks. Both are platform-neutral; `densa-window` connects them to the operating system.
@@ -55,6 +58,7 @@
 
 mod access;
 mod access_tree;
+mod clipboard;
 mod context;
 mod dispatch;
 mod event;
@@ -66,6 +70,7 @@ mod ui;
 mod widget;
 
 pub use access::{AccessAction, AccessId, AccessNode, AccessRequest, AccessTree, Role, MAX_PART};
+pub use clipboard::{Clipboard, ClipboardError, MemoryClipboard};
 pub use context::{EventCx, LayoutCx, PaintCx};
 pub use event::{
     Cursor, Event, Ime, Key, KeyEvent, Modifiers, NamedKey, PointerButton, PointerEvent,

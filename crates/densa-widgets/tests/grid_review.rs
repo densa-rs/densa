@@ -385,9 +385,8 @@ fn enter_and_double_clicks_activate_and_modified_keys_are_left_alone() {
     pointer(&mut ui, PointerKind::Down(PointerButton::Primary), at);
     pointer(&mut ui, PointerKind::Up(PointerButton::Primary), at);
     ui.key(&KeyEvent::down(Key::Named(NamedKey::Enter)));
-    let shift_down =
-        KeyEvent::down(Key::Named(NamedKey::ArrowDown)).with_modifiers(Modifiers::SHIFT);
-    ui.key(&shift_down);
+    let alt_down = KeyEvent::down(Key::Named(NamedKey::ArrowDown)).with_modifiers(Modifiers::ALT);
+    ui.key(&alt_down);
     assert_eq!(
         actions(&mut ui),
         [

@@ -109,7 +109,7 @@ impl<M: GridModel> DataGrid<M> {
         let shown = Shown {
             model: &self.model,
             first: self.first_row,
-            selected: self.selected.map(|s| s.row),
+            selected: self.selected_rows(),
             highlight: theme.selection,
             palette: super::palette(theme),
         };

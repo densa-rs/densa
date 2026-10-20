@@ -452,3 +452,235 @@ mod composition {
         assert_eq!(rects, 1);
     }
 }
+
+mod undo {
+    use super::*;
+
+    /// Types `text` one character at a time, as key presses do.
+    fn type_each(s: &mut TextSystem, e: &mut TextEditor, text: &str) {
+        for c in text.chars() {
+            e.insert(s, c.encode_utf8(&mut [0; 4])).unwrap();
+        }
+    }
+
+    fn undo(s: &mut TextSystem, e: &mut TextEditor) -> bool {
+        e.undo(s).unwrap()
+    }
+
+    #[test]
+    fn a_typed_word_is_undone_and_redone_at_once() {
+        let (mut s, mut e) = editor("");
+        assert!(!e.can_undo());
+        type_each(&mut s, &mut e, "hello");
+        assert!(e.can_undo() && !e.can_redo());
+        assert!(undo(&mut s, &mut e));
+        assert_eq!(e.text(), "");
+        assert!(!e.can_undo() && e.can_redo());
+        assert!(e.redo(&mut s).unwrap());
+        assert_eq!(e.text(), "hello");
+        assert_eq!(e.selection().range(), 5..5);
+    }
+
+    #[test]
+    fn each_word_typed_is_a_step_of_its_own() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "one two  three");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "one two  ");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "one ");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "");
+        assert!(!undo(&mut s, &mut e), "nothing left");
+    }
+
+    #[test]
+    fn moving_the_caret_ends_a_step() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "ab");
+        e.move_caret(Motion::Left, false);
+        e.move_caret(Motion::Right, false);
+        type_each(&mut s, &mut e, "c");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+    }
+
+    #[test]
+    fn undo_puts_the_caret_back_where_the_edit_was_made() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "ab");
+        e.set_selection(TextSelection::caret_at(e.paragraph(), 0));
+        type_each(&mut s, &mut e, "x");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+        assert_eq!(e.selection().range(), 0..0, "the caret where it was before");
+    }
+
+    #[test]
+    fn backspaces_in_a_row_are_one_step() {
+        let (mut s, mut e) = editor("hello");
+        for _ in 0..3 {
+            e.delete(&mut s, Motion::Previous).unwrap();
+        }
+        assert_eq!(e.text(), "he");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello");
+        assert_eq!(e.selection().range(), 5..5);
+        e.redo(&mut s).unwrap();
+        assert_eq!(e.text(), "he");
+        assert_eq!(e.selection().range(), 2..2);
+    }
+
+    #[test]
+    fn forward_deletes_in_a_row_are_one_step() {
+        let (mut s, mut e) = editor_at("hello", 1);
+        e.delete(&mut s, Motion::Next).unwrap();
+        e.delete(&mut s, Motion::NextWord).unwrap();
+        assert_eq!(e.text(), "h");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello");
+        assert_eq!(e.selection().range(), 1..1);
+    }
+
+    #[test]
+    fn typing_then_deleting_are_separate_steps() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "abc");
+        e.delete(&mut s, Motion::Previous).unwrap();
+        e.delete(&mut s, Motion::Next).unwrap(); // nothing after the caret: no step
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "abc");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "");
+    }
+
+    #[test]
+    fn undoing_a_replaced_selection_selects_it_again() {
+        let (mut s, mut e) = editor("hello world");
+        e.set_selection(TextSelection::from_range(e.paragraph(), 11, 6));
+        type_each(&mut s, &mut e, "you");
+        assert_eq!(e.text(), "hello you");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello world");
+        let selection = e.selection();
+        assert_eq!((selection.anchor(), selection.focus()), (11, 6));
+    }
+
+    #[test]
+    fn a_deleted_selection_is_a_step_of_its_own() {
+        let (mut s, mut e) = editor("hello world");
+        e.delete(&mut s, Motion::Previous).unwrap();
+        e.set_selection(TextSelection::from_range(e.paragraph(), 0, 6));
+        e.delete(&mut s, Motion::Previous).unwrap();
+        e.delete(&mut s, Motion::Previous).unwrap(); // nothing before the caret: no step
+        assert_eq!(e.text(), "worl");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello worl");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello world");
+    }
+
+    #[test]
+    fn a_paste_is_a_step_of_its_own() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "ab");
+        e.paste(&mut s, "cd").unwrap();
+        type_each(&mut s, &mut e, "e");
+        assert_eq!(e.text(), "abcde");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "abcd");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "");
+    }
+
+    #[test]
+    fn a_new_edit_drops_what_was_undone() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "a");
+        undo(&mut s, &mut e);
+        type_each(&mut s, &mut e, "b");
+        assert!(!e.can_redo());
+        assert!(!e.redo(&mut s).unwrap());
+        assert_eq!(e.text(), "b");
+    }
+
+    #[test]
+    fn undo_and_redo_alternate_through_every_step() {
+        let (mut s, mut e) = editor("");
+        e.paste(&mut s, "a").unwrap();
+        e.paste(&mut s, "b").unwrap();
+        e.paste(&mut s, "c").unwrap();
+        undo(&mut s, &mut e);
+        undo(&mut s, &mut e);
+        e.redo(&mut s).unwrap();
+        assert_eq!(e.text(), "ab");
+        e.redo(&mut s).unwrap();
+        assert_eq!(e.text(), "abc");
+        assert!(!e.can_redo());
+        // Typing after a redo starts a step of its own.
+        type_each(&mut s, &mut e, "d");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "abc");
+    }
+
+    #[test]
+    fn new_text_forgets_the_edits() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "a");
+        e.set_text(&mut s, "fresh").unwrap();
+        assert!(!e.can_undo());
+        assert!(!undo(&mut s, &mut e));
+        assert_eq!(e.text(), "fresh");
+    }
+
+    #[test]
+    fn only_the_last_hundred_steps_are_kept() {
+        let (mut s, mut e) = editor("");
+        for _ in 0..150 {
+            e.paste(&mut s, "x").unwrap();
+        }
+        let mut undone = 0;
+        while undo(&mut s, &mut e) {
+            undone += 1;
+        }
+        assert_eq!(undone, 100);
+        assert_eq!(e.text().len(), 50);
+    }
+
+    #[test]
+    fn a_committed_composition_is_one_step_back_to_the_selection_it_replaced() {
+        let (mut s, mut e) = editor("hello world");
+        e.set_selection(TextSelection::from_range(e.paragraph(), 6, 11));
+        e.set_composition(&mut s, "w", Some(1..1)).unwrap();
+        e.set_composition(&mut s, "wa", Some(2..2)).unwrap();
+        e.insert(&mut s, "\u{308F}").unwrap(); // わ, committed over the preedit
+        assert_eq!(e.text(), "hello \u{308F}");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "hello world");
+        assert_eq!(e.selection().range(), 6..11);
+        assert!(!e.can_undo(), "the preedits were not steps");
+    }
+
+    #[test]
+    fn a_preedit_kept_by_moving_the_caret_is_a_step() {
+        let (mut s, mut e) = editor("ab");
+        e.set_composition(&mut s, "k", Some(1..1)).unwrap();
+        e.move_caret(Motion::LineStart, false);
+        assert_eq!(e.text(), "abk");
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "ab");
+        assert_eq!(e.selection().range(), 2..2);
+    }
+
+    #[test]
+    fn undo_while_composing_drops_the_preedit_and_the_last_edit() {
+        let (mut s, mut e) = editor("");
+        type_each(&mut s, &mut e, "ab");
+        e.set_composition(&mut s, "k", Some(1..1)).unwrap();
+        undo(&mut s, &mut e);
+        assert_eq!(e.text(), "");
+        assert_eq!(e.composition(), None);
+    }
+}

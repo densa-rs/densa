@@ -30,6 +30,7 @@
 //!   selects one character.
 
 mod editor;
+mod history;
 mod paragraph;
 mod selection;
 mod style;

@@ -2,6 +2,7 @@ use std::ops::Range;
 
 use densa_core::Rect;
 
+use crate::history::{Edit, History, Kind};
 use crate::selection::backspace_start;
 use crate::style::{is_char_range, ParagraphError, ParagraphStyle};
 use crate::{Affinity, Motion, Paragraph, TextSelection, TextSystem};
@@ -9,9 +10,10 @@ use crate::{Affinity, Motion, Paragraph, TextSelection, TextSystem};
 /// Editable text: a [`Paragraph`] with a [`TextSelection`], typing, deletion and input-method
 /// composition.
 ///
-/// Every change to the text (typing, deleting, composing, a new style) lays the text out
-/// again, which allocates; moving the caret, drawing [`paragraph`](Self::paragraph) and the
-/// geometry queries do not. A change that fails leaves the editor as it was.
+/// Every change to the text (typing, deleting, composing, a new style, undo and redo) lays
+/// the text out again, which allocates; moving the caret, drawing
+/// [`paragraph`](Self::paragraph) and the geometry queries do not (except the move that
+/// keeps a preedit as text, an edit). A change that fails leaves the editor as it was.
 ///
 /// Input methods (IME) compose text before committing it: forward their preedit to
 /// [`set_composition`](Self::set_composition) (an empty preedit removes it) and the committed
@@ -20,7 +22,11 @@ use crate::{Affinity, Motion, Paragraph, TextSelection, TextSystem};
 /// Typing replaces an active preedit, deleting cancels it (restoring any selection it
 /// replaced), and moving the caret keeps it as ordinary text.
 ///
-/// Not yet supported: undo and redo, styled spans, a maximum length.
+/// Edits can be undone and redone ([`undo`](Self::undo), [`redo`](Self::redo)): typing is one
+/// step per word, and Backspace or Delete pressed repeatedly one step, until the caret
+/// moves. A preedit is not an edit until it is committed or kept. Up to 100 steps are kept.
+///
+/// Not yet supported: styled spans, a maximum length.
 ///
 /// [`for_each_composition_rect`]: Self::for_each_composition_rect
 #[derive(Debug)]
@@ -31,6 +37,7 @@ pub struct TextEditor {
     selection: TextSelection,
     composition: Option<Composition>,
     shows_caret: bool,
+    history: History,
 }
 
 /// Preedit text an input method is composing.
@@ -40,6 +47,8 @@ struct Composition {
     range: Range<usize>,
     /// The selected text the preedit replaced, put back if the input method cancels.
     replaced: String,
+    /// The selection (anchor, focus) before composing started.
+    before: (usize, usize),
 }
 
 /// Characters after which the caret belongs to the next line: the hard line breaks of
@@ -68,6 +77,7 @@ impl TextEditor {
             selection,
             composition: None,
             shows_caret: true,
+            history: History::default(),
         })
     }
 
@@ -109,14 +119,16 @@ impl TextEditor {
     /// Selects `selection` (clamped to this text), for example from a click or a drag. A
     /// preedit being composed stays as ordinary text.
     pub fn set_selection(&mut self, selection: TextSelection) {
-        self.end_composition();
+        self.keep_composition();
+        self.history.seal();
         self.selection = selection.refreshed(&self.paragraph);
     }
 
     /// Moves the caret by `motion`, or with `extend` moves the selection's focus (shift +
     /// navigation keys). A preedit being composed stays as ordinary text.
     pub fn move_caret(&mut self, motion: Motion, extend: bool) {
-        self.end_composition();
+        self.keep_composition();
+        self.history.seal();
         self.selection = self.selection.moved(&self.paragraph, motion, extend);
     }
 
@@ -127,7 +139,33 @@ impl TextEditor {
     /// # Errors
     /// [`ParagraphError::UnreadableFont`] if a font chosen for the new text cannot be read.
     pub fn insert(&mut self, system: &mut TextSystem, text: &str) -> Result<(), ParagraphError> {
-        let range = self.composition().unwrap_or_else(|| self.selection.range());
+        self.insert_as(system, text, Kind::Typing)
+    }
+
+    /// Inserts `text` as [`insert`](Self::insert) does, as an undo step of its own: for a
+    /// paste or a drop, rather than typing.
+    ///
+    /// # Errors
+    /// [`ParagraphError::UnreadableFont`] if a font chosen for the new text cannot be read.
+    pub fn paste(&mut self, system: &mut TextSystem, text: &str) -> Result<(), ParagraphError> {
+        self.insert_as(system, text, Kind::Other)
+    }
+
+    fn insert_as(
+        &mut self,
+        system: &mut TextSystem,
+        text: &str,
+        kind: Kind,
+    ) -> Result<(), ParagraphError> {
+        let (range, removed, before) = match &self.composition {
+            Some(c) => (c.range.clone(), c.replaced.clone(), c.before),
+            None => (
+                self.selection.range(),
+                self.selected_text().to_owned(),
+                self.ends(),
+            ),
+        };
+        let at = range.start;
         let caret = range.start + text.len();
         // After a line break the caret belongs to the new line; otherwise it stays at the
         // end of the line it typed on, even where that line wraps.
@@ -148,6 +186,7 @@ impl TextEditor {
         })?;
         self.composition = None;
         self.shows_caret = true;
+        self.record(at, removed, text, before, kind);
         Ok(())
     }
 
@@ -172,11 +211,75 @@ impl TextEditor {
         if range.is_empty() {
             return Ok(());
         }
+        let kind = match motion {
+            _ if !self.selection.is_caret() => Kind::Other,
+            Motion::Previous | Motion::PreviousWord => Kind::Backspace,
+            Motion::Next | Motion::NextWord => Kind::ForwardDelete,
+            _ => Kind::Other,
+        };
+        let (before, removed) = (self.ends(), self.text[range.clone()].to_owned());
         let caret = range.start;
-        self.replace(system, range, "", |p| TextSelection::caret_at(p, caret))
+        self.replace(system, range, "", |p| TextSelection::caret_at(p, caret))?;
+        self.record(caret, removed, "", before, kind);
+        Ok(())
     }
 
-    /// Replaces the whole text with `text`, the caret at its end.
+    /// Takes back the last edit, selecting what was selected before it; `false` if there
+    /// was none. A preedit being composed is removed first.
+    ///
+    /// # Errors
+    /// [`ParagraphError::UnreadableFont`] if a font cannot be read; the edit stays undoable.
+    pub fn undo(&mut self, system: &mut TextSystem) -> Result<bool, ParagraphError> {
+        self.cancel_composition(system)?;
+        let Some(edit) = self.history.take_undo() else {
+            return Ok(false);
+        };
+        let range = edit.at..edit.at + edit.inserted.len();
+        let (anchor, focus) = edit.before;
+        let undone = self.replace(system, range, &edit.removed, |p| {
+            TextSelection::from_range(p, anchor, focus)
+        });
+        match undone {
+            Ok(()) => self.history.push_redo(edit),
+            Err(_) => self.history.push_undo(edit),
+        }
+        undone.map(|()| true)
+    }
+
+    /// Makes the last undone edit again, selecting what it left selected; `false` if there
+    /// was none. A new edit makes undone ones unavailable.
+    ///
+    /// # Errors
+    /// [`ParagraphError::UnreadableFont`] if a font cannot be read; the edit stays redoable.
+    pub fn redo(&mut self, system: &mut TextSystem) -> Result<bool, ParagraphError> {
+        self.cancel_composition(system)?;
+        let Some(edit) = self.history.take_redo() else {
+            return Ok(false);
+        };
+        let range = edit.at..edit.at + edit.removed.len();
+        let (anchor, focus) = edit.after;
+        let redone = self.replace(system, range, &edit.inserted, |p| {
+            TextSelection::from_range(p, anchor, focus)
+        });
+        match redone {
+            Ok(()) => self.history.push_undo(edit),
+            Err(_) => self.history.push_redo(edit),
+        }
+        redone.map(|()| true)
+    }
+
+    /// Whether there is an edit to [`undo`](Self::undo).
+    pub fn can_undo(&self) -> bool {
+        self.history.can_undo()
+    }
+
+    /// Whether there is an edit to [`redo`](Self::redo).
+    pub fn can_redo(&self) -> bool {
+        self.history.can_redo()
+    }
+
+    /// Replaces the whole text with `text`, the caret at its end, and forgets the edits to
+    /// undo and redo (as loading a new document does).
     ///
     /// # Errors
     /// [`ParagraphError::UnreadableFont`] if a font chosen for `text` cannot be read.
@@ -186,6 +289,7 @@ impl TextEditor {
         self.replace(system, all, text, |p| TextSelection::caret_at(p, caret))?;
         self.composition = None;
         self.shows_caret = true;
+        self.history.clear();
         Ok(())
     }
 
@@ -240,9 +344,13 @@ impl TextEditor {
         if text.is_empty() {
             return self.cancel_composition(system);
         }
-        let (range, replaced) = match &self.composition {
-            Some(composition) => (composition.range.clone(), composition.replaced.clone()),
-            None => (self.selection.range(), self.selected_text().to_owned()),
+        let (range, replaced, before) = match &self.composition {
+            Some(c) => (c.range.clone(), c.replaced.clone(), c.before),
+            None => (
+                self.selection.range(),
+                self.selected_text().to_owned(),
+                self.ends(),
+            ),
         };
         let start = range.start;
         let selected = cursor.clone().unwrap_or(0..0);
@@ -252,6 +360,7 @@ impl TextEditor {
         self.composition = Some(Composition {
             range: start..start + text.len(),
             replaced,
+            before,
         });
         self.shows_caret = cursor.is_some();
         Ok(())
@@ -291,20 +400,54 @@ impl TextEditor {
 
     /// Removes the preedit text and puts back what it replaced, selected.
     fn cancel_composition(&mut self, system: &mut TextSystem) -> Result<(), ParagraphError> {
-        if let Some(Composition { range, replaced }) = self.composition.clone() {
+        if let Some(Composition {
+            range, replaced, ..
+        }) = self.composition.clone()
+        {
             let (start, end) = (range.start, range.start + replaced.len());
             self.replace(system, range, &replaced, |p| {
                 TextSelection::from_range(p, start, end)
             })?;
         }
-        self.end_composition();
+        self.composition = None;
+        self.shows_caret = true;
         Ok(())
     }
 
-    /// Keeps the preedit text as ordinary text.
-    fn end_composition(&mut self) {
-        self.composition = None;
+    /// Keeps the preedit text as ordinary text: an edit from then on.
+    fn keep_composition(&mut self) {
+        if let Some(c) = self.composition.take() {
+            let kept = self.text[c.range.clone()].to_owned();
+            self.record(c.range.start, c.replaced, &kept, c.before, Kind::Other);
+        }
         self.shows_caret = true;
+    }
+
+    /// The selection's ends: (anchor, focus).
+    fn ends(&self) -> (usize, usize) {
+        (self.selection.anchor(), self.selection.focus())
+    }
+
+    /// Records that `removed` at `at` became `inserted`, leaving the current selection.
+    fn record(
+        &mut self,
+        at: usize,
+        removed: String,
+        inserted: &str,
+        before: (usize, usize),
+        kind: Kind,
+    ) {
+        if removed.is_empty() && inserted.is_empty() {
+            return;
+        }
+        self.history.record(Edit {
+            at,
+            removed,
+            inserted: inserted.to_owned(),
+            before,
+            after: self.ends(),
+            kind,
+        });
     }
 
     /// Replaces `range` of the text with `with`, lays it out again and selects what

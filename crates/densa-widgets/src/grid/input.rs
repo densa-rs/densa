@@ -39,12 +39,16 @@ impl<M: GridModel> DataGrid<M> {
         let at = pointer.position;
         match pointer.kind {
             PointerKind::Scroll(delta) => self.wheel(cx, delta, pointer.modifiers.shift()),
-            PointerKind::Down(PointerButton::Primary) => self.press(cx, at, pointer.clicks),
-            // A secondary press selects its row first, so the context menu the Ui reports
-            // after it is for that row.
+            PointerKind::Down(PointerButton::Primary) => {
+                self.press(cx, at, pointer.clicks, pointer.modifiers.shift())
+            }
+            // A secondary press selects its row first (unless the row is among the selected
+            // ones), so the context menu the Ui reports after it is for what is selected.
             PointerKind::Down(PointerButton::Secondary) => match self.row_at(cx, at) {
                 Some(row) => {
-                    self.select_row(cx, row);
+                    if !self.selected_rows().contains(&row) {
+                        self.select_row(cx, row);
+                    }
                     Handled::Yes
                 }
                 None => Handled::No,
@@ -135,7 +139,7 @@ impl<M: GridModel> DataGrid<M> {
         Handled::Yes
     }
 
-    fn press(&mut self, cx: &mut EventCx<'_>, at: Point, clicks: u8) -> Handled {
+    fn press(&mut self, cx: &mut EventCx<'_>, at: Point, clicks: u8, shift: bool) -> Handled {
         let Some(frame) = self.frame(cx.rect()) else {
             return Handled::No;
         };
@@ -169,23 +173,17 @@ impl<M: GridModel> DataGrid<M> {
             }
             return Handled::Yes;
         }
-        if let Some(row) = self.row_at(cx, at) {
-            self.select_row(cx, row);
-            if clicks >= 2 {
-                cx.emit(ActionKind::Submitted);
+        match self.row_at(cx, at) {
+            Some(row) if shift => self.extend_to(cx, row),
+            Some(row) => {
+                self.select_row(cx, row);
+                if clicks >= 2 {
+                    cx.emit(ActionKind::Submitted);
+                }
             }
+            None => {}
         }
         Handled::Yes
-    }
-
-    /// Selects `row` (reporting it if it was not selected) and shows it.
-    fn select_row(&mut self, cx: &mut EventCx<'_>, row: usize) {
-        if self.selected() != Some(row) {
-            self.selected = Some(self.selection_of(row));
-            cx.emit(ActionKind::Selected(row));
-        }
-        self.reveal_row(row);
-        cx.request_paint();
     }
 
     /// Sorts by `column`: ascending first, then the other way on each click. A selection
@@ -201,6 +199,7 @@ impl<M: GridModel> DataGrid<M> {
         self.sort = Some((column, order));
         self.first_row = 0;
         self.row_rest = 0.0;
+        self.anchor = None;
         self.selected = self.selected.filter(|s| s.key.is_some());
         self.clamp();
         if let Some(row) = self.selected() {
@@ -309,19 +308,23 @@ impl<M: GridModel> DataGrid<M> {
         }
     }
 
-    /// The selection keys, Left and Right to scroll sideways, and Enter to activate the
-    /// selected row, while the grid has focus. Keys with modifiers are left to the
-    /// application (Shift is kept for extending a selection later).
+    /// The selection keys (with Shift: extending it), Ctrl+A and Ctrl+C (Cmd on macOS),
+    /// Left and Right to scroll sideways, and Enter to activate the selected row, while the
+    /// grid has focus. Other keys with modifiers are left to the application.
     fn key(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Handled {
         let m = key.modifiers;
-        if m.shift() || m.control() || m.alt() || m.logo() {
+        if let Some(handled) = self.command(cx, key) {
+            return handled;
+        }
+        if m.control() || m.alt() || m.logo() {
             return Handled::No;
         }
+        let extend = m.shift();
         let rows = self.model.rows();
         let sideways = cx.px(SIDEWAYS);
         let max_x = self.max_scroll_x(cx.rect().width());
         match key.key {
-            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight) => {
+            Key::Named(NamedKey::ArrowLeft | NamedKey::ArrowRight) if !extend => {
                 let dx = if key.key == Key::Named(NamedKey::ArrowLeft) {
                     -sideways
                 } else {
@@ -335,7 +338,7 @@ impl<M: GridModel> DataGrid<M> {
                 cx.request_paint();
                 return Handled::Yes;
             }
-            Key::Named(NamedKey::Enter) => {
+            Key::Named(NamedKey::Enter) if !extend => {
                 if self.selected().is_none() {
                     return Handled::No;
                 }
@@ -361,7 +364,39 @@ impl<M: GridModel> DataGrid<M> {
             _ => return Handled::No,
         }
         .min(rows - 1);
-        self.select_row(cx, to);
+        if extend {
+            self.extend_to(cx, to);
+        } else {
+            self.select_row(cx, to);
+        }
         Handled::Yes
+    }
+
+    /// Select all and copy: `None` for other keys.
+    fn command(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Option<Handled> {
+        let m = key.modifiers;
+        if m.alt() || m.shift() {
+            return None;
+        }
+        let copy = match key.key {
+            Key::Character(c) if m.command() && c.eq_ignore_ascii_case("a") => {
+                if self.model.rows() == 0 {
+                    return Some(Handled::No);
+                }
+                self.select_all(cx);
+                return Some(Handled::Yes);
+            }
+            Key::Character(c) => m.command() && c.eq_ignore_ascii_case("c"),
+            Key::Named(NamedKey::Insert) => m.control(),
+            _ => false,
+        };
+        if !copy {
+            return None;
+        }
+        Some(if self.copy(cx) {
+            Handled::Yes
+        } else {
+            Handled::No
+        })
     }
 }

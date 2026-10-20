@@ -9,6 +9,7 @@ use densa_paragraph::TextSystem;
 use taffy::style::AvailableSpace;
 use taffy::{TaffyResult, TaffyTree};
 
+use crate::clipboard::{Clipboard, Held};
 use crate::popup::{Incoming, Popup};
 use crate::{
     Action, Available, Constraints, Cursor, EventCx, LayoutCx, Overflow, PaintCx, PointerButton,
@@ -113,6 +114,7 @@ pub(crate) struct State {
     pub(crate) last_press: Option<Press>,
     /// Where the pointer is, if over the window: hover follows layout changes under it.
     pub(crate) pointer: Option<Point>,
+    pub(crate) clipboard: Held,
 }
 
 /// The layout tree mirrors the widget tree, so its operations only fail on ids this crate
@@ -391,6 +393,7 @@ impl Ui {
             ime_area: None,
             last_press: None,
             pointer: None,
+            clipboard: Held::default(),
         };
         for (id, taffy) in [(root, node), (layer, layer_node)] {
             let style = state.taffy_style(id);
@@ -571,6 +574,17 @@ impl Ui {
     pub fn set_theme(&mut self, theme: Theme) {
         self.state.theme = theme;
         self.restyle();
+    }
+
+    /// The clipboard widgets copy to and paste from.
+    pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+        self.state.clipboard.0.as_mut()
+    }
+
+    /// Gives widgets `clipboard` (the system's, from a window) in place of the
+    /// [`MemoryClipboard`](crate::MemoryClipboard) a `Ui` starts with.
+    pub fn set_clipboard(&mut self, clipboard: impl Clipboard + 'static) {
+        self.state.clipboard = Held(Box::new(clipboard));
     }
 
     /// Physical pixels per logical pixel.

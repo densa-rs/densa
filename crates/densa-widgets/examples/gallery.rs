@@ -1,5 +1,6 @@
 //! The standard widgets in a window: a menu bar, a toolbar, a filterable list beside a
-//! details pane in a splitter, and a status bar. Right-click a row for its context menu.
+//! details pane in a splitter, and a status bar. Right-click a row for its context menu; the
+//! Edit menu works on the filter (as do Ctrl+Z, Ctrl+X, Ctrl+C and Ctrl+V in it).
 //!
 //! `cargo run --release -p densa-widgets --example gallery` (`--light` for the light theme,
 //! `--seconds N` to close after N seconds, `--menu N` to start with menu N open, 0 for File).
@@ -39,6 +40,12 @@ const LIGHT: u32 = 10;
 const ABOUT: u32 = 20;
 const FILTER_ROW: u32 = 30;
 const REMOVE_ROW: u32 = 31;
+const COPY_ROW: u32 = 32;
+const UNDO: u32 = 40;
+const REDO: u32 = 41;
+const CUT: u32 = 42;
+const COPY: u32 = 43;
+const PASTE: u32 = 44;
 /// The first of the View > Filter commands, one per service.
 const FILTER_SERVICE: u32 = 100;
 
@@ -77,6 +84,32 @@ fn view_menu(light: bool) -> Vec<MenuItem> {
     ]
 }
 
+/// The Edit menu, for the text input with focus.
+fn edit_menu() -> [MenuItem; 6] {
+    [
+        MenuItem::new("Undo", UNDO).with_shortcut("Ctrl+Z"),
+        MenuItem::new("Redo", REDO).with_shortcut("Ctrl+Y"),
+        MenuItem::separator(),
+        MenuItem::new("Cut", CUT).with_shortcut("Ctrl+X"),
+        MenuItem::new("Copy", COPY).with_shortcut("Ctrl+C"),
+        MenuItem::new("Paste", PASTE).with_shortcut("Ctrl+V"),
+    ]
+}
+
+/// Runs an Edit menu `command` on the text input with focus, if one has it.
+fn edit(ui: &mut Ui, command: u32) {
+    let Some(focus) = ui.focus() else {
+        return;
+    };
+    ui.update::<TextInput, _>(focus, |input, cx| match command {
+        UNDO => input.undo(cx),
+        REDO => input.redo(cx),
+        CUT => input.cut(cx),
+        COPY => input.copy(cx),
+        _ => input.paste(cx),
+    });
+}
+
 /// A list row: a service, its instance and its uptime, aligned in the monospaced font.
 fn row(index: usize) -> String {
     let name = NAMES[index % NAMES.len()];
@@ -102,7 +135,7 @@ impl Gallery {
         ui.set_theme(theme);
         if let Some(ids) = self.ids {
             let items = view_menu(self.light);
-            ui.update::<MenuBar, _>(ids.menu_bar, |bar, _| bar.set_items(1, items));
+            ui.update::<MenuBar, _>(ids.menu_bar, |bar, _| bar.set_items(2, items));
         }
     }
 
@@ -152,6 +185,7 @@ impl App for Gallery {
                     MenuItem::new("Quit", QUIT),
                 ],
             )
+            .with_menu("Edit", edit_menu())
             .with_menu("View", view_menu(self.light))
             .with_menu("Help", [MenuItem::new("About densa", ABOUT)]);
         let menu_bar = ui.add(root, menu_bar, MenuBar::style())?;
@@ -228,6 +262,7 @@ impl App for Gallery {
                 self.context_row = Some(source);
                 let items = [
                     MenuItem::new("Filter by this service", FILTER_ROW),
+                    MenuItem::new("Copy row", COPY_ROW),
                     MenuItem::separator(),
                     MenuItem::new("Remove row", REMOVE_ROW),
                 ];
@@ -257,6 +292,20 @@ impl App for Gallery {
                     self.set_filter(ui, &ids, service);
                 }
             }
+            ActionKind::Command(COPY_ROW) => {
+                let text = self
+                    .context_row
+                    .and_then(|row| ui.widget::<Label>(row))
+                    .map(|label| label.text().to_owned());
+                if let Some(text) = text {
+                    let copied = match ui.clipboard().set_text(&text) {
+                        Ok(()) => "Copied the row".to_owned(),
+                        Err(error) => error.to_string(),
+                    };
+                    Self::status(ui, ids.status, copied);
+                }
+            }
+            ActionKind::Command(command @ UNDO..=PASTE) => edit(ui, command),
             ActionKind::Command(REMOVE_ROW) => {
                 if let Some(row) = self.context_row.take() {
                     ui.remove(row);

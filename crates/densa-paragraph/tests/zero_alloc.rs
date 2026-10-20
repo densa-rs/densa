@@ -111,6 +111,12 @@ fn moving_the_caret_and_querying_an_editor_perform_zero_heap_operations() {
         editor.for_each_composition_rect(|rect| {
             black_box(rect);
         });
+    });
+    assert!(stats.is_zero(), "composition queries allocated: {stats:?}");
+    // The first move keeps the preedit as text: an edit, recorded to undo.
+    editor.move_caret(Motion::Left, false);
+
+    let ((), stats) = measure(|| {
         for step in 0..1_000u32 {
             editor.move_caret(Motion::Left, step % 3 == 0);
             editor.move_caret(Motion::Down, false);

@@ -4,7 +4,7 @@ use densa_core::{Point, Rect, Size};
 use densa_paragraph::TextSystem;
 
 use crate::ui::State;
-use crate::{Action, ActionKind, Cursor, Style, Theme, WidgetId};
+use crate::{Action, ActionKind, Clipboard, Cursor, Style, Theme, WidgetId};
 
 /// What a widget gets while it measures itself or learns its size.
 #[derive(Debug)]
@@ -187,6 +187,11 @@ impl EventCx<'_> {
     /// Asks for the next frame to be painted.
     pub fn request_paint(&mut self) {
         self.state.needs_paint = true;
+    }
+
+    /// The clipboard, to copy to and paste from.
+    pub fn clipboard(&mut self) -> &mut dyn Clipboard {
+        self.state.clipboard.0.as_mut()
     }
 
     /// Asks for the widget to be measured again: its content changed size.

@@ -17,6 +17,8 @@ rust-version = "1.90"
 # Screen readers: densa-window turns densa-ui's accessibility tree into the platform's.
 accesskit = "0.25.1"
 accesskit_winit = "0.34.1"
+# Text only: its default image support would pull in the image crate.
+arboard = { version = "3.7.0", default-features = false }
 densa-alloc = { path = "crates/densa-alloc", version = "0.1.0" }
 densa-arrow = { path = "crates/densa-arrow", version = "0.1.0" }
 densa-chart = { path = "crates/densa-chart", version = "0.1.0" }

@@ -1,6 +1,8 @@
 use densa_core::{Color, Point, Rect, Size};
 use densa_draw::Canvas;
-use densa_paragraph::{Motion, ParagraphError, ParagraphStyle, TextEditor, TextSelection};
+use densa_paragraph::{
+    Motion, ParagraphError, ParagraphStyle, TextEditor, TextSelection, TextSystem,
+};
 use densa_ui::{
     AccessAction, AccessNode, AccessRequest, ActionKind, Constraints, Cursor, Event, EventCx,
     Handled, Ime, Key, KeyEvent, LayoutCx, NamedKey, PaintCx, PointerButton, PointerKind, Role,
@@ -22,6 +24,13 @@ const WIDTH: f32 = 180.0;
 /// Clicks place the caret (two select a word, three everything), dragging selects, the arrow
 /// keys and Home/End move (with Shift: select; with Ctrl, or Cmd on macOS: by word),
 /// Backspace and Delete remove characters or words, and input methods compose in place.
+///
+/// Ctrl (Cmd on macOS) with X, C and V cuts, copies and pastes through the
+/// [`Ui`](densa_ui::Ui)'s clipboard, as do Shift+Delete, Ctrl+Insert and Shift+Insert; pasted
+/// line breaks become spaces. Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes (see
+/// [`TextEditor`] for what one step is). An application's Edit menu calls the same
+/// [`cut`](Self::cut), [`copy`](Self::copy), [`paste`](Self::paste), [`undo`](Self::undo) and
+/// [`redo`](Self::redo) from an [`Ui::update`](densa_ui::Ui::update) on the input.
 #[derive(Debug)]
 pub struct TextInput {
     /// The text until the editor exists (it is created at the first layout).
@@ -77,6 +86,110 @@ impl TextInput {
         }
         self.follow_caret(cx);
         Ok(())
+    }
+
+    /// Whether text is selected, to cut or copy.
+    pub fn has_selection(&self) -> bool {
+        self.editor
+            .as_ref()
+            .is_some_and(|e| !e.selection().is_caret())
+    }
+
+    /// Whether there is an edit to [`undo`](Self::undo).
+    pub fn can_undo(&self) -> bool {
+        self.editor.as_ref().is_some_and(TextEditor::can_undo)
+    }
+
+    /// Whether there is an edit to [`redo`](Self::redo).
+    pub fn can_redo(&self) -> bool {
+        self.editor.as_ref().is_some_and(TextEditor::can_redo)
+    }
+
+    /// Puts the selected text on the clipboard; `false` if none is selected or the clipboard
+    /// would not take it.
+    pub fn copy(&mut self, cx: &mut EventCx<'_>) -> bool {
+        let Some(editor) = &self.editor else {
+            return false;
+        };
+        let selected = editor.selected_text();
+        !selected.is_empty() && cx.clipboard().set_text(selected).is_ok()
+    }
+
+    /// Copies the selected text and deletes it; nothing is deleted unless it was copied.
+    pub fn cut(&mut self, cx: &mut EventCx<'_>) -> bool {
+        self.copy(cx) && self.edit(cx, |e, s| e.delete(s, Motion::Previous).map(|()| true))
+    }
+
+    /// Replaces the selection with the clipboard's text, its line breaks made spaces; `false`
+    /// if the clipboard holds no text.
+    pub fn paste(&mut self, cx: &mut EventCx<'_>) -> bool {
+        let Ok(text) = cx.clipboard().text() else {
+            return false;
+        };
+        let line = one_line(&text);
+        !line.is_empty() && self.edit(cx, |e, s| e.paste(s, &line).map(|()| true))
+    }
+
+    /// Takes back the last edit; `false` if there is none.
+    pub fn undo(&mut self, cx: &mut EventCx<'_>) -> bool {
+        self.edit(cx, TextEditor::undo)
+    }
+
+    /// Makes the last undone edit again; `false` if there is none.
+    pub fn redo(&mut self, cx: &mut EventCx<'_>) -> bool {
+        self.edit(cx, TextEditor::redo)
+    }
+
+    /// Runs `edit` on the editor, reporting [`ActionKind::Changed`] if it changed the text.
+    fn edit(
+        &mut self,
+        cx: &mut EventCx<'_>,
+        edit: impl FnOnce(&mut TextEditor, &mut TextSystem) -> Result<bool, ParagraphError>,
+    ) -> bool {
+        let Some(editor) = &mut self.editor else {
+            return false;
+        };
+        let changed = edit(editor, cx.text_system()).unwrap_or(false);
+        if changed {
+            cx.emit(ActionKind::Changed);
+        }
+        self.follow_caret(cx);
+        changed
+    }
+
+    /// Runs the clipboard or undo command `key` asks for, if any.
+    fn command(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Option<()> {
+        let m = key.modifiers;
+        let command = match key.key {
+            Key::Character(c) if m.command() && !m.alt() => {
+                let letters = [
+                    ("x", Command::Cut),
+                    ("c", Command::Copy),
+                    ("v", Command::Paste),
+                    ("z", Command::Undo),
+                    ("y", Command::Redo),
+                ];
+                match letters
+                    .into_iter()
+                    .find(|(l, _)| c.eq_ignore_ascii_case(l))?
+                {
+                    (_, Command::Undo) if m.shift() => Command::Redo,
+                    (_, command) => command,
+                }
+            }
+            Key::Named(NamedKey::Delete) if m.shift() && !m.control() => Command::Cut,
+            Key::Named(NamedKey::Insert) if m.control() && !m.shift() => Command::Copy,
+            Key::Named(NamedKey::Insert) if m.shift() && !m.control() => Command::Paste,
+            _ => return None,
+        };
+        let _ = match command {
+            Command::Cut => self.cut(cx),
+            Command::Copy => self.copy(cx),
+            Command::Paste => self.paste(cx),
+            Command::Undo => self.undo(cx),
+            Command::Redo => self.redo(cx),
+        };
+        Some(())
     }
 
     /// The editor, created or restyled for the theme's text size and color.
@@ -181,6 +294,14 @@ impl TextInput {
     }
 
     fn key(&mut self, cx: &mut EventCx<'_>, key: &KeyEvent<'_>) -> Handled {
+        if self.editor.is_none() {
+            return Handled::No;
+        }
+        // Handled even when there is nothing to do: the keys are the input's while it has
+        // focus, not shortcuts for the application.
+        if self.command(cx, key).is_some() {
+            return Handled::Yes;
+        }
         let Some(editor) = &mut self.editor else {
             return Handled::No;
         };
@@ -266,6 +387,23 @@ impl TextInput {
         self.follow_caret(cx);
         Handled::Yes
     }
+}
+
+/// What a clipboard or undo key asks for.
+#[derive(Debug, Clone, Copy)]
+enum Command {
+    Cut,
+    Copy,
+    Paste,
+    Undo,
+    Redo,
+}
+
+/// `text` on one line: trailing line breaks dropped, the others (CR LF counting as one)
+/// made spaces.
+fn one_line(text: &str) -> String {
+    let text = text.trim_end_matches(['\r', '\n']);
+    text.replace("\r\n", " ").replace(['\r', '\n'], " ")
 }
 
 impl Widget for TextInput {

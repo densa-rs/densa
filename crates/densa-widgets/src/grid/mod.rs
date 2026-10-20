@@ -3,6 +3,7 @@
 mod access;
 mod input;
 mod paint;
+mod selection;
 
 use densa_core::{Color, Point, Rect, Size};
 use densa_draw::Canvas;
@@ -37,9 +38,11 @@ struct Selection {
 }
 
 /// A grid of rows from a [`GridModel`]: the user scrolls it (wheel, touchpad, scroll bar,
-/// keys), selects a row (click, arrow keys, Page Up and Down, Home, End), sorts it by
-/// clicking a column's title (again to reverse), and resizes columns by dragging the edges
-/// between titles. Leading columns can stay in place while the rest scroll sideways
+/// keys), selects a row (click, arrow keys, Page Up and Down, Home, End) or a range of rows
+/// (the same with Shift; Ctrl+A, or Cmd+A on macOS, for all), copies them (Ctrl+C or
+/// Ctrl+Insert, Cmd+C: tab-separated, see [`selected_text`](Self::selected_text)), sorts it
+/// by clicking a column's title (again to reverse), and resizes columns by dragging the
+/// edges between titles. Leading columns can stay in place while the rest scroll sideways
 /// ([`with_frozen_columns`](Self::with_frozen_columns)).
 ///
 /// Only the rows on screen are asked of the model, each frame, and painting allocates nothing
@@ -48,9 +51,11 @@ struct Selection {
 /// which repaints it. The grid follows the model's [`GridModel::columns_revision`] and
 /// [`GridModel::generation`] each frame.
 ///
-/// A selection is a row, kept on its record while rows move if the model gives rows keys
-/// ([`GridModel::row_key`]) and cleared when its record is removed or filtered out (as in
-/// Qt's proxy models); without keys, sorting clears it. It reports
+/// The selected row (and a range's other end) is kept on its record while rows move if the
+/// model gives rows keys ([`GridModel::row_key`]) and cleared when its record is removed or
+/// filtered out (as in Qt's proxy models); without keys, sorting clears it. Sorting makes a
+/// range one row again, and a range covers the rows between its ends as they stand. It
+/// reports
 /// [`ActionKind::Selected`](densa_ui::ActionKind::Selected) with the row when the user
 /// selects one, [`ActionKind::Submitted`](densa_ui::ActionKind::Submitted) when they activate
 /// it (Enter, a double click), and [`ActionKind::Changed`](densa_ui::ActionKind::Changed) when
@@ -69,6 +74,8 @@ pub struct DataGrid<M> {
     /// How far the unfrozen columns are scrolled sideways, in physical pixels.
     scroll_x: f32,
     selected: Option<Selection>,
+    /// Where a range of selected rows started (Shift), the selected row being its other end.
+    anchor: Option<Selection>,
     /// The sort a click made, for models that do not report theirs.
     sort: Option<(usize, SortOrder)>,
     drag: Option<Drag>,
@@ -92,6 +99,7 @@ impl<M: GridModel> DataGrid<M> {
             row_rest: 0.0,
             scroll_x: 0.0,
             selected: None,
+            anchor: None,
             sort: None,
             drag: None,
             built: None,
@@ -141,8 +149,9 @@ impl<M: GridModel> DataGrid<M> {
         self.selected.map(|s| s.row)
     }
 
-    /// Selects `row` (none for `None`) and scrolls it into view.
+    /// Selects `row` alone (none for `None`) and scrolls it into view.
     pub fn select(&mut self, cx: &mut EventCx<'_>, row: Option<usize>) {
+        self.anchor = None;
         self.selected = row
             .filter(|r| *r < self.model.rows())
             .map(|row| self.selection_of(row));
@@ -241,6 +250,7 @@ impl<M: GridModel> DataGrid<M> {
         }
         if generation != self.revisions.1 {
             self.selected = None;
+            self.anchor = None;
             self.sort = None;
             self.drag = None;
             self.first_row = 0;
@@ -251,18 +261,26 @@ impl<M: GridModel> DataGrid<M> {
     }
 
     /// Keeps the selection on its record, and the scroll within the rows and columns there
-    /// are.
+    /// are. A range whose start is gone is the selected row alone.
     fn clamp(&mut self) {
-        let rows = self.model.rows();
-        self.selected = self.selected.and_then(|s| match s.key {
-            Some(key) => self.model.row_of_key(key).map(|row| Selection { row, ..s }),
-            None => Some(s),
-        });
-        self.selected = self.selected.filter(|s| s.row < rows);
+        self.selected = self.selected.and_then(|s| self.find(s));
+        self.anchor = self
+            .anchor
+            .and_then(|s| self.find(s))
+            .filter(|_| self.selected.is_some());
         self.first_row = self.first_row.min(self.last_first_row());
         if let Some((size, _, _)) = self.built {
             self.scroll_x = self.scroll_x.clamp(0.0, self.max_scroll_x(size.width));
         }
+    }
+
+    /// Where `selection`'s record is now, if it is still within the rows.
+    fn find(&self, selection: Selection) -> Option<Selection> {
+        let row = match selection.key {
+            Some(key) => self.model.row_of_key(key)?,
+            None => selection.row,
+        };
+        (row < self.model.rows()).then_some(Selection { row, ..selection })
     }
 
     /// The painter for `size` at `px`, or none if the bundled font cannot be read.
@@ -306,12 +324,12 @@ fn palette(theme: &Theme) -> Palette {
     palette
 }
 
-/// The rows on screen, as the painter reads them: from the first row, the selected one
+/// The rows on screen, as the painter reads them: from the first row, the selected ones
 /// highlighted where the model draws no fill of its own (a flash stays visible).
 struct Shown<'a, M> {
     model: &'a M,
     first: usize,
-    selected: Option<usize>,
+    selected: std::ops::Range<usize>,
     highlight: Color,
     palette: Palette,
 }
@@ -324,7 +342,7 @@ impl<M: GridModel> GridSource for Shown<'_, M> {
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle {
         let row = self.first + row;
         let style = self.model.cell(row, column, text, &self.palette);
-        if self.selected == Some(row) && style.background.is_none() {
+        if self.selected.contains(&row) && style.background.is_none() {
             return style.with_background(self.highlight);
         }
         style

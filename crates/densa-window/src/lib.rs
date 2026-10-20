@@ -36,6 +36,7 @@
 //! ```
 
 mod access;
+mod clipboard;
 mod gpu;
 mod translate;
 
@@ -331,6 +332,7 @@ impl<A: App> Shell<A> {
         let text = TextSystem::new().map_err(|e| WindowError::Text(e.to_string()))?;
         let mut ui = Ui::new(text);
         ui.set_theme(self.options.theme.clone());
+        ui.set_clipboard(clipboard::SystemClipboard::default());
         ui.set_scale(window.scale_factor() as f32);
         let inner = window.inner_size();
         ui.resize(Size::new(inner.width as f32, inner.height as f32));

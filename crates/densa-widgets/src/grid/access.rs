@@ -2,9 +2,7 @@
 
 use densa_core::Rect;
 use densa_grid::{CellText, GridModel, SortOrder};
-use densa_ui::{
-    AccessAction, AccessNode, AccessRequest, ActionKind, EventCx, Handled, PaintCx, Role,
-};
+use densa_ui::{AccessAction, AccessNode, AccessRequest, EventCx, Handled, PaintCx, Role};
 
 use super::DataGrid;
 
@@ -122,7 +120,7 @@ impl<M: GridModel> DataGrid<M> {
                 frame.rect.right(),
                 bottom,
             ));
-            item.set_selected(self.selected() == Some(row));
+            item.set_selected(self.selected_rows().contains(&row));
             item.add_action(AccessAction::Click);
             item.add_action(AccessAction::ScrollIntoView);
             for column in 0..count {
@@ -160,12 +158,7 @@ impl<M: GridModel> DataGrid<M> {
         };
         match request.action {
             AccessAction::Click => {
-                if self.selected() != Some(row) {
-                    self.selected = Some(self.selection_of(row));
-                    cx.emit(ActionKind::Selected(row));
-                }
-                self.reveal_row(row);
-                cx.request_paint();
+                self.select_row(cx, row);
                 Handled::Yes
             }
             AccessAction::ScrollIntoView => {
