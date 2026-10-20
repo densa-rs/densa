@@ -269,7 +269,7 @@ paint_line(&mut canvas, &plot, &readings[..], LineStyle::new(Color::WHITE));
 
 `ChartPainter` adds gridlines, tick labels and a crosshair; `paint_candles` and `paint_bars`
 draw candlesticks and volume. In a window, implement `ChartModel` (stacked panes on one time
-axis, each named in its corner if you give it a title) and give it to the `Chart` widget, which follows new data, zooms with the wheel and
+axis, each named above it if you give it a title) and give it to the `Chart` widget, which follows new data, zooms with the wheel and
 pans by dragging: see the [`chart` example](crates/densa-widgets/examples/chart.rs).
 For live data, `densa_arrow::LiveSeries` reads two numeric columns of a live table's view
 (numbers, timestamps, dates) as a series, so a chart keeps up with the same table a grid
