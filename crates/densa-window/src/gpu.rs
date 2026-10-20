@@ -9,7 +9,22 @@ use densa_text::GlyphCache;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-use crate::WindowError;
+use crate::{Backend, WindowError};
+
+/// The graphics APIs `backend` names, unless `from_env` (`WGPU_BACKEND`, read by the caller)
+/// names others: the variable stays the way to try another API without rebuilding.
+pub(crate) fn backends(backend: Backend, from_env: Option<wgpu::Backends>) -> wgpu::Backends {
+    if let Some(chosen) = from_env.filter(|b| !b.is_empty()) {
+        return chosen;
+    }
+    match backend {
+        Backend::Auto => wgpu::Backends::all(),
+        Backend::Vulkan => wgpu::Backends::VULKAN,
+        Backend::Metal => wgpu::Backends::METAL,
+        Backend::Dx12 => wgpu::Backends::DX12,
+        Backend::Gl => wgpu::Backends::GL,
+    }
+}
 
 pub(crate) struct Gpu {
     surface: wgpu::Surface<'static>,
@@ -22,17 +37,38 @@ pub(crate) struct Gpu {
 
 impl Gpu {
     /// A surface on `window`, presenting with V-Sync, and a renderer drawing up to
-    /// `instances` rectangles and glyphs a frame. Limits `cache` to the GPU's texture size.
+    /// `instances` rectangles and glyphs a frame, through `backend` (or what `WGPU_BACKEND`
+    /// names). When those give no device, every API is tried before giving up. Limits
+    /// `cache` to the GPU's texture size.
     pub(crate) fn new(
         event_loop: &ActiveEventLoop,
         window: &Arc<Window>,
         instances: usize,
         cache: &mut GlyphCache,
+        backend: Backend,
+    ) -> Result<Self, WindowError> {
+        let chosen = backends(backend, wgpu::Backends::from_env());
+        match Self::open(event_loop, window, instances, cache, chosen) {
+            Err(_) if chosen != wgpu::Backends::all() => {
+                Self::open(event_loop, window, instances, cache, wgpu::Backends::all())
+            }
+            opened => opened,
+        }
+    }
+
+    fn open(
+        event_loop: &ActiveEventLoop,
+        window: &Arc<Window>,
+        instances: usize,
+        cache: &mut GlyphCache,
+        backends: wgpu::Backends,
     ) -> Result<Self, WindowError> {
         let gpu = |e: &dyn std::fmt::Display| WindowError::Gpu(e.to_string());
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_with_display_handle(
-            Box::new(event_loop.owned_display_handle()),
+        let mut descriptor = wgpu::InstanceDescriptor::new_with_display_handle(Box::new(
+            event_loop.owned_display_handle(),
         ));
+        descriptor.backends = backends;
+        let instance = wgpu::Instance::new(descriptor);
         let surface = instance
             .create_surface(Arc::clone(window))
             .map_err(|e| gpu(&e))?;
@@ -127,5 +163,44 @@ impl Gpu {
         window.pre_present_notify();
         self.queue.present(frame);
         Ok(true)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_backend_names_its_api_and_auto_names_every_one() {
+        assert_eq!(backends(Backend::Auto, None), wgpu::Backends::all());
+        assert_eq!(backends(Backend::Vulkan, None), wgpu::Backends::VULKAN);
+        assert_eq!(backends(Backend::Metal, None), wgpu::Backends::METAL);
+        assert_eq!(backends(Backend::Dx12, None), wgpu::Backends::DX12);
+        assert_eq!(backends(Backend::Gl, None), wgpu::Backends::GL);
+    }
+
+    #[test]
+    fn the_environment_overrides_the_application_unless_it_names_nothing() {
+        let from_env = Some(wgpu::Backends::VULKAN | wgpu::Backends::GL);
+
+        assert_eq!(
+            backends(Backend::Dx12, from_env),
+            wgpu::Backends::VULKAN | wgpu::Backends::GL
+        );
+        assert_eq!(
+            backends(Backend::Gl, Some(wgpu::Backends::empty())),
+            wgpu::Backends::GL
+        );
+    }
+
+    #[test]
+    fn a_window_draws_with_the_api_its_options_name() {
+        assert_eq!(crate::WindowOptions::new("t").backend, Backend::Auto);
+        assert_eq!(
+            crate::WindowOptions::new("t")
+                .with_backend(Backend::Gl)
+                .backend,
+            Backend::Gl
+        );
     }
 }
