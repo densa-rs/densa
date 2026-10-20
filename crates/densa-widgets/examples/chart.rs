@@ -186,7 +186,7 @@ impl ChartModel for Market {
 
     fn pane_title(&self, pane: usize) -> &str {
         if pane == 0 {
-            "One-minute candles, 20-minute average"
+            "1 min, average of 20"
         } else {
             "Volume"
         }

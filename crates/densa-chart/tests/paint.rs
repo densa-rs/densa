@@ -346,27 +346,48 @@ fn axes_draw_gridlines_edges_and_labels_outside_the_plot() {
 
 #[test]
 fn a_title_is_written_in_the_top_left_corner_on_the_background() {
-    let mut painter = painter();
-    let palette = *painter.palette();
-    let area = Rect::new(20.0, 10.0, 300.0, 200.0);
-    let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
-    let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "Volume"));
+    let cases = [
+        (13.0, 20.0, 10.0),
+        (10.0, 20.4, 10.6),
+        (17.0, 3.5, 0.2),
+        (26.0, 0.0, 0.0),
+    ];
+    for (px, left, top) in cases {
+        let font = Font::bundled_mono().unwrap();
+        let mut painter = ChartPainter::new(font, px, ChartPalette::new());
+        let palette = *painter.palette();
+        let area = Rect::from_edges(left, top, 300.0, 200.0);
+        let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
+        let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "Volume (gq)"));
 
-    let backing = &instances[0];
-    assert!(!backing.is_glyph());
-    assert_eq!(backing.color, palette.background.to_array());
-    assert_eq!(
-        (backing.rect[0], backing.rect[1]),
-        (21.0, 11.0),
-        "inside the edges"
-    );
-    let glyphs: Vec<&Instance> = instances.iter().filter(|i| i.is_glyph()).collect();
-    assert_eq!(glyphs.len(), 6);
-    assert!(glyphs.iter().all(|g| g.color == palette.label.to_array()));
-    for glyph in &glyphs {
-        let (x, y) = (glyph.rect[0], glyph.rect[1]);
-        assert!(x > backing.rect[0] && x + glyph.rect[2] <= backing.rect[0] + backing.rect[2]);
-        assert!(y >= backing.rect[1] && y + glyph.rect[3] <= backing.rect[1] + backing.rect[3]);
+        let backing = &instances[0];
+        assert!(!backing.is_glyph());
+        assert_eq!(backing.color, palette.background.to_array());
+        let corner = ((left + 1.0).round(), (top + 1.0).round());
+        assert_eq!(
+            (backing.rect[0], backing.rect[1]),
+            corner,
+            "inside the edges, {px} px"
+        );
+        assert!(
+            backing.rect.iter().all(|v| v.fract() == 0.0),
+            "whole pixels: {backing:?}"
+        );
+        let glyphs: Vec<&Instance> = instances.iter().filter(|i| i.is_glyph()).collect();
+        assert_eq!(glyphs.len(), 10, "every character but the space");
+        assert!(glyphs.iter().all(|g| g.color == palette.label.to_array()));
+        let [bx, by, bw, bh] = backing.rect;
+        for glyph in &glyphs {
+            let [x, y, w, h] = glyph.rect;
+            assert!(
+                x > bx && x + w <= bx + bw,
+                "{px} px: {glyph:?} across {backing:?}"
+            );
+            assert!(
+                y >= by && y + h <= by + bh,
+                "{px} px: {glyph:?} down {backing:?}"
+            );
+        }
     }
 }
 

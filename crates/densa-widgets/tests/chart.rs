@@ -537,15 +537,24 @@ fn each_pane_has_its_title_in_its_top_left_corner() {
     }
 
     let mut line = Line::new(200);
+    // Titles without spaces: one glyph per character.
     line.titles = ["Price", "Volume"];
     let (mut ui, id) = chart(line);
     let titled = paint(&mut ui);
+    let background = Theme::dark().surface.to_array();
     for (pane, title) in [(0, "Price"), (1, "Volume")] {
-        let glyphs = glyphs_in(&titled, &plot(&ui, id, pane));
+        let plot = plot(&ui, id, pane);
+        let glyphs = glyphs_in(&titled, &plot);
         assert_eq!(glyphs.len(), title.len(), "pane {pane}");
         assert!(
             glyphs.iter().all(|&(x, y)| x < 80.0 && y < 20.0),
             "{glyphs:?}"
         );
+        let corner = [plot.area().x0 + 1.0, plot.area().y0 + 1.0];
+        let backing = titled
+            .iter()
+            .filter(|i| !i.is_glyph() && i.color == background)
+            .any(|i| i.rect[..2] == corner);
+        assert!(backing, "pane {pane} has a box under its title");
     }
 }

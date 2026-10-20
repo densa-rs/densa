@@ -241,13 +241,11 @@ impl ChartPainter {
         let palette = self.palette;
         let outside = canvas.state();
         canvas.clip(area);
+        // One whole-pixel corner for the box and the text, so they line up at any size.
+        let (x, y) = ((area.x0 + 1.0).round(), (area.y0 + 1.0).round());
         let width = (self.glyphs.measure(title) + 2.0 * pad).round();
-        let backing = Rect::new(area.x0 + 1.0, area.y0 + 1.0, width, line);
-        canvas.fill_rect(backing, palette.background);
-        let at = Point::new(
-            area.x0 + 1.0 + pad,
-            (area.y0 + 1.0 + metrics.ascent).round(),
-        );
+        canvas.fill_rect(Rect::new(x, y, width, line), palette.background);
+        let at = Point::new(x + pad, y + metrics.ascent.round());
         draw_text(&mut self.glyphs, canvas, title, at, palette.label);
         canvas.restore(outside);
     }
