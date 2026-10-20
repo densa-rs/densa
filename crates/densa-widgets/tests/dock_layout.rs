@@ -4,8 +4,8 @@ use densa_core::Size;
 use densa_paragraph::TextSystem;
 use densa_ui::{Ui, UiError, WidgetId};
 use densa_widgets::{
-    DockArea, DockAt, DockAxis, DockLayout, DockLayoutError, DockPanel, DockSide, Panel,
-    MAX_LAYOUT_DEPTH,
+    DockArea, DockAt, DockAxis, DockLayout, DockLayoutError, DockLayoutErrorKind, DockPanel,
+    DockSide, Panel, MAX_LAYOUT_DEPTH,
 };
 
 fn empty_dock() -> (Ui, WidgetId) {
@@ -135,7 +135,12 @@ fn ratios_are_restored_and_kept_within_bounds() {
     ui.layout();
     let (left, right) = (ui.rect(orders).unwrap(), ui.rect(chart).unwrap());
     assert!(left.width() > 2.5 * right.width(), "{left:?} {right:?}");
-    for (ratio, kept) in [(f32::NAN, 0.5), (2.0, 1.0), (-1.0, 0.0)] {
+    for (ratio, kept) in [
+        (f32::NAN, 0.5),
+        (2.0, 1.0 - 0.01),
+        (-1.0, 0.01),
+        (0.0, 0.01),
+    ] {
         let odd = split(
             DockAxis::Column,
             ratio,
@@ -300,73 +305,65 @@ fn error(text: &str) -> DockLayoutError {
 
 #[test]
 fn malformed_layouts_say_where_and_why() {
-    let cases: [(&str, usize, &str); 17] = [
-        ("", 0, "not a densa dock layout (version 1)"),
-        (
-            "densa-dock 2 (tabs 0 \"a\")",
-            0,
-            "not a densa dock layout (version 1)",
-        ),
-        (
-            "densa-dock 1(tabs 0 \"a\")",
-            12,
-            "not a densa dock layout (version 1)",
-        ),
-        ("densa-dock 1", 12, "not a densa dock layout (version 1)"),
-        ("densa-dock 1 ", 13, "expected `(`"),
-        ("densa-dock 1 tabs", 13, "expected `(`"),
-        (
-            "densa-dock 1 (grid 0)",
-            14,
-            "expected `row`, `column` or `tabs`",
-        ),
+    use DockLayoutErrorKind::*;
+    let cases = [
+        ("", 0, NotALayout),
+        ("densa-dock", 10, NotALayout),
+        ("densa-dock 2 (tabs 0 \"a\")", 11, UnsupportedVersion),
+        ("densa-dock 12 (tabs 0 \"a\")", 11, UnsupportedVersion),
+        ("densa-dock x (tabs 0 \"a\")", 11, NotALayout),
+        ("densa-dock 1(tabs 0 \"a\")", 11, NotALayout),
+        ("densa-dock 1", 11, NotALayout),
+        ("densa-dock 1 ", 13, ExpectedOpen),
+        ("densa-dock 1 tabs", 13, ExpectedOpen),
+        ("densa-dock 1 (grid 0)", 14, ExpectedNode),
         (
             "densa-dock 1 (row 1.5 (tabs 0 \"a\") (tabs 0 \"b\"))",
             18,
-            "expected a ratio from 0 to 1",
+            BadRatio,
         ),
         (
             "densa-dock 1 (row NaN (tabs 0 \"a\") (tabs 0 \"b\"))",
             18,
-            "expected a ratio from 0 to 1",
+            BadRatio,
         ),
-        ("densa-dock 1 (row 0.5 (tabs 0 \"a\"))", 34, "expected `(`"),
-        (
-            "densa-dock 1 (tabs x \"a\")",
-            19,
-            "expected the shown tab's position",
-        ),
-        (
-            "densa-dock 1 (tabs 1 \"a\")",
-            19,
-            "a group must show one of its panels",
-        ),
-        (
-            "densa-dock 1 (tabs 0)",
-            19,
-            "a group must show one of its panels",
-        ),
-        (
-            "densa-dock 1 (tabs 0 \"a)",
-            24,
-            "a key without its closing quote",
-        ),
-        (
-            "densa-dock 1 (tabs 0 \"a\\n\")",
-            23,
-            "only `\\\"` and `\\\\` are escapes",
-        ),
-        ("densa-dock 1 (tabs 0 \"a\" 7)", 25, "expected `)`"),
-        ("densa-dock 1 (tabs 0 \"a\") x", 26, "text after the layout"),
+        ("densa-dock 1 (row 0.5 (tabs 0 \"a\"))", 34, ExpectedOpen),
+        ("densa-dock 1 (tabs x \"a\")", 19, BadShown),
+        ("densa-dock 1 (tabs 1 \"a\")", 19, ShownMissing),
+        ("densa-dock 1 (tabs 0)", 19, ShownMissing),
+        ("densa-dock 1 (tabs 0 \"a)", 24, UnclosedKey),
+        ("densa-dock 1 (tabs 0 \"a\\n\")", 23, BadEscape),
+        ("densa-dock 1 (tabs 0 \"a\" 7)", 25, ExpectedClose),
+        ("densa-dock 1 (tabs 0 \"a\") x", 26, TrailingText),
+        // Offsets count bytes: "订单" is six.
+        ("densa-dock 1 (tabs 0 \"订单\" x)", 30, ExpectedClose),
     ];
-    for (text, at, reason) in cases {
+    for (text, at, kind) in cases {
         let error = error(text);
-        assert_eq!((error.at, error.reason), (at, reason), "{text:?}");
+        assert_eq!((error.at, error.kind), (at, kind), "{text:?}");
     }
     assert_eq!(
         error("densa-dock 1 ").to_string(),
         "invalid dock layout at byte 13: expected `(`"
     );
+    assert_eq!(
+        error("densa-dock 2 x").to_string(),
+        "invalid dock layout at byte 11: a dock layout of a later version"
+    );
+    for kind in [
+        NotALayout,
+        ExpectedClose,
+        ExpectedNode,
+        BadShown,
+        ShownMissing,
+        UnclosedKey,
+        BadEscape,
+        TooDeep,
+        TrailingText,
+    ] {
+        assert!(!kind.to_string().is_empty());
+    }
+    assert_eq!(BadEscape.to_string(), "only `\\\"` and `\\\\` are escapes");
     // Space around the layout is fine.
     assert!(format!("  {WORKSPACE}\n").parse::<DockLayout>().is_ok());
 }
@@ -386,19 +383,143 @@ fn nested(depth: usize) -> String {
 fn splits_nest_only_so_deep() {
     assert!(nested(MAX_LAYOUT_DEPTH).parse::<DockLayout>().is_ok());
     let deep = error(&nested(MAX_LAYOUT_DEPTH + 1));
-    assert_eq!(deep.reason, "splits nested too deeply");
-    // Built in code instead: the levels past the limit are passed over.
+    assert_eq!(deep.kind, DockLayoutErrorKind::TooDeep);
+    // Built in code instead: the levels past the limit are passed over, and their panels
+    // join the first group with the rest.
     let (mut ui, dock) = empty_dock();
     let a = keyed(&mut ui, dock, "a", DockAt::First);
-    let mut layout = tabs(&["a"], 0);
+    let b = keyed(&mut ui, dock, "b", DockAt::Beside(a, DockSide::Right));
+    let mut layout = split(DockAxis::Row, 0.5, tabs(&["a"], 0), tabs(&["b"], 0));
     for _ in 0..1_000 {
         layout = split(DockAxis::Row, 0.5, tabs(&["none"], 0), layout);
     }
     DockArea::restore_layout(&mut ui, dock, &layout).unwrap();
-    assert!(
-        area(&ui, dock).is_shown(a),
-        "placed with the panels left over"
+    let together: Vec<WidgetId> = area(&ui, dock).tabs_with(a).collect();
+    assert_eq!(together, [a, b]);
+}
+
+#[test]
+fn a_dock_split_too_deeply_saves_its_deepest_groups_as_one() {
+    let (mut ui, dock) = empty_dock();
+    let mut panels = vec![keyed(&mut ui, dock, "p0", DockAt::First)];
+    for i in 1..80 {
+        let last = *panels.last().unwrap();
+        let side = if i % 2 == 0 {
+            DockSide::Right
+        } else {
+            DockSide::Bottom
+        };
+        panels.push(keyed(
+            &mut ui,
+            dock,
+            &format!("p{i}"),
+            DockAt::Beside(last, side),
+        ));
+    }
+    let saved = area(&ui, dock).layout().unwrap();
+    let read: DockLayout = saved.to_string().parse().expect("within the depth limit");
+    assert_eq!(read, saved);
+    DockArea::restore_layout(&mut ui, dock, &read).unwrap();
+    assert_eq!(area(&ui, dock).panels().count(), 80, "every panel kept");
+    assert_eq!(area(&ui, dock).group_count(), MAX_LAYOUT_DEPTH + 1);
+    let last: Vec<WidgetId> = area(&ui, dock).tabs_with(panels[79]).collect();
+    assert_eq!(
+        last,
+        panels[MAX_LAYOUT_DEPTH..],
+        "the deepest groups as one"
     );
+    assert!(area(&ui, dock).is_shown(panels[MAX_LAYOUT_DEPTH]));
+}
+
+#[test]
+fn negative_zero_is_written_as_zero() {
+    let layout = split(DockAxis::Row, -0.0, tabs(&["a"], 0), tabs(&["b"], 0));
+    assert!(layout.to_string().contains("(row 0 "), "{layout}");
+}
+
+#[test]
+fn restoring_ends_a_drag_and_keeps_the_keyboard_on_its_panel() {
+    use densa_core::Point;
+    use densa_ui::{Cursor, Key, KeyEvent, NamedKey, PointerButton, PointerEvent, PointerKind};
+    let (mut ui, dock, [orders, trades, chart, log]) = workspace();
+    let saved = area(&ui, dock).layout().unwrap();
+    // Drag Chart's tab toward Orders' group, and restore halfway.
+    let rect = ui.rect(dock).unwrap();
+    let tab = area(&ui, dock).tab_rect(chart, rect, 1.0).unwrap();
+    let from = Point::new(tab.left() + 5.0, tab.top() + 5.0);
+    ui.pointer(PointerEvent::new(
+        PointerKind::Down(PointerButton::Primary),
+        from,
+    ));
+    for to in [
+        Point::new(from.x + 30.0, from.y + 30.0),
+        Point::new(100.0, 300.0),
+    ] {
+        ui.pointer(PointerEvent::new(PointerKind::Move, to));
+    }
+    assert_ne!(ui.cursor(), Cursor::Default, "dragging");
+    DockArea::restore_layout(&mut ui, dock, &saved).unwrap();
+    assert_eq!(
+        ui.cursor(),
+        Cursor::Default,
+        "the drag's cursor went with it"
+    );
+    ui.pointer(PointerEvent::new(
+        PointerKind::Up(PointerButton::Primary),
+        Point::new(100.0, 300.0),
+    ));
+    ui.layout();
+    assert_eq!(
+        area(&ui, dock).layout().unwrap(),
+        saved,
+        "the drop moved nothing"
+    );
+    // The keyboard was on Chart's group: after a restore that moves it, it still is.
+    ui.set_focus(Some(dock));
+    let swapped = split(
+        DockAxis::Row,
+        0.5,
+        split(
+            DockAxis::Column,
+            0.5,
+            tabs(&["chart"], 0),
+            tabs(&["log"], 0),
+        ),
+        tabs(&["orders", "trades"], 0),
+    );
+    DockArea::restore_layout(&mut ui, dock, &swapped).unwrap();
+    ui.key(&KeyEvent::down(Key::Named(NamedKey::ArrowRight)));
+    assert!(
+        area(&ui, dock).is_shown(chart),
+        "a one-tab group: nothing to move to"
+    );
+    let _ = (orders, trades, log);
+}
+
+#[test]
+fn panels_removed_from_the_ui_are_forgotten_before_restoring() {
+    let (mut ui, dock, [orders, trades, _, _]) = workspace();
+    let saved = area(&ui, dock).layout().unwrap();
+    ui.remove(trades);
+    DockArea::restore_layout(&mut ui, dock, &saved).unwrap();
+    ui.layout();
+    assert_eq!(area(&ui, dock).panels().count(), 3);
+    assert!(
+        area(&ui, dock).is_shown(orders),
+        "Trades was shown; Orders is all that is left"
+    );
+    let expected = split(
+        DockAxis::Row,
+        0.5,
+        tabs(&["orders"], 0),
+        split(
+            DockAxis::Column,
+            0.5,
+            tabs(&["chart"], 0),
+            tabs(&["log"], 0),
+        ),
+    );
+    assert_eq!(area(&ui, dock).layout().unwrap(), expected);
 }
 
 #[test]

@@ -80,7 +80,7 @@ git clone https://github.com/densa-rs/densa
 cd densa
 cargo run --release -p densa-widgets --example monitor      # a live fleet monitor: grid and chart
 cargo run --release -p densa-widgets --example gallery      # widgets in a window
-cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid
+cargo run --release -p densa-widgets --example dock         # a docking workspace, live grid (--layout FILE saves it)
 cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
 cargo run --release -p densa-widgets --example chart        # live candles, volume, pan and zoom
 cargo run --release -p densa-widgets --example linked       # a grid and a chart over live tables
@@ -115,7 +115,7 @@ densa-window = "0.1"
 | [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
-| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
+| [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking with saved layouts, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
 | [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
@@ -391,8 +391,8 @@ all, so measure on the machines you target.
   readers. The grid selects a row or a range of rows (kept on their records when the model
   gives rows keys) and copies them as tab-separated text; it does not yet select cells or
   scattered rows, paste or edit. On Linux the clipboard goes through X11 (XWayland under
-  Wayland). Docking does not yet save and restore layouts (panels already carry stable keys
-  for it) or float panels in their own windows.
+  Wayland). Docking saves and restores layouts by panel key, but does not yet float panels
+  in their own windows.
 - **Charts:** lines, candlesticks and bars on number and time axes (UTC: no time zones yet),
   in stacked panes, fed from your data or a live table's view. Not there yet: logarithmic
   axes, area fills, annotations and drawing tools, several y axes in one pane, and candles

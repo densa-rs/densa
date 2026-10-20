@@ -13,7 +13,9 @@ use densa_ui::{
     PointerButton, PointerKind, Style, Ui, UiError, Widget, WidgetId,
 };
 
-pub use self::layout::{DockAxis, DockLayout, DockLayoutError, MAX_LAYOUT_DEPTH};
+pub use self::layout::{
+    DockAxis, DockLayout, DockLayoutError, DockLayoutErrorKind, MAX_LAYOUT_DEPTH,
+};
 
 use self::geometry::{bar, beside, content_style, divider_rect, group_rect, hairline};
 use crate::paint::{centered, outline};
@@ -70,7 +72,8 @@ impl DockPanel {
         }
     }
 
-    /// The panel with `key`.
+    /// The panel with `key`. Give each panel its own key: panels sharing one take each
+    /// other's places in turn when a layout is restored.
     #[must_use]
     pub fn with_key(mut self, key: impl Into<String>) -> Self {
         self.key = Some(key.into());
@@ -210,6 +213,10 @@ enum Found {
 /// goes inside a panel rather than the panel itself, and leave the dock's own padding at
 /// zero. A hidden panel keeps its state, scroll positions included. Give the dock
 /// [`DockArea::style`].
+///
+/// The arrangement of panels added with keys ([`DockPanel::with_key`]) is saved with
+/// [`DockArea::layout`] and put back, in this run or the next, with
+/// [`DockArea::restore_layout`]; a [`DockLayout`] reads and writes itself as a line of text.
 ///
 /// ```
 /// use densa_core::Size;

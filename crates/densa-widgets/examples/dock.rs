@@ -8,7 +8,7 @@
 
 use std::error::Error;
 use std::fmt::Write as _;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use densa_core::Point;
@@ -291,13 +291,14 @@ impl App for Workspace {
         let Some(area) = ui.widget::<DockArea>(dock) else {
             return;
         };
-        let saved =
-            self.layout_file.as_ref().zip(area.layout()).map(
-                |(file, layout)| match std::fs::write(file, layout.to_string()) {
-                    Ok(()) => String::from(", saved"),
-                    Err(error) => format!(", not saved: {error}"),
-                },
-            );
+        let saved = self
+            .layout_file
+            .as_ref()
+            .zip(area.layout())
+            .map(|(file, layout)| match save_layout(file, &layout) {
+                Ok(()) => String::from(", saved"),
+                Err(error) => format!(", not saved: {error}"),
+            });
         let text = match action.kind {
             ActionKind::Selected(index) => {
                 let title = area.panels().nth(index).and_then(|p| area.title(p));
@@ -336,25 +337,36 @@ impl App for Workspace {
 }
 
 impl Workspace {
-    /// Arranges the dock as the layout file says, if there is one: what to tell the user.
-    fn read_layout(&self, ui: &mut Ui) -> Option<String> {
-        let file = self.layout_file.as_ref()?;
-        let text = match std::fs::read_to_string(file) {
-            Ok(text) => text,
+    /// Arranges the dock as the layout file says, if there is one: what to tell the user. A
+    /// file that cannot be read or restored is left alone, and changes are not saved over it.
+    fn read_layout(&mut self, ui: &mut Ui) -> Option<String> {
+        let file = self.layout_file.clone()?;
+        let restored = match std::fs::read_to_string(&file) {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-            Err(error) => return Some(format!("Layout not read: {error}")),
+            Err(error) => Err(error.to_string()),
+            Ok(text) => text
+                .parse::<DockLayout>()
+                .map_err(|e| e.to_string())
+                .and_then(|layout| {
+                    let dock = self.dock.ok_or("no dock")?;
+                    DockArea::restore_layout(ui, dock, &layout).map_err(|e| e.to_string())
+                }),
         };
-        match text.parse::<DockLayout>() {
-            Ok(layout) => {
-                let restored = DockArea::restore_layout(ui, self.dock?, &layout);
-                Some(match restored {
-                    Ok(()) => format!("Layout restored from {}", file.display()),
-                    Err(error) => format!("Layout not restored: {error}"),
-                })
+        Some(match restored {
+            Ok(()) => format!("Layout restored from {}", file.display()),
+            Err(error) => {
+                self.layout_file = None;
+                format!("Layout not restored ({error}); changes will not be saved")
             }
-            Err(error) => Some(format!("Layout not restored: {error}")),
-        }
+        })
     }
+}
+
+/// Writes `layout` to `file` through a file beside it, so a crash midway leaves the old one.
+fn save_layout(file: &Path, layout: &DockLayout) -> std::io::Result<()> {
+    let partial = file.with_extension("partial");
+    std::fs::write(&partial, layout.to_string())?;
+    std::fs::rename(&partial, file)
 }
 
 /// Where `--demo` presses (the Screener tab) and where it holds the tab (near the right edge
@@ -388,6 +400,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .nth(1)
         .map(|s| s.parse::<u64>())
         .transpose()?;
+    let layout_file = match args.iter().position(|a| a == "--layout") {
+        Some(at) => match args.get(at + 1).filter(|a| !a.starts_with("--")) {
+            Some(file) => Some(PathBuf::from(file)),
+            None => return Err("--layout needs a file name".into()),
+        },
+        None => None,
+    };
     let app = Workspace {
         light,
         demo,
@@ -396,11 +415,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         dock: None,
         status: None,
         watchlist: None,
-        layout_file: args
-            .iter()
-            .skip_while(|a| *a != "--layout")
-            .nth(1)
-            .map(PathBuf::from),
+        layout_file,
     };
     densa_window::run(
         WindowOptions::new("densa dock").with_size(1200.0, 760.0),

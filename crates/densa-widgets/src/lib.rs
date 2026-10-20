@@ -1,9 +1,9 @@
 //! Standard widgets for `densa_ui`: [`Label`], [`Button`], [`TextInput`] (with undo and the
 //! clipboard), [`ScrollView`], [`Splitter`], [`Panel`], [`DockArea`] (panels in tab groups
-//! the user rearranges), [`DataGrid`] (rows of a model, scrolled, selected, copied and
-//! sorted), [`Chart`] (time series,
-//! candles and volume, panned and zoomed), and [`Menu`] and [`MenuBar`] (commands in menus
-//! that pop up, with submenus, check marks and keyboard navigation).
+//! the user rearranges, the arrangement saved and restored as a [`DockLayout`]),
+//! [`DataGrid`] (rows of a model, scrolled, selected, copied and sorted), [`Chart`] (time
+//! series, candles and volume, panned and zoomed), and [`Menu`] and [`MenuBar`] (commands in
+//! menus that pop up, with submenus, check marks and keyboard navigation).
 //!
 //! Each is a [`Widget`](densa_ui::Widget): add it to a [`Ui`](densa_ui::Ui) with a
 //! [`Style`](densa_ui::Style), and read what the user did from the actions it reports.
@@ -47,7 +47,8 @@ mod text_input;
 pub use button::Button;
 pub use chart::Chart;
 pub use dock::{
-    DockArea, DockAt, DockAxis, DockLayout, DockLayoutError, DockPanel, DockSide, MAX_LAYOUT_DEPTH,
+    DockArea, DockAt, DockAxis, DockLayout, DockLayoutError, DockLayoutErrorKind, DockPanel,
+    DockSide, MAX_LAYOUT_DEPTH,
 };
 pub use grid::DataGrid;
 pub use label::Label;
