@@ -175,3 +175,46 @@ fn many_updates_snapshot_like_a_model() {
         assert_eq!(rows(&t), model, "step {step}");
     }
 }
+
+#[test]
+fn nulls_string_keys_and_lists_come_through() {
+    use arrow_array::types::Int32Type;
+    use arrow_array::ListArray;
+    let batch =
+        |names: Vec<&str>, scores: Vec<Option<f64>>, tags: Vec<Option<Vec<Option<i32>>>>| {
+            RecordBatch::try_from_iter([
+                (
+                    "name",
+                    Arc::new(arrow_array::StringArray::from(names)) as ArrayRef,
+                ),
+                ("score", Arc::new(Float64Array::from(scores)) as ArrayRef),
+                (
+                    "tags",
+                    Arc::new(ListArray::from_iter_primitive::<Int32Type, _, _>(tags)) as ArrayRef,
+                ),
+            ])
+            .unwrap()
+        };
+    let first = batch(
+        vec!["a", "b"],
+        vec![Some(1.0), None],
+        vec![Some(vec![Some(1)]), None],
+    );
+    let mut t = LiveTable::new(first.schema(), "name").unwrap();
+    t.upsert(first).unwrap();
+    t.upsert(batch(
+        vec!["a"],
+        vec![None],
+        vec![Some(vec![Some(2), None])],
+    ))
+    .unwrap();
+    let snapshot = t.snapshot().unwrap();
+    let rows: usize = snapshot.iter().map(RecordBatch::num_rows).sum();
+    assert_eq!(rows, 2);
+    for b in &snapshot {
+        assert_eq!(b.schema(), *t.schema());
+        assert_eq!(b.column(0).len(), b.num_rows());
+    }
+    let nulls: usize = snapshot.iter().map(|b| b.column(1).null_count()).sum();
+    assert_eq!(nulls, 2, "both scores are null now");
+}
