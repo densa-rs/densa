@@ -184,6 +184,14 @@ impl ChartModel for Market {
         );
     }
 
+    fn pane_title(&self, pane: usize) -> &str {
+        if pane == 0 {
+            "One-minute candles, 20-minute average"
+        } else {
+            "Volume"
+        }
+    }
+
     fn describe(&self) -> String {
         let last = self.candles.last().map_or(0.0, |(_, candle)| candle.close);
         format!("Simulated instrument, one-minute candles, last {last:.2}")

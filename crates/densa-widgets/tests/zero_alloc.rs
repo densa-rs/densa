@@ -450,6 +450,10 @@ impl densa_chart::ChartModel for Day {
         Some(densa_chart::Axis::number(low, high).padded(0.05))
     }
 
+    fn pane_title(&self, pane: usize) -> &str {
+        ["Price, 1 min", "Volume"][pane]
+    }
+
     fn paint(
         &self,
         pane: usize,
@@ -508,7 +512,7 @@ fn chart_frames_zooming_panning_and_the_crosshair_perform_zero_heap_operations()
         frame(ui);
         black_box(actions_of(ui));
     };
-    // Warm up: every label character drawn, the crosshair's too.
+    // Warm up: every label character drawn, the crosshair's and the titles' too.
     for i in 0..60 {
         step(&mut ui, i, &mut frame);
     }

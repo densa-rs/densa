@@ -258,6 +258,14 @@ impl ChartModel for Trail {
         self.sync();
     }
 
+    fn pane_title(&self, pane: usize) -> &str {
+        if pane == 0 {
+            "Price"
+        } else {
+            "Size"
+        }
+    }
+
     fn describe(&self) -> String {
         format!("Trades of {}", self.symbol)
     }

@@ -21,6 +21,7 @@ struct Line {
     plots: RefCell<Vec<(usize, Plot)>>,
     description: &'static str,
     weights: [f32; 2],
+    titles: [&'static str; 2],
 }
 
 impl Line {
@@ -31,6 +32,7 @@ impl Line {
             plots: RefCell::new(Vec::new()),
             description: "",
             weights: [3.0, 1.0],
+            titles: ["", ""],
         }
     }
 }
@@ -63,6 +65,10 @@ impl ChartModel for Line {
     fn paint(&self, pane: usize, plot: &Plot, canvas: &mut Canvas<'_>, palette: &ChartPalette) {
         self.plots.borrow_mut().push((pane, *plot));
         paint_line(canvas, plot, &self.points[..], LineStyle::new(palette.line));
+    }
+
+    fn pane_title(&self, pane: usize) -> &str {
+        self.titles[pane]
     }
 
     fn describe(&self) -> String {
@@ -507,5 +513,39 @@ fn a_pane_weight_that_is_not_a_number_counts_as_none() {
         assert!(plots
             .iter()
             .all(|(_, plot)| plot.area().height().is_finite()));
+    }
+}
+
+#[test]
+fn each_pane_has_its_title_in_its_top_left_corner() {
+    let glyphs_in = |instances: &[Instance], plot: &Plot| {
+        let area = plot.area();
+        instances
+            .iter()
+            .filter(|i| i.is_glyph())
+            .filter(|i| area.contains(Point::new(i.rect[0], i.rect[1])))
+            .map(|i| (i.rect[0] - area.x0, i.rect[1] - area.y0))
+            .collect::<Vec<_>>()
+    };
+    let (mut ui, id) = chart(Line::new(200));
+    let untitled = paint(&mut ui);
+    for pane in 0..2 {
+        assert!(
+            glyphs_in(&untitled, &plot(&ui, id, pane)).is_empty(),
+            "labels are outside"
+        );
+    }
+
+    let mut line = Line::new(200);
+    line.titles = ["Price", "Volume"];
+    let (mut ui, id) = chart(line);
+    let titled = paint(&mut ui);
+    for (pane, title) in [(0, "Price"), (1, "Volume")] {
+        let glyphs = glyphs_in(&titled, &plot(&ui, id, pane));
+        assert_eq!(glyphs.len(), title.len(), "pane {pane}");
+        assert!(
+            glyphs.iter().all(|&(x, y)| x < 80.0 && y < 20.0),
+            "{glyphs:?}"
+        );
     }
 }

@@ -452,6 +452,7 @@ impl<M: ChartModel> Chart<M> {
                 let plot = Plot::new(area, x, y);
                 painter.paint_axes(canvas, &plot, last);
                 self.model.paint(pane, &plot, canvas, painter.palette());
+                painter.paint_title(canvas, &plot, self.model.pane_title(pane));
                 if let Some(at) = hover {
                     painter.paint_crosshair(canvas, &plot, at, last);
                 }

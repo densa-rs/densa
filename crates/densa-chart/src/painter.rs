@@ -228,6 +228,30 @@ impl ChartPainter {
         }
     }
 
+    /// Writes `title` in the top left corner of `plot`, on a box of the background so the
+    /// series under it do not hide it, and cut off where the plot ends. Call it after the
+    /// series. An empty title draws nothing.
+    pub fn paint_title(&mut self, canvas: &mut Canvas<'_>, plot: &Plot, title: &str) {
+        let area = plot.area();
+        if title.is_empty() || area.is_empty() {
+            return;
+        }
+        let metrics = self.glyphs.line_metrics();
+        let (pad, line) = (self.pad(), metrics.line_height().round());
+        let palette = self.palette;
+        let outside = canvas.state();
+        canvas.clip(area);
+        let width = (self.glyphs.measure(title) + 2.0 * pad).round();
+        let backing = Rect::new(area.x0 + 1.0, area.y0 + 1.0, width, line);
+        canvas.fill_rect(backing, palette.background);
+        let at = Point::new(
+            area.x0 + 1.0 + pad,
+            (area.y0 + 1.0 + metrics.ascent).round(),
+        );
+        draw_text(&mut self.glyphs, canvas, title, at, palette.label);
+        canvas.restore(outside);
+    }
+
     /// The `y` ticks `plot` has room for, `finer` times as many.
     fn y_ticks(&self, plot: &Plot, finer: usize) -> Ticks {
         let line = self.glyphs.line_metrics().line_height();

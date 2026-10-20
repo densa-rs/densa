@@ -345,6 +345,64 @@ fn axes_draw_gridlines_edges_and_labels_outside_the_plot() {
 }
 
 #[test]
+fn a_title_is_written_in_the_top_left_corner_on_the_background() {
+    let mut painter = painter();
+    let palette = *painter.palette();
+    let area = Rect::new(20.0, 10.0, 300.0, 200.0);
+    let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
+    let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "Volume"));
+
+    let backing = &instances[0];
+    assert!(!backing.is_glyph());
+    assert_eq!(backing.color, palette.background.to_array());
+    assert_eq!(
+        (backing.rect[0], backing.rect[1]),
+        (21.0, 11.0),
+        "inside the edges"
+    );
+    let glyphs: Vec<&Instance> = instances.iter().filter(|i| i.is_glyph()).collect();
+    assert_eq!(glyphs.len(), 6);
+    assert!(glyphs.iter().all(|g| g.color == palette.label.to_array()));
+    for glyph in &glyphs {
+        let (x, y) = (glyph.rect[0], glyph.rect[1]);
+        assert!(x > backing.rect[0] && x + glyph.rect[2] <= backing.rect[0] + backing.rect[2]);
+        assert!(y >= backing.rect[1] && y + glyph.rect[3] <= backing.rect[1] + backing.rect[3]);
+    }
+}
+
+#[test]
+fn a_title_is_cut_off_where_the_plot_ends() {
+    let mut painter = painter();
+    let area = Rect::new(0.0, 0.0, 40.0, 100.0);
+    let plot = Plot::new(area, Axis::number(0.0, 10.0), Axis::number(0.0, 100.0));
+    let instances = drawn(|canvas| painter.paint_title(canvas, &plot, "A rather long title"));
+    assert!(
+        instances.iter().all(|i| i.rect[0] + i.rect[2] <= 40.0),
+        "{instances:?}"
+    );
+    assert!(instances.iter().filter(|i| i.is_glyph()).count() < 19);
+
+    let after = drawn(|canvas| {
+        painter.paint_title(canvas, &plot, "A rather long title");
+        canvas.fill_rect(Rect::new(100.0, 0.0, 10.0, 10.0), RED);
+    });
+    assert_eq!(after.last().unwrap().rect[0], 100.0, "the clip is put back");
+}
+
+#[test]
+fn an_empty_title_or_plot_draws_nothing() {
+    let mut painter = painter();
+    let plot = Plot::new(
+        Rect::new(0.0, 0.0, 100.0, 100.0),
+        Axis::number(0.0, 10.0),
+        Axis::number(0.0, 100.0),
+    );
+    assert!(drawn(|canvas| painter.paint_title(canvas, &plot, "")).is_empty());
+    let empty = Plot::new(Rect::new(0.0, 0.0, 0.0, 0.0), plot.x(), plot.y());
+    assert!(drawn(|canvas| painter.paint_title(canvas, &empty, "Volume")).is_empty());
+}
+
+#[test]
 fn an_empty_plot_has_no_axes() {
     let mut painter = painter();
     let plot = Plot::new(
