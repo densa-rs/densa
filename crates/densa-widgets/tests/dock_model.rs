@@ -5,7 +5,7 @@
 use densa_core::{Point, Rect, Size};
 use densa_paragraph::TextSystem;
 use densa_ui::{PointerButton, PointerEvent, PointerKind, Ui, WidgetId};
-use densa_widgets::{DockArea, DockAt, DockSide, Panel};
+use densa_widgets::{DockArea, DockAt, DockLayout, DockPanel, DockSide, Panel};
 
 const WIDTH: f32 = 900.0;
 const HEIGHT: f32 = 700.0;
@@ -103,6 +103,14 @@ fn check(ui: &Ui, dock: WidgetId, context: &str) {
     }
 }
 
+/// Each panel's group (as its tabs) and whether it is shown.
+fn arrangement(ui: &Ui, dock: WidgetId) -> Vec<(Vec<WidgetId>, bool)> {
+    let area = ui.widget::<DockArea>(dock).unwrap();
+    area.panels()
+        .map(|p| (area.tabs_with(p).collect(), area.is_shown(p)))
+        .collect()
+}
+
 #[test]
 fn random_edits_keep_every_panel_in_exactly_one_group() {
     for seed in 1..120u64 {
@@ -114,11 +122,23 @@ fn random_edits_keep_every_panel_in_exactly_one_group() {
             .unwrap();
         for step in 0..100 {
             let panels: Vec<WidgetId> = ui.widget::<DockArea>(dock).unwrap().panels().collect();
-            match rng.below(6) {
+            match rng.below(7) {
                 0 | 1 => {
                     let at = place(&mut rng, &panels);
-                    DockArea::add_panel(&mut ui, dock, Panel::new(), format!("T{step}"), at)
-                        .unwrap();
+                    let panel = DockPanel::new(format!("T{step}")).with_key(format!("k{step}"));
+                    DockArea::add_panel(&mut ui, dock, Panel::new(), panel, at).unwrap();
+                }
+                // Saving, writing, reading and restoring the layout changes nothing.
+                3 => {
+                    let before = arrangement(&ui, dock);
+                    let area = ui.widget::<DockArea>(dock).unwrap();
+                    if let Some(layout) = area.layout() {
+                        let read: DockLayout = layout.to_string().parse().unwrap();
+                        DockArea::restore_layout(&mut ui, dock, &read).unwrap();
+                        let after = ui.widget::<DockArea>(dock).unwrap().layout();
+                        assert_eq!(after.as_ref(), Some(&layout), "seed {seed} step {step}");
+                        assert_eq!(arrangement(&ui, dock), before, "seed {seed} step {step}");
+                    }
                 }
                 // Removals may empty the dock, which must then take panels again.
                 2 if !panels.is_empty() => {

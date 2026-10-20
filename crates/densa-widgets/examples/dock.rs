@@ -3,10 +3,12 @@
 //! data grid of simulated instruments: click a title to sort, a row to select it.
 //!
 //! `cargo run --release -p densa-widgets --example dock` (`--light` for the light theme,
-//! `--seconds N` to close after N seconds, `--demo` to start with a tab being dragged).
+//! `--seconds N` to close after N seconds, `--demo` to start with a tab being dragged,
+//! `--layout FILE` to start from the arrangement saved in FILE and save every change to it).
 
 use std::error::Error;
 use std::fmt::Write as _;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use densa_core::Point;
@@ -14,7 +16,9 @@ use densa_grid::{Align as Side, CellStyle, CellText, Column, GridModel, Palette,
 use densa_ui::{
     Action, ActionKind, Align, PointerButton, PointerEvent, PointerKind, Style, Theme, Ui, WidgetId,
 };
-use densa_widgets::{DataGrid, DockArea, DockAt, DockPanel, DockSide, Label, Panel, ScrollView};
+use densa_widgets::{
+    DataGrid, DockArea, DockAt, DockLayout, DockPanel, DockSide, Label, Panel, ScrollView,
+};
 use densa_window::{App, Host, WindowOptions};
 
 /// Instruments in the watchlist.
@@ -37,6 +41,8 @@ struct Workspace {
     dock: Option<WidgetId>,
     status: Option<WidgetId>,
     watchlist: Option<WidgetId>,
+    /// Where the arrangement is saved, if anywhere.
+    layout_file: Option<PathBuf>,
 }
 
 /// One simulated instrument.
@@ -193,7 +199,8 @@ fn text_panel(
     at: DockAt,
     text: &str,
 ) -> Result<WidgetId, Box<dyn Error>> {
-    let panel = DockArea::add_panel(ui, dock, Panel::new(), title, at)?;
+    let spec = DockPanel::new(title).with_key(title.to_lowercase());
+    let panel = DockArea::add_panel(ui, dock, Panel::new(), spec, at)?;
     let body = Style::column().grow(1.0).padding(14.0).gap(8.0);
     let body = ui.add(panel, Panel::transparent(), body)?;
     ui.add(body, Label::new(title).with_size(18.0), Style::row())?;
@@ -251,8 +258,12 @@ impl App for Workspace {
             .shrink(0.0)
             .align_items(Align::Center);
         let bar = ui.add(root, Panel::new(), bar)?;
-        self.status = Some(ui.add(bar, Label::new("Ready").dim(), Style::row())?);
+        let status = ui.add(bar, Label::new("Ready").dim(), Style::row())?;
+        self.status = Some(status);
         self.dock = Some(dock);
+        if let Some(text) = self.read_layout(ui) {
+            ui.update::<Label, _>(status, |label, cx| label.set_text(cx, text));
+        }
         Ok(())
     }
 
@@ -280,6 +291,13 @@ impl App for Workspace {
         let Some(area) = ui.widget::<DockArea>(dock) else {
             return;
         };
+        let saved =
+            self.layout_file.as_ref().zip(area.layout()).map(
+                |(file, layout)| match std::fs::write(file, layout.to_string()) {
+                    Ok(()) => String::from(", saved"),
+                    Err(error) => format!(", not saved: {error}"),
+                },
+            );
         let text = match action.kind {
             ActionKind::Selected(index) => {
                 let title = area.panels().nth(index).and_then(|p| area.title(p));
@@ -288,6 +306,7 @@ impl App for Workspace {
             ActionKind::Changed => format!("Rearranged: {groups} groups"),
             _ => return,
         };
+        let text = text + saved.as_deref().unwrap_or("");
         ui.update::<Label, _>(status, |label, cx| label.set_text(cx, text));
     }
 
@@ -313,6 +332,28 @@ impl App for Workspace {
         }
         // The prices keep moving: paint every frame.
         true
+    }
+}
+
+impl Workspace {
+    /// Arranges the dock as the layout file says, if there is one: what to tell the user.
+    fn read_layout(&self, ui: &mut Ui) -> Option<String> {
+        let file = self.layout_file.as_ref()?;
+        let text = match std::fs::read_to_string(file) {
+            Ok(text) => text,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+            Err(error) => return Some(format!("Layout not read: {error}")),
+        };
+        match text.parse::<DockLayout>() {
+            Ok(layout) => {
+                let restored = DockArea::restore_layout(ui, self.dock?, &layout);
+                Some(match restored {
+                    Ok(()) => format!("Layout restored from {}", file.display()),
+                    Err(error) => format!("Layout not restored: {error}"),
+                })
+            }
+            Err(error) => Some(format!("Layout not restored: {error}")),
+        }
     }
 }
 
@@ -355,6 +396,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         dock: None,
         status: None,
         watchlist: None,
+        layout_file: args
+            .iter()
+            .skip_while(|a| *a != "--layout")
+            .nth(1)
+            .map(PathBuf::from),
     };
     densa_window::run(
         WindowOptions::new("densa dock").with_size(1200.0, 760.0),

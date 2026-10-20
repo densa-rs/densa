@@ -3,6 +3,7 @@
 mod access;
 mod geometry;
 mod input;
+mod layout;
 mod tree;
 
 use densa_core::{Color, Point, Rect, Size};
@@ -11,6 +12,8 @@ use densa_ui::{
     AccessNode, AccessRequest, Event, EventCx, Handled, LayoutCx, Length, Overflow, PaintCx,
     PointerButton, PointerKind, Style, Ui, UiError, Widget, WidgetId,
 };
+
+pub use self::layout::{DockAxis, DockLayout, DockLayoutError, MAX_LAYOUT_DEPTH};
 
 use self::geometry::{bar, beside, content_style, divider_rect, group_rect, hairline};
 use crate::paint::{centered, outline};

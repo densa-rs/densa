@@ -46,7 +46,9 @@ mod text_input;
 
 pub use button::Button;
 pub use chart::Chart;
-pub use dock::{DockArea, DockAt, DockPanel, DockSide};
+pub use dock::{
+    DockArea, DockAt, DockAxis, DockLayout, DockLayoutError, DockPanel, DockSide, MAX_LAYOUT_DEPTH,
+};
 pub use grid::DataGrid;
 pub use label::Label;
 pub use menu::{Menu, MenuBar, MenuItem};

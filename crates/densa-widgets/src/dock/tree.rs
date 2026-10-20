@@ -146,7 +146,7 @@ impl DockArea {
     }
 
     /// Stores a node in a free slot, or a new one.
-    fn push(&mut self, kind: Kind) -> usize {
+    pub(super) fn push(&mut self, kind: Kind) -> usize {
         let node = Some(Node { kind, parent: None });
         match self.nodes.iter().position(Option::is_none) {
             Some(slot) => {
