@@ -447,7 +447,7 @@ impl DockArea {
         }
         self.hovered = None;
         // The tab the keyboard was on, to find its group again.
-        let keyboard = self.focus_group.and_then(|group| {
+        let keyboard = self.focused_group().and_then(|group| {
             let (tabs, active) = self.group_tabs(group);
             tabs.get(active).copied()
         });

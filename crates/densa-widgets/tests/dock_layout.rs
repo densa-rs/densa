@@ -474,26 +474,29 @@ fn restoring_ends_a_drag_and_keeps_the_keyboard_on_its_panel() {
         saved,
         "the drop moved nothing"
     );
-    // The keyboard was on Chart's group: after a restore that moves it, it still is.
-    ui.set_focus(Some(dock));
-    let swapped = split(
+    // The keyboard on Chart's group stays with it when a restore moves the group.
+    let chart_first = split(
         DockAxis::Row,
         0.5,
-        split(
-            DockAxis::Column,
-            0.5,
-            tabs(&["chart"], 0),
-            tabs(&["log"], 0),
-        ),
+        tabs(&["chart", "log"], 0),
         tabs(&["orders", "trades"], 0),
     );
-    DockArea::restore_layout(&mut ui, dock, &swapped).unwrap();
-    ui.key(&KeyEvent::down(Key::Named(NamedKey::ArrowRight)));
-    assert!(
-        area(&ui, dock).is_shown(chart),
-        "a one-tab group: nothing to move to"
+    DockArea::restore_layout(&mut ui, dock, &chart_first).unwrap();
+    ui.set_focus(Some(dock));
+    let chart_second = split(
+        DockAxis::Row,
+        0.5,
+        tabs(&["orders", "trades"], 0),
+        tabs(&["log", "chart"], 0),
     );
-    let _ = (orders, trades, log);
+    DockArea::restore_layout(&mut ui, dock, &chart_second).unwrap();
+    ui.key(&KeyEvent::down(Key::Named(NamedKey::ArrowRight)));
+    let area = area(&ui, dock);
+    assert!(
+        area.is_shown(chart) && area.is_shown(orders),
+        "moved within Chart's group"
+    );
+    let _ = (trades, log);
 }
 
 #[test]
