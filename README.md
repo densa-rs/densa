@@ -112,7 +112,7 @@ densa-window = "0.1"
 | Crate | Use it for |
 |---|---|
 | [`densa`](crates/densa) | All of the crates below under one name, as modules; the `window` and `data` features (on by default) leave out the GPU and Arrow when off |
-| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally |
+| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally, snapshots for SQL engines and other Arrow readers |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking with saved layouts, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
@@ -131,9 +131,11 @@ densa-window = "0.1"
 
 Connectors that bring data in, with the large dependency trees their formats and protocols
 need, live in [densa-connectors](https://github.com/densa-rs/densa-connectors): today
-`densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread, and
+`densa-files`, which reads CSV and Parquet files as Arrow batches on a background thread,
 `densa-ws`, which reads WebSocket streams of JSON rows or Arrow IPC as Arrow batches and
-reconnects on its own, and `densa-flight`, which reads Arrow Flight and Flight SQL results.
+reconnects on its own, `densa-flight`, which reads Arrow Flight and Flight SQL results, and
+`densa-datafusion`, which runs SQL with Apache DataFusion over files, batches and snapshots
+of live tables (`LiveTable::snapshot`).
 
 ## Usage
 

@@ -297,9 +297,15 @@ impl LiveTable {
     }
 
     /// The stored batches [`RowRef`]s point into. They also hold superseded rows until the
-    /// next compaction.
+    /// next compaction, and keep the schema they arrived with (compacted ones have the
+    /// table's); [`snapshot`](Self::snapshot) gives the live rows alone, in the table's.
     pub fn batches(&self) -> &[RecordBatch] {
         &self.batches
+    }
+
+    /// Where each live row is, in row id order.
+    pub(crate) fn live_rows(&self) -> impl Iterator<Item = RowRef> + '_ {
+        self.slots.iter().flatten().map(|slot| slot.row_ref())
     }
 
     /// Counts compactions: when it changes, batches were rewritten and earlier [`RowRef`]s

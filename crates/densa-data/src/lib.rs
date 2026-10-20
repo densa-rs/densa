@@ -8,7 +8,8 @@
 //! mean). A view's rows are [`RowRef`]s into [`LiveTable::batches`], so a display
 //! layer (such as `densa-arrow`'s grid) reads values straight from the Arrow arrays. Each
 //! key's row is a [`RecordId`] while the key lives: a selection can follow it through
-//! updates, compactions and re-sorted views ([`View::position`]).
+//! updates, compactions and re-sorted views ([`View::position`]). [`LiveTable::snapshot`]
+//! hands the live rows to anything else that reads Arrow, such as a SQL engine.
 //!
 //! This crate has no user-interface dependency.
 //!
@@ -43,6 +44,7 @@ mod error;
 mod filter;
 mod group;
 mod key;
+mod snapshot;
 mod sorted;
 mod table;
 mod value;
