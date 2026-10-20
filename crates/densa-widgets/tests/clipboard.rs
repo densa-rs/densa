@@ -614,6 +614,21 @@ mod grid {
             "3\tn3",
             "the selected record is gone"
         );
+        // A range wholly past the end, before the grid catches up, is empty at the end.
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids = (0..30).collect());
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 20, 25));
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids.truncate(5));
+        assert_eq!(rows(&ui, id), 5..5);
+        // Its start goes with the selection: with the selected record gone, Shift starts a
+        // range afresh.
+        update(&mut ui, id, |g, cx| g.model_mut(cx).ids = (0..30).collect());
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 2, 4));
+        update(&mut ui, id, |g, cx| {
+            g.model_mut(cx).ids.retain(|id| *id != 4)
+        });
+        paint(&mut ui);
+        key(&mut ui, NamedKey::ArrowDown, Modifiers::SHIFT);
+        assert_eq!(rows(&ui, id).len(), 1, "from the first row shown");
     }
 
     #[test]
@@ -627,6 +642,9 @@ mod grid {
         update(&mut ui, id, |g, cx| g.select_rows(cx, 2, 5));
         update(&mut ui, id, |g, cx| g.select_rows(cx, 5, 5));
         assert_eq!(rows(&ui, id), 5..6);
+        super::shortcut(&mut ui, "a", Modifiers::NONE);
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 2, 5));
+        assert_eq!(rows(&ui, id), 2..6, "not every row any more");
     }
 
     #[test]
@@ -652,6 +670,7 @@ mod grid {
     fn sorting_leaves_the_selected_record_alone_selected() {
         let (mut ui, id) = grid(30);
         update(&mut ui, id, |g, cx| g.select_rows(cx, 1, 3));
+        super::shortcut(&mut ui, "a", Modifiers::NONE);
         let title = shown(&mut ui, id)[0].0;
         let header = Point::new(title.left() + 10.0, title.top() - 5.0);
         for kind in [

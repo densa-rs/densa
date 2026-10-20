@@ -31,7 +31,8 @@ impl<M: GridModel> DataGrid<M> {
         let Some(last) = self.model.rows().checked_sub(1) else {
             return;
         };
-        self.select(cx, None);
+        self.all = false;
+        self.anchor = None;
         self.select(cx, Some(row.min(last)));
         self.anchor = Some(self.selection_of(anchor.min(last)));
     }
