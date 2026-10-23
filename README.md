@@ -22,7 +22,7 @@ it changes, and draws it on the GPU at the display's refresh rate, from the data
 the pixel.
 
 > **Status: 0.x, experimental.** On [crates.io](https://crates.io/crates/densa); APIs will change
-> between releases. Builds and tests on Linux, macOS and Windows.
+> between releases ([what changed](CHANGELOG.md)). Builds and tests on Linux, macOS and Windows.
 
 ## Architecture
 
@@ -95,16 +95,16 @@ To use densa, depend on the `densa` crate, which gathers the libraries as module
 
 ```toml
 [dependencies]
-densa = "0.1"
+densa = "0.2"
 ```
 
 Or take only the crates you use, each on its own (`densa-data` needs no GPU or window):
 
 ```toml
 [dependencies]
-densa-data = "0.1"
-densa-widgets = "0.1"
-densa-window = "0.1"
+densa-data = "0.2"
+densa-widgets = "0.2"
+densa-window = "0.2"
 ```
 
 ## Crates
