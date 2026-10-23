@@ -95,6 +95,10 @@ pub trait App: 'static {
 }
 
 /// A file dragged over the window, or dropped on it: what [`App::file_drop`] is told.
+///
+/// A drag ends either with [`Left`](Self::Left) (dragged away) or with a [`Dropped`](Self::Dropped)
+/// for each file (no `Left` then). Windows, macOS and X11 report file drops; Wayland does
+/// not yet (winit 0.30). [`WindowOptions::with_file_drops`] turns them off.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum FileDrop {
@@ -172,6 +176,10 @@ pub struct WindowOptions {
     pub instances: usize,
     /// The graphics API that draws the window.
     pub backend: Backend,
+    /// Whether files dragged onto the window reach [`App::file_drop`] (on by default). Off,
+    /// the window on Windows does not set up OLE drag and drop, which fails if the thread
+    /// already uses COM in its multithreaded mode.
+    pub file_drops: bool,
 }
 
 /// The graphics API a window draws with. The `WGPU_BACKEND` environment variable
@@ -205,6 +213,7 @@ impl WindowOptions {
             theme: Theme::default(),
             instances: 65_536,
             backend: Backend::Auto,
+            file_drops: true,
         }
     }
 
@@ -219,6 +228,14 @@ impl WindowOptions {
     #[must_use]
     pub fn with_theme(mut self, theme: Theme) -> Self {
         self.theme = theme;
+        self
+    }
+
+    /// The options with files dropped on the window reaching the app, or not; see
+    /// [`WindowOptions::file_drops`].
+    #[must_use]
+    pub fn with_file_drops(mut self, file_drops: bool) -> Self {
+        self.file_drops = file_drops;
         self
     }
 
@@ -333,6 +350,11 @@ impl<A: App> Shell<A> {
             .with_title(self.options.title.clone())
             .with_inner_size(LogicalSize::new(size.width, size.height))
             .with_visible(false);
+        #[cfg(windows)]
+        let attributes = {
+            use winit::platform::windows::WindowAttributesExtWindows;
+            attributes.with_drag_and_drop(self.options.file_drops)
+        };
         let window = event_loop
             .create_window(attributes)
             .map_err(|e| WindowError::Window(e.to_string()))?;
@@ -422,11 +444,13 @@ impl<A: App> ApplicationHandler<UserEvent> for Shell<A> {
                     failed = session.paint().err();
                 }
                 other => match translate::file_drop(&other) {
-                    Some(drop) => {
+                    Some(drop) if self.options.file_drops => {
                         self.app.file_drop(&mut session.ui, &mut host, drop);
                         // What the app showed for it is painted.
                         window.request_redraw();
                     }
+                    // Turned off: not the app's business.
+                    Some(_) => {}
                     None => session.input(&other),
                 },
             }

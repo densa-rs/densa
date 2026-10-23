@@ -9,7 +9,9 @@ version without changes of its own.
 
 - **Files dropped on the window** (`densa-window`): `App::file_drop` is told of each file
   dragged over the window (`FileDrop::Hovering`), dragged away (`FileDrop::Left`) or dropped
-  (`FileDrop::Dropped`). It does nothing by default.
+  (`FileDrop::Dropped`). It does nothing by default. `WindowOptions::with_file_drops(false)`
+  turns drops off (on Windows the window then leaves OLE alone, for apps whose thread uses
+  COM in its multithreaded mode).
 
 ## 0.2.1
 
