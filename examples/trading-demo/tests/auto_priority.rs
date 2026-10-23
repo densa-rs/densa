@@ -4,10 +4,16 @@
 //! A separate test binary (its own process, so its own CPU registry): exhausting the cores
 //! here cannot disturb the pinning tests in `worker.rs`.
 
+use std::sync::Mutex;
+
 use densa_platform::ThreadPriority;
 use trading_demo::engine::{spawn_worker, Clock, Pin, WorkerConfig};
 
 const ROWS: usize = 4;
+
+/// The tests share this process's CPU registry: one at a time, or a core one frees could be
+/// claimed by the other's worker while it expects none to be free.
+static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
 
 fn auto_critical() -> WorkerConfig {
     WorkerConfig {
@@ -21,6 +27,7 @@ fn auto_critical() -> WorkerConfig {
 
 #[test]
 fn an_auto_worker_without_a_core_of_its_own_stays_at_normal_priority() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     // Claim every free core first (on systems without topology there is none to claim).
     let cpus = densa_platform::logical_cpus().unwrap_or_default();
     let registry = densa_platform::cpu_registry();
@@ -42,6 +49,7 @@ fn an_auto_worker_without_a_core_of_its_own_stays_at_normal_priority() {
 #[cfg(windows)]
 #[test]
 fn an_auto_worker_with_a_core_gets_the_requested_priority_and_can_change_it() {
+    let _alone = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
     let (worker, _reader) = spawn_worker::<ROWS>(auto_critical(), Clock::new()).unwrap();
     if worker.pinned_cpu().is_some() {
         assert_eq!(worker.priority(), Some(ThreadPriority::TimeCritical));
