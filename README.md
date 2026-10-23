@@ -116,7 +116,7 @@ densa-window = "0.2"
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking with saved layouts, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
-| [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit |
+| [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit, files dropped on the window handed to the app |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
 | [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods, undo and redo |

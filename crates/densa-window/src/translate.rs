@@ -1,9 +1,21 @@
 //! winit's input in densa's terms.
 
 use densa_ui::{Cursor, Ime, Key, Modifiers, NamedKey, PointerButton, ScrollDelta};
-use winit::event::{Ime as WinitIme, MouseButton, MouseScrollDelta};
+use winit::event::{Ime as WinitIme, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::keyboard::{Key as WinitKey, ModifiersState, NamedKey as WinitNamed};
 use winit::window::CursorIcon;
+
+use crate::FileDrop;
+
+/// The file drop `event` is, if it is one.
+pub(crate) fn file_drop(event: &WindowEvent) -> Option<FileDrop> {
+    Some(match event {
+        WindowEvent::HoveredFile(path) => FileDrop::Hovering(path.clone()),
+        WindowEvent::HoveredFileCancelled => FileDrop::Left,
+        WindowEvent::DroppedFile(path) => FileDrop::Dropped(path.clone()),
+        _ => return None,
+    })
+}
 
 pub(crate) fn modifiers(state: ModifiersState) -> Modifiers {
     let mut modifiers = Modifiers::NONE;
@@ -113,5 +125,30 @@ pub(crate) fn cursor(cursor: Cursor) -> CursorIcon {
         Cursor::Grabbing => CursorIcon::Grabbing,
         Cursor::NotAllowed => CursorIcon::NotAllowed,
         _ => CursorIcon::Default,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn files_dragged_over_the_window_become_file_drops() {
+        let path = PathBuf::from("data/trips.parquet");
+        assert_eq!(
+            file_drop(&WindowEvent::HoveredFile(path.clone())),
+            Some(FileDrop::Hovering(path.clone()))
+        );
+        assert_eq!(
+            file_drop(&WindowEvent::DroppedFile(path.clone())),
+            Some(FileDrop::Dropped(path))
+        );
+        assert_eq!(
+            file_drop(&WindowEvent::HoveredFileCancelled),
+            Some(FileDrop::Left)
+        );
+        assert_eq!(file_drop(&WindowEvent::CloseRequested), None);
     }
 }

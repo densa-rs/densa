@@ -9,7 +9,7 @@
 //! [`Waker`] (new data arrived), or continuously while the app asks for it (animation).
 //!
 //! Widgets copy and paste through the system clipboard (on Linux, X11's; XWayland's under
-//! Wayland).
+//! Wayland). Files dragged onto the window reach [`App::file_drop`].
 //!
 //! Screen readers (Narrator, VoiceOver, Orca) read the interface through AccessKit: the
 //! window sends the [`Ui`]'s accessibility tree after each frame, only while one is
@@ -45,6 +45,7 @@ mod translate;
 
 use std::error::Error;
 use std::fmt;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -78,6 +79,12 @@ pub trait App: 'static {
         let _ = (ui, host, action);
     }
 
+    /// Handles a file dragged over the window or dropped on it (one call per file). Nothing
+    /// happens unless the app does something with it.
+    fn file_drop(&mut self, ui: &mut Ui, host: &mut Host<'_>, drop: FileDrop) {
+        let _ = (ui, host, drop);
+    }
+
     /// Updates live content before a frame is painted. Return `true` to keep painting frames
     /// continuously (animation), `false` to paint only when something changes or a
     /// [`Waker`] asks for a frame.
@@ -85,6 +92,18 @@ pub trait App: 'static {
         let _ = (ui, host);
         false
     }
+}
+
+/// A file dragged over the window, or dropped on it: what [`App::file_drop`] is told.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum FileDrop {
+    /// A file is held over the window (once for each file held).
+    Hovering(PathBuf),
+    /// The files held over the window left it without being dropped.
+    Left,
+    /// A file was dropped on the window (once for each file dropped).
+    Dropped(PathBuf),
 }
 
 /// The window an [`App`] runs in.
@@ -402,7 +421,14 @@ impl<A: App> ApplicationHandler<UserEvent> for Shell<A> {
                     session.continuous = self.app.frame(&mut session.ui, &mut host);
                     failed = session.paint().err();
                 }
-                other => session.input(&other),
+                other => match translate::file_drop(&other) {
+                    Some(drop) => {
+                        self.app.file_drop(&mut session.ui, &mut host, drop);
+                        // What the app showed for it is painted.
+                        window.request_redraw();
+                    }
+                    None => session.input(&other),
+                },
             }
             if failed.is_none() {
                 while let Some(action) = session.ui.next_action() {

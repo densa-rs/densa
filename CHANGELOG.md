@@ -3,6 +3,14 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **Files dropped on the window** (`densa-window`): `App::file_drop` is told of each file
+  dragged over the window (`FileDrop::Hovering`), dragged away (`FileDrop::Left`) or dropped
+  (`FileDrop::Dropped`). It does nothing by default.
+
 ## 0.2.1
 
 Nothing in the public API of 0.2.0 was removed or changed in a way that breaks code using it
