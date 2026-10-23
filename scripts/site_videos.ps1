@@ -22,7 +22,7 @@ function Publish($from, $name, $crf, $at, $filter = "") {
   ffmpeg -v error -y -ss $at -i $video -frames:v 1 -c:v libwebp -quality 80 "$Site\assets\video\$name.webp"
 }
 
-$studioQuery = '--query "SELECT date_trunc(''second'', to_timestamp_millis(CAST(time AS BIGINT))) AS second, avg(celsius) AS celsius, count(*) AS readings FROM recent GROUP BY 1 ORDER BY 1 DESC"'
+$studioQuery = '--query "SELECT date_trunc(''second'', time) AS second, avg(celsius) AS celsius, count(*) AS readings FROM recent GROUP BY 1 ORDER BY 1 DESC"'
 # Scroll a million rows, sort by the ms column twice (its title at 598, 53), scroll again.
 $filesScript = "300 move 500 400; 800 wheel 500 400 -20; 1300 wheel 500 400 -40; 1800 wheel 500 400 -80; 2300 wheel 500 400 -160; 3400 click 598 53; 5200 click 598 53; 6600 wheel 500 400 -20; 7000 wheel 500 400 -20"
 
