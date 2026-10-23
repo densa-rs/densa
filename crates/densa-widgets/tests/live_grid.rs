@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
+use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
 use densa_arrow::LiveModel;
 use densa_core::{Point, Rect, Size};
 use densa_data::{Filter, LiveTable, Scalar};
@@ -64,12 +64,17 @@ fn selected_symbol(ui: &Ui, id: WidgetId) -> Option<String> {
     Some(symbols.value(at.row).to_owned())
 }
 
-/// Clicks the title of column `column`.
-fn click_title(ui: &mut Ui, id: WidgetId, column: usize) {
+/// Where the title of column `column` is.
+fn title(ui: &mut Ui, id: WidgetId, column: usize) -> Rect {
     let tree = ui.access_tree();
     let table = tree.node(ui.access_id(id).unwrap()).unwrap();
     let header = tree.node(table.children()[0]).unwrap();
-    let title: Rect = tree.node(header.children()[column]).unwrap().bounds();
+    tree.node(header.children()[column]).unwrap().bounds()
+}
+
+/// Clicks the title of column `column`.
+fn click_title(ui: &mut Ui, id: WidgetId, column: usize) {
+    let title = title(ui, id, column);
     let at = Point::new(
         (title.left() + title.right()) / 2.0,
         (title.top() + title.bottom()) / 2.0,
@@ -165,6 +170,89 @@ fn a_grid_started_on_an_empty_table_takes_the_widths_of_the_first_rows() {
     paint(&mut ui);
     upsert(&mut ui, id, vec!["A-VERY-LONG-SYMBOL"], vec![1.0]);
     assert_eq!(grid_of(&ui, id).columns()[0].chars, 18);
+}
+
+#[test]
+fn a_number_too_wide_widens_its_column_and_a_dragged_width_stays() {
+    let (mut ui, id) = grid();
+    let symbol = title(&mut ui, id, 0);
+    let edge = Point::new(symbol.right(), (symbol.top() + symbol.bottom()) / 2.0);
+    let wider = Point::new(edge.x + 60.0, edge.y);
+    for (kind, at) in [
+        (PointerKind::Down(PointerButton::Primary), edge),
+        (PointerKind::Move, wider),
+        (PointerKind::Up(PointerButton::Primary), wider),
+    ] {
+        ui.pointer(PointerEvent::new(kind, at));
+    }
+    ui.layout();
+    let dragged = grid_of(&ui, id).columns()[0].chars;
+    assert!(dragged > 6, "{dragged}");
+    assert_eq!(grid_of(&ui, id).columns()[1].chars, 5, "\"price\" and 4");
+
+    upsert(&mut ui, id, vec!["E"], vec![123_456_789.5]);
+    let columns = grid_of(&ui, id).columns();
+    assert_eq!(columns[1].chars, 11, "the price column widened");
+    assert_eq!(
+        columns[0].chars, dragged,
+        "the width the user dragged stays"
+    );
+}
+
+#[test]
+fn widths_dragged_on_other_columns_are_forgotten() {
+    let (mut ui, id) = grid();
+    let symbol = title(&mut ui, id, 0);
+    let edge = Point::new(symbol.right(), (symbol.top() + symbol.bottom()) / 2.0);
+    let wider = Point::new(edge.x + 60.0, edge.y);
+    for (kind, at) in [
+        (PointerKind::Down(PointerButton::Primary), edge),
+        (PointerKind::Move, wider),
+        (PointerKind::Up(PointerButton::Primary), wider),
+    ] {
+        ui.pointer(PointerEvent::new(kind, at));
+    }
+    // Another table, of other columns: then its first column grows.
+    let counts = |n: Vec<i64>| {
+        RecordBatch::try_from_iter([("n", Arc::new(Int64Array::from(n)) as ArrayRef)]).unwrap()
+    };
+    ui.update::<Grid, _>(id, |grid, cx| {
+        let mut other = LiveTable::new(counts(vec![]).schema(), "n").unwrap();
+        other.upsert(counts(vec![1])).unwrap();
+        *grid.model_mut(cx).table_mut() = other;
+    });
+    paint(&mut ui);
+    ui.update::<Grid, _>(id, |grid, cx| {
+        let table = grid.model_mut(cx).table_mut();
+        table.upsert(counts(vec![123_456_789])).unwrap();
+    });
+    paint(&mut ui);
+    assert_eq!(
+        grid_of(&ui, id).columns()[0].chars,
+        9,
+        "the new column's own width"
+    );
+}
+
+#[test]
+fn a_column_widening_mid_drag_does_not_end_the_drag() {
+    let (mut ui, id) = grid();
+    let symbol = title(&mut ui, id, 0);
+    let edge = Point::new(symbol.right(), (symbol.top() + symbol.bottom()) / 2.0);
+    ui.pointer(PointerEvent::new(
+        PointerKind::Down(PointerButton::Primary),
+        edge,
+    ));
+    upsert(&mut ui, id, vec!["E"], vec![123_456_789.5]);
+    assert_eq!(grid_of(&ui, id).columns()[1].chars, 11);
+    let wider = Point::new(edge.x + 60.0, edge.y);
+    ui.pointer(PointerEvent::new(PointerKind::Move, wider));
+    ui.pointer(PointerEvent::new(
+        PointerKind::Up(PointerButton::Primary),
+        wider,
+    ));
+    ui.layout();
+    assert!(grid_of(&ui, id).columns()[0].chars > 6, "the drag went on");
 }
 
 #[test]

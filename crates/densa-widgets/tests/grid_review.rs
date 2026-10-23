@@ -450,6 +450,25 @@ fn the_light_theme_gets_darker_rise_and_fall_colors() {
 }
 
 #[test]
+fn resetting_the_columns_drops_the_widths_the_user_dragged() {
+    let (mut ui, id) = grid(10);
+    let headers = nodes(&mut ui, id).1;
+    let edge = Point::new(headers[0].right(), middle(headers[0]).y);
+    pointer(&mut ui, PointerKind::Down(PointerButton::Primary), edge);
+    let wider = Point::new(edge.x + 60.0, edge.y);
+    pointer(&mut ui, PointerKind::Move, wider);
+    pointer(&mut ui, PointerKind::Up(PointerButton::Primary), wider);
+    ui.layout();
+    assert!(view(&ui, id).columns()[0].chars > 8);
+    ui.update::<DataGrid<Records>, _>(id, |g, cx| g.reset_columns(cx));
+    assert_eq!(
+        view(&ui, id).columns()[0].chars,
+        8,
+        "the model's width again"
+    );
+}
+
+#[test]
 fn reading_the_columns_again_drops_a_resize_in_progress() {
     let (mut ui, id) = grid(10);
     let headers = nodes(&mut ui, id).1;

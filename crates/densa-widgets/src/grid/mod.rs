@@ -85,6 +85,8 @@ pub struct DataGrid<M> {
     built: Option<(Size, f32, Palette)>,
     /// The model's [`GridModel::columns_revision`] and [`GridModel::generation`] last seen.
     revisions: (u64, u64),
+    /// Which columns the user resized: their widths outlast the model's new ones.
+    dragged: Vec<bool>,
 }
 
 impl<M: GridModel> DataGrid<M> {
@@ -93,6 +95,7 @@ impl<M: GridModel> DataGrid<M> {
         let columns = model.columns().to_vec();
         Self {
             revisions: (model.columns_revision(), model.generation()),
+            dragged: vec![false; columns.len()],
             model,
             columns,
             frozen: 0,
@@ -141,7 +144,7 @@ impl<M: GridModel> DataGrid<M> {
     /// Reads the model's columns again (after it changed them), dropping the user's widths,
     /// and a sort or a drag on a column that is gone.
     pub fn reset_columns(&mut self, cx: &mut EventCx<'_>) {
-        self.read_columns();
+        self.read_columns(false);
         self.built = None;
         cx.request_layout();
         cx.request_paint();
@@ -244,11 +247,29 @@ impl<M: GridModel> DataGrid<M> {
         }
     }
 
-    /// The model's columns again, ending a drag and a sort on a column that is gone.
-    fn read_columns(&mut self) {
-        self.columns = self.model.columns().to_vec();
+    /// The model's columns again, ending a sort on a column that is gone. With `keep_dragged`
+    /// and the titles shown before, widths the user dragged stay, and so does a drag in
+    /// progress; otherwise every width is the model's and a drag ends.
+    fn read_columns(&mut self, keep_dragged: bool) {
+        let mut columns = self.model.columns().to_vec();
+        let same = columns.len() == self.columns.len()
+            && columns
+                .iter()
+                .zip(&self.columns)
+                .all(|(a, b)| a.title == b.title);
+        if keep_dragged && same {
+            for ((new, old), dragged) in columns.iter_mut().zip(&self.columns).zip(&self.dragged) {
+                if *dragged {
+                    new.chars = old.chars;
+                }
+            }
+        } else {
+            self.dragged.clear();
+            self.drag = None;
+        }
+        self.columns = columns;
         let count = self.columns.len();
-        self.drag = None;
+        self.dragged.resize(count, false);
         self.sort = self.sort.filter(|(column, _)| *column < count);
     }
 
@@ -257,7 +278,7 @@ impl<M: GridModel> DataGrid<M> {
     fn follow_model(&mut self) {
         let (columns, generation) = (self.model.columns_revision(), self.model.generation());
         if columns != self.revisions.0 {
-            self.read_columns();
+            self.read_columns(true);
             if let Some((size, px, palette)) = self.built {
                 self.build(size, px, palette);
             }

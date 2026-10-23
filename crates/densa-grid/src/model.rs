@@ -77,8 +77,8 @@ pub trait GridModel {
     }
 
     /// Changes whenever [`columns`](Self::columns) changes (another schema, new widths): the
-    /// grid then reads the columns again, dropping widths the user dragged. Checked each
-    /// frame after [`prepare`](Self::prepare).
+    /// grid then reads the columns again, keeping the widths the user dragged if the column
+    /// titles are the same as before. Checked each frame after [`prepare`](Self::prepare).
     fn columns_revision(&self) -> u64 {
         0
     }

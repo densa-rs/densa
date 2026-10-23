@@ -12,8 +12,9 @@ use crate::table::{CellState, TableError};
 /// incrementally. Cells are formatted as in [`ArrowTable`](crate::ArrowTable), from
 /// formatters brought up to date by [`GridModel::prepare`], which the grid calls before it
 /// paints; until then, rows from batches added since show empty cells rather than stale
-/// values. Columns are sized from the first rows to arrive, and the grid takes in new sizes
-/// by itself ([`GridModel::columns_revision`]).
+/// values. Columns are sized from the first rows to arrive and widened when later numbers
+/// no longer fit, and the grid takes in new sizes by itself
+/// ([`GridModel::columns_revision`]), keeping widths the user dragged.
 ///
 /// Costs: a frame without changes allocates nothing; one after upserts allocates a
 /// formatter per new batch, and after a compaction rebuilds them all. Sorting or filtering
@@ -221,11 +222,11 @@ impl GridModel for LiveModel {
         if replaced {
             self.adopt_table();
         }
-        let sized = self.grid.is_sized();
+        let widths = self.grid.widths();
         self.grid.sync(&self.table);
-        // Another table (maybe of another schema), or the first rows sized the columns:
-        // read them again (allocates, once).
-        if replaced || sized != self.grid.is_sized() {
+        // Another table (maybe of another schema), or rows sized or widened the columns:
+        // read them again (allocates, rarely: a width only grows).
+        if replaced || widths != self.grid.widths() {
             self.read_columns();
         }
     }

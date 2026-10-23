@@ -7,7 +7,8 @@ use crate::table::{ArrowTable, CellState, TableError};
 ///
 /// It keeps a formatter for each of the live table's batches; [`view`](Self::view) brings them
 /// up to date first, which allocates only when batches were added or compacted since the
-/// last call. Columns are sized from the first rows, as in [`ArrowTable`]. Given another
+/// last call. Columns are sized from the first rows and widened for later numbers that no
+/// longer fit, as in [`ArrowTable`]. Given another
 /// table (or a clone), it rebuilds its formatters; for a table with another schema it also
 /// resets its column settings.
 #[derive(Debug, Clone)]
@@ -72,9 +73,9 @@ impl LiveGrid {
         })
     }
 
-    /// Whether rows have sized the columns (they are sized once, by the first rows).
-    pub(crate) fn is_sized(&self) -> bool {
-        self.mirror.is_sized()
+    /// Changes whenever rows changed a column's width (see [`ArrowTable::push`]).
+    pub(crate) fn widths(&self) -> u64 {
+        self.mirror.widths()
     }
 
     /// Whether the formatters match `table`'s batches, so a [`RowRef`] of it reads the

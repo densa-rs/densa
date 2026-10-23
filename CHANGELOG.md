@@ -14,6 +14,15 @@ version without changes of its own.
   follow. The window ends at the newest time in the table, not at the clock. Rows without a
   time (null or NaN) are kept. New error: `DataError::WindowSpan`.
 
+### Changed
+
+- **Number columns widen** (`densa-arrow`): a number or time column sized by the first rows
+  widens when later values no longer fit (a count or a row number that grows), instead of
+  showing `###`. It never narrows. Each later batch is measured on a sample of its rows that
+  includes its last row; columns given a width with `set_column_chars` keep it.
+- **Dragged widths stay** (`densa-widgets`): when a `DataGrid`'s model reports new column
+  widths with the same column titles, the widths the user dragged are kept.
+
 ## 0.2.0
 
 Nothing in the public API of 0.1.0 was removed or changed in a way that breaks code using it

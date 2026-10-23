@@ -8,6 +8,10 @@ use crate::reader::{is_numeric, Format, Reader};
 
 /// Rows of the first batch measured to size the columns.
 const SAMPLE_ROWS: usize = 1_000;
+/// Rows of each later batch measured to widen number and time columns (spread over the
+/// batch, its last row included): values that grow, such as counts and row numbers, grow
+/// toward the end.
+const WIDEN_ROWS: usize = 64;
 /// Widest a column is sized from its content; longer text is cut with `…`.
 const MAX_SAMPLED_CHARS: usize = 40;
 /// Width of a column with no rows yet, unless its title is wider.
@@ -93,6 +97,9 @@ pub struct ArrowTable {
     formats: Vec<Format>,
     /// Whether the columns have been sized from a batch's content.
     sized: bool,
+    /// Bumped whenever content changes a column's width: the first rows, or a later value
+    /// too wide for its number column.
+    widths: u64,
 }
 
 impl ArrowTable {
@@ -115,6 +122,7 @@ impl ArrowTable {
             rows: 0,
             formats,
             sized: false,
+            widths: 0,
         }
     }
 
@@ -135,8 +143,10 @@ impl ArrowTable {
     }
 
     /// Appends `batch`'s rows. The first rows to arrive size the columns (their titles and
-    /// up to the first 1,000 values, at most 40 characters), except columns sized with
-    /// [`set_column_chars`](Self::set_column_chars).
+    /// up to the first 1,000 values, at most 40 characters); later rows widen a number or time
+    /// column whose values no longer fit (measuring some rows of each batch, the last among
+    /// them), never narrowing it. Columns sized with
+    /// [`set_column_chars`](Self::set_column_chars) keep their width.
     ///
     /// # Errors
     /// A column error if `batch` has other columns or data types; the table is unchanged.
@@ -146,7 +156,9 @@ impl ArrowTable {
             return Ok(());
         }
         let readers: Vec<Reader> = batch.columns().iter().cloned().map(Reader::new).collect();
-        if !self.sized {
+        if self.sized {
+            self.widen_columns(&readers);
+        } else {
             self.size_columns(&readers);
         }
         self.starts.push(self.rows);
@@ -201,6 +213,15 @@ impl ArrowTable {
         ) {
             let format = &mut self.formats[column];
             size_column(format, reader, field.name());
+            // Later batches may have widened it: measure them again as now printed.
+            if is_numeric(field.data_type()) && !format.width_set {
+                let mut text = CellText::new();
+                for readers in &self.batches[1..] {
+                    let rows = spread(readers[column].len(), WIDEN_ROWS);
+                    let widest = widest(&readers[column], format, rows, &mut text);
+                    format.max_chars = format.max_chars.max(widest);
+                }
+            }
         }
         Ok(())
     }
@@ -304,11 +325,36 @@ impl ArrowTable {
             size_column(format, reader, field.name());
         }
         self.sized = true;
+        self.widths = self.widths.wrapping_add(1);
     }
 
-    /// Whether rows have sized the columns.
-    pub(crate) fn is_sized(&self) -> bool {
-        self.sized
+    /// Widens each number and time column (not sized by the application) to its widest
+    /// value among some of `readers`' rows, if that is wider than the column.
+    fn widen_columns(&mut self, readers: &[Reader]) {
+        let mut text = CellText::new();
+        let mut widened = false;
+        for ((reader, format), field) in readers
+            .iter()
+            .zip(&mut self.formats)
+            .zip(self.schema.fields().iter())
+        {
+            if format.width_set || !is_numeric(field.data_type()) {
+                continue;
+            }
+            let widest = widest(reader, format, spread(reader.len(), WIDEN_ROWS), &mut text);
+            if widest > format.max_chars {
+                format.max_chars = widest;
+                widened = true;
+            }
+        }
+        if widened {
+            self.widths = self.widths.wrapping_add(1);
+        }
+    }
+
+    /// Changes whenever content changed a column's width (a revision, not a count).
+    pub(crate) fn widths(&self) -> u64 {
+        self.widths
     }
 
     /// Batches with rows held, in the order pushed.
@@ -336,20 +382,40 @@ fn size_column(format: &mut Format, reader: &Reader, title: &str) {
     if format.width_set {
         return;
     }
+    let mut text = CellText::new();
+    let rows = 0..reader.len().min(SAMPLE_ROWS);
+    let widest = widest(reader, format, rows, &mut text).max(title.chars().count());
+    format.max_chars = widest.max(1);
+}
+
+/// The widest of `rows`' values in `reader` as `format` writes them, up to 40 characters
+/// (nulls count as nothing).
+fn widest(
+    reader: &Reader,
+    format: &Format,
+    rows: impl Iterator<Item = usize>,
+    text: &mut CellText,
+) -> usize {
     let sampling = Format {
         max_chars: MAX_SAMPLED_CHARS,
         ..*format
     };
-    let mut text = CellText::new();
-    let mut widest = title.chars().count();
-    for row in 0..reader.len().min(SAMPLE_ROWS) {
+    let mut widest = 0;
+    for row in rows {
         text.clear();
         if !reader.is_null(row) {
-            reader.write(row, &mut text, &sampling);
+            reader.write(row, text, &sampling);
         }
         widest = widest.max(text.as_str().chars().count());
     }
-    format.max_chars = widest.max(1);
+    widest.min(MAX_SAMPLED_CHARS)
+}
+
+/// Up to `most` rows of `len`, spread evenly from the first to the last.
+fn spread(len: usize, most: usize) -> impl Iterator<Item = usize> {
+    let count = len.min(most);
+    // The first, then evenly to the last (one row: the first is the last).
+    (0..count).map(move |i| i * (len - 1) / (count - 1).max(1))
 }
 
 /// An [`ArrowTable`] as a grid's data, scrolled to a first row. Cheap to create each frame.

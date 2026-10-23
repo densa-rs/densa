@@ -284,6 +284,9 @@ impl<M: GridModel> DataGrid<M> {
             return;
         }
         target.chars = to;
+        if let Some(dragged) = self.dragged.get_mut(column) {
+            *dragged = true;
+        }
         // The painter is rebuilt for the new widths at the next layout.
         self.built = None;
         cx.request_layout();

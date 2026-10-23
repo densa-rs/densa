@@ -451,3 +451,63 @@ fn fixed_decimals_size_a_column_again_from_its_first_rows() {
     table.set_decimals(0, Some(1)).unwrap();
     assert_eq!(table.columns()[0].chars, 9, "a width set stays");
 }
+
+#[test]
+fn later_rows_widen_number_columns_measuring_some_rows_and_the_last() {
+    let rows = |numbers: Vec<i64>, names: Vec<&str>| {
+        batch(vec![
+            ("n", Arc::new(Int64Array::from(numbers)) as ArrayRef),
+            ("name", Arc::new(StringArray::from(names)) as ArrayRef),
+        ])
+    };
+    let mut table = ArrowTable::from_batches([rows(vec![1], vec!["a"])]).unwrap();
+    let chars = |table: &ArrowTable| table.columns().iter().map(|c| c.chars).collect::<Vec<_>>();
+    assert_eq!(chars(&table), [1, 4]);
+
+    // A counter: the widest value is the last.
+    let count: Vec<i64> = (1..=10_000).collect();
+    table.push(rows(count, vec!["b"; 10_000])).unwrap();
+    assert_eq!(chars(&table), [5, 4], "10000 fits; text is not widened");
+
+    // A single wide value not among the rows measured goes unseen: a sample, not a scan.
+    let mut hidden = vec![1; 10_000];
+    hidden[5] = 1_000_000_000;
+    table.push(rows(hidden, vec!["c"; 10_000])).unwrap();
+    assert_eq!(chars(&table)[0], 5);
+
+    // Rows between are measured too: 32 * 9_999 / 63 is row 5,078 of 64 spread rows.
+    let mut middle = vec![1; 10_000];
+    middle[5_078] = 1_000_000;
+    table.push(rows(middle, vec!["c"; 10_000])).unwrap();
+    assert_eq!(chars(&table)[0], 7);
+
+    table.push(rows(vec![1, 22], vec!["d", "e"])).unwrap();
+    assert_eq!(chars(&table)[0], 7, "never narrower");
+    table.push(rows(vec![-10_000_000], vec!["f"])).unwrap();
+    assert_eq!(chars(&table)[0], 9, "one row, measured");
+    table.push(rows(vec![i64::MIN, 1], vec!["g", "h"])).unwrap();
+    assert_eq!(chars(&table)[0], 20, "the first row is measured too");
+}
+
+#[test]
+fn new_decimals_keep_the_width_later_rows_gave() {
+    let prices = |v: Vec<f64>| batch(vec![("p", Arc::new(Float64Array::from(v)) as ArrayRef)]);
+    let mut table = ArrowTable::from_batches([prices(vec![1.0])]).unwrap();
+    table.push(prices(vec![1_234_567.25])).unwrap();
+    table.push(prices(vec![2.0])).unwrap();
+    assert_eq!(table.columns()[0].chars, 10);
+    table.set_decimals(0, Some(1)).unwrap();
+    assert_eq!(table.columns()[0].chars, 9, "1234567.2 still fits");
+    table.set_column_chars(0, 3).unwrap();
+    table.set_decimals(0, Some(4)).unwrap();
+    assert_eq!(table.columns()[0].chars, 3, "a width set stays");
+}
+
+#[test]
+fn a_later_number_widens_its_column_to_forty_characters_at_most() {
+    let prices = |v: Vec<f64>| batch(vec![("p", Arc::new(Float64Array::from(v)) as ArrayRef)]);
+    let mut table = ArrowTable::from_batches([prices(vec![1.0])]).unwrap();
+    table.set_decimals(0, Some(2)).unwrap();
+    table.push(prices(vec![1e50])).unwrap();
+    assert_eq!(table.columns()[0].chars, 40);
+}

@@ -207,6 +207,42 @@ fn the_first_rows_size_the_columns_of_a_table_that_started_empty() {
 }
 
 #[test]
+fn a_later_number_too_wide_widens_its_column_and_never_narrows_it() {
+    let mut model = model(vec!["A"], vec![1.0]);
+    assert_eq!(model.columns()[1].chars, 5, "\"price\"");
+    let revision = model.columns_revision();
+    model
+        .table_mut()
+        .upsert(quotes(vec!["A-LONGER-SYMBOL"], vec![123_456_789.5]))
+        .unwrap();
+    model.prepare();
+    assert_ne!(model.columns_revision(), revision, "the grid is told");
+    assert_eq!(model.columns()[1].chars, 11);
+    assert_eq!(model.columns()[0].chars, 6, "text is cut, not widened");
+
+    let revision = model.columns_revision();
+    model
+        .table_mut()
+        .upsert(quotes(vec!["B"], vec![2.0]))
+        .unwrap();
+    model.prepare();
+    assert_eq!(
+        model.columns_revision(),
+        revision,
+        "nothing wider: nothing to tell"
+    );
+    assert_eq!(model.columns()[1].chars, 11, "never narrower");
+
+    model.set_column_chars(1, 4).unwrap();
+    model
+        .table_mut()
+        .upsert(quotes(vec!["C"], vec![1e15]))
+        .unwrap();
+    model.prepare();
+    assert_eq!(model.columns()[1].chars, 4, "a width the app set stays");
+}
+
+#[test]
 fn changing_decimals_or_widths_tells_the_grid() {
     let mut model = model(vec!["A"], vec![1.0 / 3.0]);
     let revision = model.columns_revision();
