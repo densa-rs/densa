@@ -133,6 +133,18 @@ impl SortedRows {
         (entries.get(at)?.id == id).then(|| self.before(block) + at)
     }
 
+    /// How many entries, from the first, satisfy `pred`, which must hold for a prefix of the
+    /// entries and fail for the rest.
+    pub(crate) fn partition_point(&self, pred: impl Fn(RowId) -> bool) -> usize {
+        let block = self
+            .blocks
+            .partition_point(|b| b.last().is_some_and(|last| pred(last.id)));
+        match self.blocks.get(block) {
+            Some(entries) => self.before(block) + entries.partition_point(|e| pred(e.id)),
+            None => self.len,
+        }
+    }
+
     /// Entries in the blocks before `block`.
     fn before(&self, block: usize) -> usize {
         let (mut i, mut sum) = (block, 0);

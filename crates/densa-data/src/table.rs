@@ -9,7 +9,8 @@ use crate::dictionary::interleave_column;
 use crate::group::{GroupState, Groups};
 use crate::key::{key_reader, KeyFn, KeyIndex, KeyRef};
 use crate::view::{Rows, ViewState};
-use crate::{DataError, GroupSpec, RowId, Scalar, ViewSpec};
+use crate::window::WindowState;
+use crate::{DataError, GroupSpec, RowId, Scalar, ViewSpec, Window};
 
 /// Changing more than one row in this many rebuilds each view instead of patching it.
 const REBUILD_RATIO: usize = 8;
@@ -202,6 +203,7 @@ pub struct LiveTable {
     retry_at_dead: usize,
     /// Batches the last compaction wrote: automatic compaction counts the ones stored since.
     compacted_batches: usize,
+    window: Option<WindowState>,
 }
 
 impl Clone for LiveTable {
@@ -224,6 +226,7 @@ impl Clone for LiveTable {
             compaction_error: self.compaction_error.clone(),
             retry_at_dead: self.retry_at_dead,
             compacted_batches: self.compacted_batches,
+            window: self.window.clone(),
         }
     }
 }
@@ -271,6 +274,7 @@ impl LiveTable {
             compaction_error: None,
             retry_at_dead: MIN_DEAD_ROWS,
             compacted_batches: 0,
+            window: None,
         })
     }
 
@@ -352,7 +356,9 @@ impl LiveTable {
     }
 
     /// Inserts `batch`'s rows, replacing the rows of keys already present; within the batch
-    /// the last row for a key wins. Views follow.
+    /// the last row for a key wins. Then, with a [`Window`], deletes the rows it leaves
+    /// behind (counted in [`Changes::deleted`]; a row already past it when it came counts as
+    /// inserted and deleted). Views follow.
     ///
     /// # Errors
     /// A column error if `batch` has other column names or data types,
@@ -366,7 +372,7 @@ impl LiveTable {
         }
         let plan = self.plan(&batch, &latest)?;
         let updated = plan.iter().filter(|c| c.1.is_some()).count();
-        let changes = Changes {
+        let mut changes = Changes {
             inserted: plan.len() - updated,
             updated,
             deleted: 0,
@@ -387,6 +393,7 @@ impl LiveTable {
         // Earlier rows of keys repeated within the batch were never live.
         self.dead += batch.num_rows() - plan.len();
         self.add_to_views(rebuild, plan.iter().map(|c| (c.0, c.2)));
+        changes.deleted = self.expire();
         self.compact_if_due();
         Ok(changes)
     }
@@ -408,14 +415,7 @@ impl LiveTable {
             if let Some(slot) = self.slots[id as usize] {
                 self.drop_from_views(std::iter::once((id, slot)));
             }
-            self.slots[id as usize] = None;
-            self.free.push(id);
-            if self.reuses.len() <= id as usize {
-                self.reuses.resize(id as usize + 1, 0);
-            }
-            // Wrapping: an id freed 2^32 times could give an old record back; harmless odds.
-            self.reuses[id as usize] = self.reuses[id as usize].wrapping_add(1);
-            self.dead += 1;
+            self.release(id);
             deleted += 1;
         }
         self.compact_if_due();
@@ -463,6 +463,37 @@ impl LiveTable {
         self.compaction_error = None;
         self.retry_at_dead = MIN_DEAD_ROWS;
         Ok(())
+    }
+
+    /// Keeps the table to the rows within `window` from now on, deleting the rows already
+    /// past it; `None` keeps every row again (rows already deleted stay deleted). Views
+    /// follow.
+    ///
+    /// # Errors
+    /// [`DataError::UnknownColumn`], [`DataError::UnsupportedColumn`], or
+    /// [`DataError::WindowSpan`] if the span does not fit the column: nothing changes.
+    pub fn set_window(&mut self, window: Option<Window>) -> Result<Changes, DataError> {
+        let Some(window) = window else {
+            self.window = None;
+            return Ok(Changes::default());
+        };
+        let mut state = WindowState::compile(&window, &self.schema)?;
+        state.rows.rebuild(Rows {
+            batches: &self.batches,
+            slots: &self.slots,
+        });
+        self.window = Some(state);
+        let deleted = self.expire();
+        self.compact_if_due();
+        Ok(Changes {
+            deleted,
+            ..Changes::default()
+        })
+    }
+
+    /// The table's window, if it has one.
+    pub fn window(&self) -> Option<&Window> {
+        self.window.as_ref().map(WindowState::spec)
     }
 
     /// Adds a view of the rows matching `spec`, filled from the current rows.
@@ -662,8 +693,56 @@ impl LiveTable {
         RecordBatch::try_new(Arc::clone(&self.schema), columns).map_err(DataError::arrow)
     }
 
-    /// Removes rows from every view and group, each at the place its values were when it
-    /// entered.
+    /// Deletes the rows past the window; how many.
+    fn expire(&mut self) -> usize {
+        let Some(window) = &self.window else {
+            return 0;
+        };
+        let count = window.expired(Rows {
+            batches: &self.batches,
+            slots: &self.slots,
+        });
+        if count == 0 {
+            return 0;
+        }
+        let gone: Vec<(RowId, Slot)> = (0..count)
+            .filter_map(|index| {
+                let id = window.rows.get(index)?;
+                Some((id, self.slots[id as usize]?))
+            })
+            .collect();
+        let rebuild = count.saturating_mul(REBUILD_RATIO) > self.len();
+        if !rebuild {
+            self.drop_from_views(gone.iter().copied());
+        }
+        for &(id, slot) in &gone {
+            let at = slot.row_ref();
+            let keys = self.batches[at.batch].column(self.key_column).as_ref();
+            if let Some(key) = (self.key_read)(keys, at.row) {
+                self.keys.remove(key);
+            }
+            self.release(id);
+        }
+        if rebuild {
+            self.add_to_views(true, std::iter::empty());
+        }
+        gone.len()
+    }
+
+    /// Frees row `id`, already out of every view and group: its key's record ends.
+    fn release(&mut self, id: RowId) {
+        self.slots[id as usize] = None;
+        self.free.push(id);
+        if self.reuses.len() <= id as usize {
+            self.reuses.resize(id as usize + 1, 0);
+        }
+        // Wrapping: an id freed 2^32 times could give an old record back; harmless odds.
+        self.reuses[id as usize] = self.reuses[id as usize].wrapping_add(1);
+        self.dead += 1;
+    }
+
+    /// Removes rows from every view, group and the window, each at the place its values were
+    /// when it entered.
     fn drop_from_views(&mut self, rows: impl Iterator<Item = (RowId, Slot)> + Clone) {
         let source = Rows {
             batches: &self.batches,
@@ -679,9 +758,14 @@ impl LiveTable {
                 groups.remove(source, id, slot.row_ref());
             }
         }
+        if let Some(window) = &mut self.window {
+            for (id, slot) in rows {
+                window.rows.remove(source, id, slot.row_ref());
+            }
+        }
     }
 
-    /// Adds changed rows to every view and group, or rebuilds them.
+    /// Adds changed rows to every view, group and the window, or rebuilds them.
     fn add_to_views(&mut self, rebuild: bool, rows: impl Iterator<Item = (RowId, Slot)> + Clone) {
         let source = Rows {
             batches: &self.batches,
@@ -702,6 +786,15 @@ impl LiveTable {
             } else {
                 for (id, slot) in rows.clone() {
                     groups.insert(source, id, slot.row_ref());
+                }
+            }
+        }
+        if let Some(window) = &mut self.window {
+            if rebuild {
+                window.rows.rebuild(source);
+            } else {
+                for (id, slot) in rows {
+                    window.rows.insert(source, id, slot.row_ref());
                 }
             }
         }

@@ -3,6 +3,17 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **Time windows** (`densa-data`): `LiveTable::set_window` keeps a table to the rows whose
+  time is within a span of the newest. `Window::duration` is for date, time, timestamp and
+  duration columns; `Window::span` is for number columns, in their own units. Older rows are
+  deleted as newer ones are upserted, counted in `Changes::deleted`, and views and groups
+  follow. The window ends at the newest time in the table, not at the clock. Rows without a
+  time (null or NaN) are kept. New error: `DataError::WindowSpan`.
+
 ## 0.2.0
 
 Nothing in the public API of 0.1.0 was removed or changed in a way that breaks code using it

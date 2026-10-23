@@ -9,7 +9,8 @@
 //! layer (such as `densa-arrow`'s grid) reads values straight from the Arrow arrays. Each
 //! key's row is a [`RecordId`] while the key lives: a selection can follow it through
 //! updates, compactions and re-sorted views ([`View::position`]). [`LiveTable::snapshot`]
-//! hands the live rows to anything else that reads Arrow, such as a SQL engine.
+//! hands the live rows to anything else that reads Arrow, such as a SQL engine. A
+//! [`Window`] keeps a table to its recent rows, by a time column.
 //!
 //! This crate has no user-interface dependency.
 //!
@@ -49,6 +50,7 @@ mod sorted;
 mod table;
 mod value;
 mod view;
+mod window;
 
 pub use arrow_array;
 pub use arrow_schema;
@@ -57,6 +59,7 @@ pub use filter::{CompareOp, Filter, Scalar};
 pub use group::{Aggregate, GroupSpec, Groups};
 pub use table::{Changes, GroupsId, LiveTable, RecordId, RowRef, TableOptions, View, ViewId};
 pub use view::{Order, ViewSpec};
+pub use window::Window;
 
 /// A row's internal identity: stable for as long as its key is live.
 type RowId = u32;

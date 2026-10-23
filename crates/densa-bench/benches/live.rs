@@ -1,4 +1,5 @@
-//! Keeping a sorted, filtered view of a million-row live table up to date.
+//! Keeping a sorted, filtered view of a million-row live table up to date, with aggregates
+//! or a time window.
 //!
 //! Run: `cargo bench -p densa-bench --bench live`
 
@@ -6,7 +7,9 @@ use std::sync::Arc;
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch};
 use criterion::{criterion_group, BatchSize, Criterion, Throughput};
-use densa_data::{Aggregate, CompareOp, Filter, GroupSpec, LiveTable, Order, Scalar, ViewSpec};
+use densa_data::{
+    Aggregate, CompareOp, Filter, GroupSpec, LiveTable, Order, Scalar, ViewSpec, Window,
+};
 
 const ROWS: i64 = 1_000_000;
 const UPDATE_ROWS: usize = 64;
@@ -116,10 +119,39 @@ fn update_view_and_groups(c: &mut Criterion) {
     group.finish();
 }
 
+/// A stream in a window of a million rows: each upsert brings 64 new keys (numbered in
+/// order, the number serving as the time) and the window expires the 64 oldest.
+fn update_window(c: &mut Criterion) {
+    let mut table = table_with_view();
+    table
+        .set_window(Some(Window::span("id", (ROWS - 1) as f64)))
+        .expect("numeric column");
+    let mut first = ROWS;
+    let mut group = c.benchmark_group("live_table_1m");
+    group.throughput(Throughput::Elements(UPDATE_ROWS as u64));
+    group.bench_function("upsert_64_new_rows_windowed_sorted_view", |b| {
+        b.iter_batched(
+            || {
+                let ids: Vec<i64> = (first..first + UPDATE_ROWS as i64).collect();
+                let prices = ids.iter().map(|&i| ((i * 7_919) % 100_000) as f64 / 100.0);
+                first += UPDATE_ROWS as i64;
+                batch(ids.clone(), prices.collect())
+            },
+            |update| {
+                let changes = table.upsert(update).expect("same schema");
+                assert_eq!(changes.deleted, UPDATE_ROWS);
+            },
+            BatchSize::SmallInput,
+        )
+    });
+    group.finish();
+}
+
 criterion_group!(
     benches,
     update_sorted_view,
     update_view_and_groups,
+    update_window,
     build_view
 );
 

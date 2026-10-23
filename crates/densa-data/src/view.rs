@@ -124,8 +124,23 @@ impl ViewState {
         })
     }
 
+    /// Every row (no filter), sorted by `column` alone.
+    pub(crate) fn sorted(column: SortColumn) -> Self {
+        Self {
+            sort: vec![column],
+            filter: None,
+            rows: SortedRows::default(),
+            member: Vec::new(),
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.rows.len()
+    }
+
+    /// How many rows, from the first, satisfy `pred` (true for a prefix of the rows).
+    pub(crate) fn partition_point(&self, pred: impl Fn(RowId) -> bool) -> usize {
+        self.rows.partition_point(pred)
     }
 
     pub(crate) fn get(&self, index: usize) -> Option<RowId> {

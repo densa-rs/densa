@@ -16,6 +16,9 @@ pub enum DataError {
     /// Sums and means need an integer, decimal or float column; this one holds something
     /// else (text, booleans, dates, times).
     NotNumeric(String),
+    /// A window's span does not fit its column: a `Duration` goes with dates, times and
+    /// timestamps, a number (zero or more) with integers, decimals and floats.
+    WindowSpan(String),
     /// Two columns of a group spec's result would have this name.
     DuplicateName(String),
     /// The batch has a different number of columns.
@@ -61,6 +64,12 @@ impl fmt::Display for DataError {
             }
             Self::NotNumeric(name) => {
                 write!(f, "column {name:?} is not numeric: it cannot be summed")
+            }
+            Self::WindowSpan(name) => {
+                write!(
+                    f,
+                    "the window's span does not fit the type of column {name:?}"
+                )
             }
             Self::DuplicateName(name) => write!(f, "two result columns are named {name:?}"),
             Self::ColumnCount { expected, found } => {
