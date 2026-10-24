@@ -45,8 +45,9 @@ pub struct Window {
     span: Span,
 }
 
+/// A span of a time column (a `Duration`) or of a number column (in its own units).
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Span {
+pub(crate) enum Span {
     Duration(Duration),
     Value(f64),
 }
@@ -83,7 +84,7 @@ impl Window {
 /// integer columns (differences are whole, so the span rounds down without changing which
 /// rows stay), the span itself for floats.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Reach {
+pub(crate) enum Reach {
     Whole(i128),
     Float(f64),
 }
@@ -102,20 +103,8 @@ pub(crate) struct WindowState {
 impl WindowState {
     pub(crate) fn compile(spec: &Window, schema: &Schema) -> Result<Self, DataError> {
         let (column, kind, read) = resolve(schema, &spec.column)?;
-        let mismatch = || DataError::WindowSpan(spec.column.clone());
-        let reach = match (spec.span, time_unit(schema.field(column).data_type())) {
-            (Span::Duration(span), Some(unit)) => {
-                // Whole units, rounding down. Lossless: at most 2^64 seconds of nanoseconds.
-                Reach::Whole((span.as_nanos() / unit).cast_signed())
-            }
-            (Span::Value(span), None) if span >= 0.0 => match kind {
-                Kind::Int | Kind::UInt => Reach::Whole(whole(span)),
-                Kind::Decimal { scale } => Reach::Whole(whole(span * 10f64.powi(scale.into()))),
-                Kind::Float => Reach::Float(span),
-                Kind::Bool | Kind::Str => return Err(mismatch()),
-            },
-            _ => return Err(mismatch()),
-        };
+        let reach = reach(spec.span, schema.field(column).data_type(), kind)
+            .ok_or_else(|| DataError::WindowSpan(spec.column.clone()))?;
         Ok(Self {
             spec: spec.clone(),
             reach,
@@ -146,6 +135,24 @@ impl WindowState {
         self.rows
             .partition_point(|id| older(value(id), newest, self.reach))
     }
+}
+
+/// `span` in the units of a column of `data_type`, of `kind`: `None` if they do not fit (a
+/// `Duration` goes with dates, times and timestamps, a number of zero or more with numbers).
+pub(crate) fn reach(span: Span, data_type: &DataType, kind: Kind) -> Option<Reach> {
+    Some(match (span, time_unit(data_type)) {
+        (Span::Duration(span), Some(unit)) => {
+            // Whole units, rounding down. Lossless: at most 2^64 seconds of nanoseconds.
+            Reach::Whole((span.as_nanos() / unit).cast_signed())
+        }
+        (Span::Value(span), None) if span >= 0.0 => match kind {
+            Kind::Int | Kind::UInt => Reach::Whole(whole(span)),
+            Kind::Decimal { scale } => Reach::Whole(whole(span * 10f64.powi(scale.into()))),
+            Kind::Float => Reach::Float(span),
+            Kind::Bool | Kind::Str => return None,
+        },
+        _ => return None,
+    })
 }
 
 const NANOS_PER_DAY: u128 = 86_400 * 1_000_000_000;

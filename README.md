@@ -112,7 +112,7 @@ densa-window = "0.2"
 | Crate | Use it for |
 |---|---|
 | [`densa`](crates/densa) | All of the crates below under one name, as modules; the `window` and `data` features (on by default) leave out the GPU and Arrow when off |
-| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally, time windows that keep a table's recent rows, snapshots for SQL engines and other Arrow readers |
+| [`densa-data`](crates/densa-data) | Live Arrow tables: keyed upserts and deletes, sorted and filtered views and grouped aggregates kept up to date incrementally (per key, or per minute or step of a column), time windows that keep a table's recent rows, snapshots for SQL engines and other Arrow readers |
 | [`densa-arrow`](crates/densa-arrow) | Arrow tables and live views in the data grid, the grid widget and charts, with typed, allocation-free cell formatting |
 | [`densa-ui`](crates/densa-ui) | The widget tree: flexbox layout, pointer, keyboard and input method events, focus, themes, an accessibility tree; no window or GPU needed |
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking with saved layouts, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
@@ -171,11 +171,19 @@ let summary = table.groups(by_sector).unwrap().to_batch()?; // one row per secto
 
 // Keep the last five minutes by the `time` column: older rows go as newer ones come.
 table.set_window(Some(Window::duration("time", Duration::from_secs(300))))?;
+
+// Counts per minute: a group per minute of `time`, named by when it starts.
+let per_minute = table.add_groups(
+    GroupSpec::new()
+        .group_by_time("time", Duration::from_secs(60))
+        .aggregate(Aggregate::count()),
+)?;
 ```
 
 A window ends at the newest time in the table, not at the clock, so replayed data is
 windowed by its own times. `Window::span` does the same for a column of plain numbers, in
-their units.
+their units. With both, the per-minute groups cover the window's five minutes, and the oldest
+minute goes once its rows expire; `group_by_step` buckets a column of numbers the same way.
 
 To show it in the grid widget, `densa_arrow::LiveModel` wraps the table: a click on a column
 title sorts the view, the app sets a filter, and the selection follows its row as values

@@ -219,6 +219,8 @@ fn errors_say_what_is_wrong() {
         (DataError::LiteralMismatch("qty".into()), "qty"),
         (DataError::NotNumeric("region".into()), "region"),
         (DataError::DuplicateName("count".into()), "count"),
+        (DataError::WindowSpan("time".into()), "window"),
+        (DataError::BucketWidth("time".into()), "bucket"),
         (
             DataError::ColumnCount {
                 expected: 2,

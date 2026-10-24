@@ -3,6 +3,18 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **Aggregates per time bucket** (`densa-data`): `GroupSpec::group_by_time(column, every)`
+  groups rows by buckets of a time column (a minute, an hour), back to back from the
+  column's zero, and `GroupSpec::group_by_step(column, step)` by buckets of a number column.
+  The key column holds each bucket's start, in the column's type: counts, sums, minimums,
+  maximums and means per minute, kept up to date as rows change. With a `Window` on the same
+  column, the oldest bucket goes once its rows expire. A width that does not fit the column
+  is refused with `DataError::BucketWidth`.
+
 ## 0.2.2
 
 Nothing in the public API of 0.2.1 was removed or changed in a way that breaks code using it

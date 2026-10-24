@@ -5,12 +5,14 @@
 //! query engine or a file, and upserts them by a key column; [`ViewSpec`] describes a view
 //! (a [`Filter`] and sort columns), which the table keeps up to date incrementally instead of
 //! recomputing it; [`GroupSpec`] does the same for grouped aggregates (count, sum, min, max,
-//! mean). A view's rows are [`RowRef`]s into [`LiveTable::batches`], so a display
-//! layer (such as `densa-arrow`'s grid) reads values straight from the Arrow arrays. Each
-//! key's row is a [`RecordId`] while the key lives: a selection can follow it through
-//! updates, compactions and re-sorted views ([`View::position`]). [`LiveTable::snapshot`]
-//! hands the live rows to anything else that reads Arrow, such as a SQL engine. A
-//! [`Window`] keeps a table to its recent rows, by a time column.
+//! mean), grouped by key columns or by buckets of one (counts per minute,
+//! [`GroupSpec::group_by_time`]). A view's rows are [`RowRef`]s into
+//! [`LiveTable::batches`], so a display layer (such as `densa-arrow`'s grid) reads values
+//! straight from the Arrow arrays. Each key's row is a [`RecordId`] while the key lives: a
+//! selection can follow it through updates, compactions and re-sorted views
+//! ([`View::position`]). [`LiveTable::snapshot`] hands the live rows to anything else that
+//! reads Arrow, such as a SQL engine. A [`Window`] keeps a table to its recent rows, by a
+//! time column.
 //!
 //! This crate has no user-interface dependency.
 //!
@@ -40,6 +42,7 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+mod bucket;
 mod dictionary;
 mod error;
 mod filter;

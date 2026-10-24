@@ -3,6 +3,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+use std::time::Duration;
 
 use arrow_array::cast::AsArray;
 use arrow_array::types::{Float16Type, Float32Type, Float64Type};
@@ -13,11 +14,13 @@ use arrow_array::{
 use arrow_schema::{DataType, Field, Schema};
 use arrow_select::interleave::interleave;
 
+use crate::bucket::{float_starts, whole_starts, Bucket};
 use crate::dictionary::dictionary_index;
 use crate::filter::{resolve, Filter, Predicate};
 use crate::sorted::{Entry, SortedRows};
 use crate::value::{canonical, prefix, unscale, Kind, Value, ValueFn};
 use crate::view::{entry, entry_order, Rows, SortColumn};
+use crate::window::Span;
 use crate::{DataError, RowId, RowRef};
 
 /// The largest magnitude a `Decimal128` of precision 38 holds, plus one.
@@ -151,7 +154,7 @@ impl Aggregate {
 /// ```
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct GroupSpec {
-    keys: Vec<String>,
+    keys: Vec<KeySpec>,
     aggregates: Vec<Aggregate>,
     filter: Option<Filter>,
 }
@@ -168,8 +171,86 @@ impl GroupSpec {
     /// key in the order views sort: ascending, nulls last. `-0.0` and `0.0` are one key, and
     /// so are all NaNs.
     #[must_use]
-    pub fn group_by(mut self, column: impl Into<String>) -> Self {
-        self.keys.push(column.into());
+    pub fn group_by(self, column: impl Into<String>) -> Self {
+        self.key(column, None)
+    }
+
+    /// Groups by buckets of `every` (a minute, an hour) of `column`, a column of timestamps,
+    /// dates, times of day or durations, as a key after the ones added before it.
+    ///
+    /// The buckets are back to back from the column's zero (midnight UTC for timestamps,
+    /// whatever their time zone), so a bucket of a minute starts on a whole minute; each value
+    /// is in the bucket that starts at or before it, less than `every` earlier. Buckets have
+    /// one length: a week of dates starts on a Thursday, like 1970-01-01, and there are no
+    /// months. The key column holds each bucket's start, in the column's type and under its
+    /// name, so a column is a key once (a second key of it is [`DataError::DuplicateName`]).
+    /// The lowest bucket of a type's range, which may start before it, starts at the type's
+    /// smallest value. `every` is taken in whole units of the column, rounding down, and must
+    /// be at least one ([`DataError::BucketWidth`] otherwise). Null times make a group of
+    /// their own, last.
+    ///
+    /// With a [`Window`](crate::Window) on the same column, the oldest bucket holds only the
+    /// rows the window still keeps, and goes once they expire.
+    ///
+    /// ```
+    /// use std::sync::Arc;
+    /// use std::time::Duration;
+    /// use arrow_array::{ArrayRef, Int64Array, RecordBatch, TimestampSecondArray, UInt64Array};
+    /// use densa_data::{Aggregate, GroupSpec, LiveTable};
+    ///
+    /// let requests = |ids: Vec<i64>, times: Vec<i64>| {
+    ///     RecordBatch::try_from_iter([
+    ///         ("id", Arc::new(Int64Array::from(ids)) as ArrayRef),
+    ///         ("time", Arc::new(TimestampSecondArray::from(times)) as ArrayRef),
+    ///     ])
+    /// };
+    /// let mut table = LiveTable::new(requests(vec![], vec![])?.schema(), "id")?;
+    /// let per_minute = table.add_groups(
+    ///     GroupSpec::new()
+    ///         .group_by_time("time", Duration::from_secs(60))
+    ///         .aggregate(Aggregate::count()),
+    /// )?;
+    /// table.upsert(requests(vec![1, 2, 3], vec![5, 59, 61])?)?;
+    ///
+    /// let counts = table.groups(per_minute).unwrap().to_batch()?;
+    /// let starts = counts.column(0).as_any().downcast_ref::<TimestampSecondArray>().unwrap();
+    /// let count = counts.column(1).as_any().downcast_ref::<UInt64Array>().unwrap();
+    /// assert_eq!(starts.values(), &[0, 60]); // 00:00 and 00:01
+    /// assert_eq!(count.values(), &[2, 1]);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    #[must_use]
+    pub fn group_by_time(self, column: impl Into<String>, every: Duration) -> Self {
+        self.key(column, Some(Span::Duration(every)))
+    }
+
+    /// Groups by buckets of `step` of `column`, a column of integers, decimals or floats, as a
+    /// key after the ones added before it. `step` is in the column's own units: `0.5` is
+    /// fifty cents of a decimal of dollars.
+    ///
+    /// As with [`group_by_time`](Self::group_by_time), the buckets are back to back from
+    /// zero, each value is in the one that starts at or before it, and the key column holds
+    /// each bucket's start (the type's smallest or largest value for a bucket that starts
+    /// past the type's range). For integers and decimals `step` is taken in whole units,
+    /// rounding down, but a step within a billionth of its size of a whole number counts as
+    /// it (`0.29` is 29 cents, though `0.29 * 100.0` is just below 29); it must be at least one
+    /// unit, or above zero and finite for floats ([`DataError::BucketWidth`] otherwise).
+    ///
+    /// Float buckets forgive the rounding of the column's type: a value at most two roundings
+    /// below a bucket's start, and never more than a sixteenth of a step, is in that bucket.
+    /// `0.3` is in the bucket of `0.1` steps that starts at `0.3` (`3.0 * 0.1`, itself just
+    /// above `0.3`), though `0.3 / 0.1` is just below 3. NaN, the infinities and nulls are
+    /// groups of their own.
+    #[must_use]
+    pub fn group_by_step(self, column: impl Into<String>, step: f64) -> Self {
+        self.key(column, Some(Span::Value(step)))
+    }
+
+    fn key(mut self, column: impl Into<String>, bucket: Option<Span>) -> Self {
+        self.keys.push(KeySpec {
+            column: column.into(),
+            bucket,
+        });
         self
     }
 
@@ -186,6 +267,13 @@ impl GroupSpec {
         self.filter = Some(filter);
         self
     }
+}
+
+/// A key column of a [`GroupSpec`], and its bucket width if it has one.
+#[derive(Debug, Clone, PartialEq)]
+struct KeySpec {
+    column: String,
+    bucket: Option<Span>,
 }
 
 /// One value of a key, ordered like [`crate::value::compare`] ascending, nulls last (the
@@ -214,6 +302,16 @@ impl Part {
             Value::Str(v) => Self::Str(v.into()),
         }
     }
+}
+
+/// The float whose [`Part::Float`] bits are `bits`.
+fn from_prefix(bits: u64) -> f64 {
+    const SIGN: u64 = 1 << 63;
+    f64::from_bits(if bits & SIGN != 0 {
+        bits & !SIGN
+    } else {
+        !bits
+    })
 }
 
 /// A column the groups read: its index, reader, kind, data type and name.
@@ -249,6 +347,35 @@ impl Source {
             DataType::Dictionary(_, values) => values,
             other => other,
         }
+    }
+}
+
+/// A key column the groups read, and the buckets its values go in, if any.
+#[derive(Debug, Clone)]
+struct Key {
+    source: Source,
+    bucket: Option<Bucket>,
+}
+
+impl Key {
+    fn new(schema: &Schema, spec: &KeySpec) -> Result<Self, DataError> {
+        let source = Source::new(schema, &spec.column)?;
+        let bucket = spec
+            .bucket
+            .map(|width| {
+                Bucket::new(width, &source.data_type, source.kind)
+                    .ok_or_else(|| DataError::BucketWidth(spec.column.clone()))
+            })
+            .transpose()?;
+        Ok(Self { source, bucket })
+    }
+
+    fn part(&self, batches: &[RecordBatch], at: RowRef) -> Part {
+        let value = self.source.read(batches, at);
+        Part::of(match &self.bucket {
+            Some(bucket) => bucket.start(value),
+            None => value,
+        })
     }
 }
 
@@ -525,7 +652,7 @@ impl Group {
 /// A group spec's compiled form and its groups.
 #[derive(Debug, Clone)]
 pub(crate) struct GroupState {
-    keys: Vec<Source>,
+    keys: Vec<Key>,
     trackers: Vec<Tracker>,
     aggregates: Vec<Compiled>,
     filter: Option<Predicate>,
@@ -540,7 +667,7 @@ impl GroupState {
         let keys = spec
             .keys
             .iter()
-            .map(|k| Source::new(schema, k))
+            .map(|k| Key::new(schema, k))
             .collect::<Result<Vec<_>, _>>()?;
         let mut trackers = Vec::new();
         let aggregates = spec
@@ -573,7 +700,7 @@ impl GroupState {
         let mut names = BTreeSet::new();
         let all_names = keys
             .iter()
-            .map(|k| &k.name)
+            .map(|k| &k.source.name)
             .chain(aggregates.iter().map(|a| &a.name));
         for name in all_names {
             if !names.insert(name) {
@@ -614,10 +741,7 @@ impl GroupState {
     }
 
     fn key(&self, batches: &[RecordBatch], at: RowRef) -> Vec<Part> {
-        self.keys
-            .iter()
-            .map(|k| Part::of(k.read(batches, at)))
-            .collect()
+        self.keys.iter().map(|k| k.part(batches, at)).collect()
     }
 
     /// Counts row `id` (values at `at`) if it passes the filter, and says whether it did.
@@ -778,7 +902,8 @@ impl Groups<'_> {
     }
 
     /// The groups as one record batch, one row per group in key order: the key columns,
-    /// then each aggregate. Keys, min and max have the column's type, except that dictionary
+    /// then each aggregate. A bucketed key holds each bucket's start. Keys, min and max have
+    /// the column's type, except that dictionary
     /// columns come out decoded (as their value type) and floats canonical (`0.0` for `-0.0`,
     /// one NaN). Counts are `UInt64`, never null. Sums of integers are `Decimal128(38, 0)`,
     /// which holds any sum a table can produce; sums of decimals `Decimal128(38, scale)`,
@@ -791,10 +916,16 @@ impl Groups<'_> {
         let groups: Vec<&Group> = self.state.groups.values().collect();
         let mut fields = Vec::new();
         let mut columns = Vec::new();
-        for key in &self.state.keys {
-            let rows = groups.iter().map(|g| g.rows.first().copied());
-            columns.push(self.gather(key, rows)?);
-            fields.push(Field::new(&key.name, key.output_type().clone(), true));
+        for (index, key) in self.state.keys.iter().enumerate() {
+            let source = &key.source;
+            columns.push(match key.bucket {
+                Some(_) => self.starts(index, source),
+                None => {
+                    let rows = groups.iter().map(|g| g.rows.first().copied());
+                    self.gather(source, rows)?
+                }
+            });
+            fields.push(Field::new(&source.name, source.output_type().clone(), true));
         }
         for aggregate in &self.state.aggregates {
             let (column, data_type) = self.column(aggregate.output, &groups)?;
@@ -830,6 +961,27 @@ impl Groups<'_> {
                 (self.gather(source, rows)?, source.output_type().clone())
             }
         })
+    }
+
+    /// The bucket starts of key `index`, over `source`, one per group.
+    fn starts(&self, index: usize, source: &Source) -> ArrayRef {
+        let parts = self.state.groups.keys().map(|key| &key[index]);
+        if source.kind == Kind::Float {
+            let starts: Vec<Option<f64>> = parts
+                .map(|part| match part {
+                    Part::Float(bits) => Some(from_prefix(*bits)),
+                    _ => None,
+                })
+                .collect();
+            return float_starts(&source.data_type, &starts);
+        }
+        let starts: Vec<Option<i128>> = parts
+            .map(|part| match part {
+                Part::Decimal(start) => Some(*start),
+                _ => None,
+            })
+            .collect();
+        whole_starts(&source.data_type, &starts)
     }
 
     /// `source`'s values at rows `ids` (`None`: null), dictionaries decoded and floats

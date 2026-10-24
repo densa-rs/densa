@@ -19,6 +19,10 @@ pub enum DataError {
     /// A window's span does not fit its column: a `Duration` goes with dates, times and
     /// timestamps, a number (zero or more) with integers, decimals and floats.
     WindowSpan(String),
+    /// A group's bucket width does not fit its column: a `Duration` of at least one of its
+    /// units goes with dates, times and timestamps, a number of at least one unit with
+    /// integers and decimals, a finite number above zero with floats.
+    BucketWidth(String),
     /// Two columns of a group spec's result would have this name.
     DuplicateName(String),
     /// The batch has a different number of columns.
@@ -69,6 +73,12 @@ impl fmt::Display for DataError {
                 write!(
                     f,
                     "the window's span does not fit the type of column {name:?}"
+                )
+            }
+            Self::BucketWidth(name) => {
+                write!(
+                    f,
+                    "the bucket width does not fit the type of column {name:?}"
                 )
             }
             Self::DuplicateName(name) => write!(f, "two result columns are named {name:?}"),
