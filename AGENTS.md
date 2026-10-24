@@ -216,6 +216,33 @@ fn on_action(ui: &mut Ui, input: WidgetId, grid: WidgetId, action: &Action) {
 }
 ```
 
+Rows enriched from another table (each trade with its instrument's columns), kept up to date
+as either side changes: a `densa::data::LookupJoin`. Its output is a table of your own, so
+it can sit in a grid:
+
+```rust
+use densa::arrow::LiveModel;
+use densa::data::arrow_array::RecordBatch;
+use densa::data::LookupJoin;
+use densa::widgets::DataGrid;
+
+fn enriched(
+    ui: &mut densa::ui::Ui,
+    trades: RecordBatch,      // id (key), symbol, price, ...
+    instruments: RecordBatch, // symbol (key), name, ...
+) -> Result<(LookupJoin, densa::ui::WidgetId), Box<dyn std::error::Error>> {
+    let mut join = LookupJoin::new(trades.schema(), "id", "symbol", instruments.schema(), "symbol")?;
+    let mut table = join.table()?;
+    join.upsert_right(&mut table, instruments)?;
+    join.upsert_left(&mut table, trades)?;
+    let grid = DataGrid::new(LiveModel::new(table)?);
+    let grid = ui.add(ui.root(), grid, DataGrid::<LiveModel>::style())?;
+    // Later, on the window thread: hand the grid's table to the join.
+    //   ui.update::<DataGrid<LiveModel>, _>(grid, |g, cx| join.upsert_left(g.model_mut(cx).table_mut(), more));
+    Ok((join, grid))
+}
+```
+
 A chart that follows a live table: keep the table, a view sorted by time, and a
 `densa::arrow::LiveSeries` per line in your `ChartModel`; call `series.sync(&table)` after
 every change to the table, or the chart shows nothing. `monitor.rs` (its `Trail` model) and

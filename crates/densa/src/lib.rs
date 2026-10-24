@@ -31,6 +31,7 @@
 //! | show rows of your own data | [`widgets::DataGrid`] over your [`grid::GridModel`] |
 //! | keep data sorted, filtered and aggregated as it changes | `data::LiveTable` with `data::ViewSpec` and `data::GroupSpec` |
 //! | keep only recent rows, or count per minute | `data::Window`, `data::GroupSpec::group_by_time` |
+//! | give each row the columns of the row it names in another table | `data::LookupJoin` |
 //! | read a view's rows, or grouped results | `data::View::row` (a `data::RowRef` into `data::LiveTable::batches`), `data::Groups::to_batch` |
 //! | chart data | [`widgets::Chart`] with your [`chart::ChartModel`]; `arrow::LiveSeries` reads a live table |
 //! | arrange panels in tabs and splits | [`widgets::DockArea`] |

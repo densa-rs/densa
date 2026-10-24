@@ -3,6 +3,19 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **Lookup joins** (`densa-data`): `LookupJoin` gives each row of a live table the columns of
+  another table's row whose key it names (a trade its instrument, an order its customer): a
+  left outer join kept up to date both ways. Rows going in on the left are joined as they
+  come; a changed or deleted right row joins again every row naming it. The output is an
+  ordinary `LiveTable` (`LookupJoin::table`), so views, groups, windows and grids work on it;
+  rows removed from it (deleted, or out of a window) leave the join too. Refused with
+  `DataError::JoinKey` when the `on` column cannot hold the right key's values, and with
+  `DataError::JoinTable` when given a table that is not the join's output.
+
 ## 0.2.3
 
 Nothing in the public API of 0.2.2 was removed or changed in a way that breaks code using it

@@ -342,6 +342,31 @@ impl LiveTable {
         live_slot(&self.slots, &self.reuses, record).map(|(_, slot)| slot.row_ref())
     }
 
+    /// The row id holding `key`, if it is live.
+    pub(crate) fn id_of(&self, key: KeyRef<'_>) -> Option<RowId> {
+        self.keys.get(key)
+    }
+
+    /// Where the row with id `id` is, if it is live.
+    pub(crate) fn slot_of(&self, id: RowId) -> Option<RowRef> {
+        let slot = (*self.slots.get(id as usize)?)?;
+        Some(slot.row_ref())
+    }
+
+    /// Each live row's id and place.
+    pub(crate) fn live_ids(&self) -> impl Iterator<Item = (RowId, RowRef)> + '_ {
+        // Lossless: row ids are u32.
+        self.slots
+            .iter()
+            .enumerate()
+            .filter_map(|(id, slot)| Some((id as RowId, (*slot)?.row_ref())))
+    }
+
+    /// The column index of the key.
+    pub(crate) fn key_column(&self) -> usize {
+        self.key_column
+    }
+
     /// The row id of key `key`, if it is live.
     fn key_id(&self, key: &Scalar) -> Option<RowId> {
         let key = match (key, &self.keys) {

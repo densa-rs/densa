@@ -23,8 +23,15 @@ pub enum DataError {
     /// units goes with dates, times and timestamps, a number of at least one unit with
     /// integers and decimals, a finite number above zero with floats.
     BucketWidth(String),
-    /// Two columns of a group spec's result would have this name.
+    /// Two columns of a result would have this name: a group spec's, or a join's (a left
+    /// column and a right one).
     DuplicateName(String),
+    /// A join's `on` column (named here) cannot hold the right table's keys: it must hold the
+    /// same kind of value, integers (signed or unsigned, as the key) or text.
+    JoinKey(String),
+    /// The table given to a join is not laid out as its output (the join's columns, keyed by
+    /// the left key): make it with `LookupJoin::table`.
+    JoinTable,
     /// The batch has a different number of columns.
     ColumnCount {
         /// Columns in the table.
@@ -100,7 +107,16 @@ impl fmt::Display for DataError {
             Self::DuplicateName(name) => write!(
                 f,
                 "two result columns are named {name:?}: give an aggregate another name with \
-                 Aggregate::named"
+                 Aggregate::named, or rename the column on one side of a join"
+            ),
+            Self::JoinKey(name) => write!(
+                f,
+                "column {name:?} cannot name the right table's rows: it must hold the same kind \
+                 of value as the right key (signed integers, unsigned integers, or text, not a                  dictionary)"
+            ),
+            Self::JoinTable => f.write_str(
+                "this table is not the join's output: make it with LookupJoin::table and give \
+                 that table to every call",
             ),
             Self::ColumnCount { expected, found } => {
                 write!(f, "the batch has {found} columns, the table {expected}")

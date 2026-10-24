@@ -221,6 +221,8 @@ fn errors_say_what_is_wrong() {
         (DataError::DuplicateName("count".into()), "count"),
         (DataError::WindowSpan("time".into()), "window"),
         (DataError::BucketWidth("time".into()), "bucket"),
+        (DataError::JoinKey("sym".into()), "sym"),
+        (DataError::JoinTable, "LookupJoin::table"),
         (
             DataError::ColumnCount {
                 expected: 2,
