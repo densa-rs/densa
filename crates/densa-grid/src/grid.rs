@@ -52,7 +52,9 @@ pub trait GridSource {
     /// returns its style.
     ///
     /// Text over [`CELL_BYTES`] does not fit: write a placeholder instead (for example a
-    /// run of `#`, which the painter shows as overflow) rather than ignoring the error.
+    /// run of `#`, which the painter shows as overflow) rather than ignoring the error. The
+    /// same goes for a number `densa_fmt` refuses (NaN or infinite): write `#`, or a word of
+    /// your own such as `n/a`.
     fn cell(&self, row: usize, column: usize, text: &mut CellText) -> CellStyle;
 }
 

@@ -877,6 +877,40 @@ fn tracker(trackers: &mut Vec<Tracker>, source: Source, track: Track) -> usize {
 }
 
 /// The groups of a [`GroupSpec`], ordered by key. Cheap to get.
+///
+/// A group whose last row leaves (deleted, moved to another group, or out of a window) is
+/// gone from them. Read them with [`to_batch`](Self::to_batch): the key columns first, then
+/// each aggregate in the order the spec added them.
+///
+/// ```
+/// use std::sync::Arc;
+/// use densa_data::arrow_array::cast::AsArray;
+/// use densa_data::arrow_array::types::{Float64Type, UInt64Type};
+/// use densa_data::arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
+/// use densa_data::{Aggregate, GroupSpec, LiveTable};
+///
+/// let hosts = RecordBatch::try_from_iter([
+///     ("host", Arc::new(StringArray::from(vec!["h1", "h2", "h3"])) as ArrayRef),
+///     ("region", Arc::new(StringArray::from(vec!["eu", "eu", "us"])) as ArrayRef),
+///     ("ms", Arc::new(Float64Array::from(vec![10.0, 30.0, 5.0])) as ArrayRef),
+/// ])?;
+/// let mut table = LiveTable::new(hosts.schema(), "host")?;
+/// let by_region = table.add_groups(
+///     GroupSpec::new()
+///         .group_by("region")
+///         .aggregate(Aggregate::count())
+///         .aggregate(Aggregate::mean("ms")),
+/// )?;
+/// table.upsert(hosts)?;
+///
+/// let batch = table.groups(by_region).unwrap().to_batch()?;
+/// let regions = batch.column(0).as_string::<i32>(); // the key, in its column's type
+/// let hosts = batch.column(1).as_primitive::<UInt64Type>(); // counts are UInt64
+/// let means = batch.column(2).as_primitive::<Float64Type>(); // means are Float64
+/// assert_eq!((regions.value(0), hosts.value(0), means.value(0)), ("eu", 2, 20.0));
+/// assert_eq!((regions.value(1), hosts.value(1), means.value(1)), ("us", 1, 5.0));
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct Groups<'a> {
     pub(crate) state: &'a GroupState,

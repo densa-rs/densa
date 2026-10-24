@@ -31,10 +31,12 @@
 //! | show rows of your own data | [`widgets::DataGrid`] over your [`grid::GridModel`] |
 //! | keep data sorted, filtered and aggregated as it changes | `data::LiveTable` with `data::ViewSpec` and `data::GroupSpec` |
 //! | keep only recent rows, or count per minute | `data::Window`, `data::GroupSpec::group_by_time` |
+//! | read a view's rows, or grouped results | `data::View::row` (a `data::RowRef` into `data::LiveTable::batches`), `data::Groups::to_batch` |
 //! | chart data | [`widgets::Chart`] with your [`chart::ChartModel`]; `arrow::LiveSeries` reads a live table |
 //! | arrange panels in tabs and splits | [`widgets::DockArea`] |
 //! | update the screen from another thread | `window::Host::waker`, and [`sync::triple_buffer()`] for snapshots |
 //! | format numbers in a frame without allocating | [`fmt`] |
+//! | test widgets without a window | [`ui::Ui::new`] with [`paragraph::TextSystem::bundled`], then [`ui::Ui::pointer`] and [`ui::Ui::actions`] |
 //!
 //! Complete programs to start from are in
 //! [densa-widgets' examples](https://github.com/densa-rs/densa/tree/main/crates/densa-widgets/examples):

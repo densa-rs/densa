@@ -19,6 +19,14 @@
 //! let mut small = FmtBuf::<4>::new();
 //! assert!(write_grouped(&mut small, 1_234_567, ',').is_err());
 //! assert!(small.is_empty());
+//!
+//! // Several writes are undone together by truncating back to where they began.
+//! let mark = text.len();
+//! let written = text.push_str(" and ").and_then(|()| write_fixed(&mut text, f64::NAN, 2));
+//! if written.is_err() {
+//!     text.truncate(mark);
+//! }
+//! assert_eq!(text.as_str(), "1,234,567 at 101.50");
 //! # Ok::<(), densa_fmt::FmtError>(())
 //! ```
 

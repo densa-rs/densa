@@ -5,6 +5,21 @@ application with it, then for changing densa itself. The API documentation on
 [docs.rs](https://docs.rs/densa) is the reference; [densa.dev/llms.txt](https://densa.dev/llms.txt)
 lists the same material as plain text.
 
+## Reading the docs and the source
+
+- Fetch these files as they are (`curl https://densa.dev/llms-full.txt`): a tool that
+  summarizes a page drops the item names and signatures you need.
+  [llms-full.txt](https://densa.dev/llms-full.txt) holds this file and every crate's front
+  page, with an example each.
+- docs.rs shows the last release. Code newer than it (on the main branch, listed under
+  "Unreleased" in the CHANGELOG) is documented in the source.
+- The source of the densa you build is on your disk, with every doc comment and example. From
+  crates.io: `~/.cargo/registry/src/*/densa-data-0.2.*/` (one folder per crate). From git:
+  `~/.cargo/git/checkouts/densa-*/<commit>/`, where `<commit>` is the first 7 characters of
+  the hash after `#` in the `densa` entries of your `Cargo.lock` (older commits sit beside it).
+- The examples in `crates/densa-widgets/examples/` and the tests in each crate's `tests/`
+  folder show every widget in use.
+
 ## Versions: check these before writing code
 
 densa is younger than most training data. Use what the installed crates say, not memory:
@@ -47,12 +62,27 @@ How the pieces fit:
 - Widgets live in the `Ui` and are reached by `WidgetId`. Change one with
   `ui.update::<Type, _>(id, |widget, cx| ...)`; read one with `ui.widget::<Type>(id)`. Do not
   keep references to widgets.
-- Layout is flexbox (`densa_ui::Style`) in logical pixels; painting is in physical pixels.
-- Live data: a `densa_data::LiveTable` keyed by an integer or text column. `upsert` replaces
+- Widgets are in `densa::widgets` (`Label`, `Button`, `TextInput`, `Panel`, `ScrollView`,
+  `Splitter`, `DockArea`, `MenuBar`, `DataGrid`, `Chart`). Add one with
+  `ui.add(parent, widget, style)`: `parent` is `ui.root()` or a container such as `Panel`, and
+  `style` a `densa::ui::Style`, usually `Style::row()` or `Style::column()` with `.gap(..)`,
+  `.padding(..)` and `.grow(1.0)` (widgets that fill space, such as `DataGrid`, give theirs:
+  `DataGrid::<M>::style()`). The root is a column the size of the window.
+- Layout is flexbox in logical pixels; painting is in physical pixels.
+- A widget reports what the user did as an `Action { source, kind }` (`ActionKind::Clicked`,
+  `Changed`, `Submitted`, `Selected(row)`, ...), passed to `App::action`; read the details from
+  the widget (`ui.widget::<TextInput>(id)?.text()`).
+- Live data: a `densa_data::LiveTable` keyed by an integer or text column (the key column may
+  be declared nullable; a row with a null key is refused). `upsert` replaces
   rows by key; views (`ViewSpec`: sort and filter) and grouped aggregates (`GroupSpec`) follow
   every change; `Window` keeps only recent rows. Every batch must have the table's columns:
-  the same names, order and data types (`LiveTable::schema`). Show a table with `DataGrid<densa_arrow::LiveModel>`, and change
-  it through `grid.model_mut(cx).table_mut()`.
+  the same names, order and data types (`LiveTable::schema`). Delete by key with an Arrow array
+  of the key column's type (`table.delete(&StringArray::from(vec!["h1"]))`). Read a view's
+  rows through `table.view(id)`: each `view.row(i)` is a `RowRef` naming one of
+  `table.batches()` and a row in it; read grouped results with
+  `table.groups(id).unwrap().to_batch()` (keys first, then the aggregates in the order you added
+  them). The rustdoc of `View` and `Groups` shows both. Show a table with
+  `DataGrid<densa_arrow::LiveModel>`, and change it through `grid.model_mut(cx).table_mut()`.
 - Other threads never touch the `Ui`. They hand data over (a channel, or
   `densa_sync::triple_buffer` for snapshots) and call `Waker::wake` (from `host.waker()`) so a
   frame comes.
@@ -61,6 +91,34 @@ How the pieces fit:
 
 Errors are typed (`DataError`, `UiError`, `ParagraphError`, `WindowError`, ...) and their
 messages say what to change: read the message before guessing.
+
+### Testing without a window
+
+A `Ui` runs without a window or GPU, so widgets and whole forms can be tested with
+`cargo test`:
+
+```rust
+use densa::core::{Point, Size};
+use densa::paragraph::TextSystem;
+use densa::ui::{ActionKind, PointerButton, PointerEvent, PointerKind, Style, Ui};
+use densa::widgets::Button;
+
+let mut ui = Ui::new(TextSystem::bundled()?); // the bundled font: the same on every machine
+ui.resize(Size::new(800.0, 600.0));
+let save = ui.add(ui.root(), Button::new("Save"), Style::row())?;
+ui.layout();
+
+let r = ui.rect(save).unwrap();
+let at = Point::new((r.left() + r.right()) / 2.0, (r.top() + r.bottom()) / 2.0);
+for kind in [PointerKind::Down(PointerButton::Primary), PointerKind::Up(PointerButton::Primary)] {
+    ui.pointer(PointerEvent::new(kind, at));
+}
+let clicked = ui.actions().any(|a| a.source == save && a.kind == ActionKind::Clicked);
+assert!(clicked);
+```
+
+`ui.paint(&mut canvas)` draws the frame into a `densa::draw::Canvas`, for tests that count
+what was drawn.
 
 ## Changing densa
 

@@ -401,6 +401,20 @@ impl LiveTable {
     /// Deletes the rows of `keys` (an array of the key column's kind; nulls and unknown keys
     /// are skipped). Views follow.
     ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # use densa_data::arrow_array::{ArrayRef, Int64Array, RecordBatch};
+    /// # use densa_data::LiveTable;
+    /// # let ids: ArrayRef = Arc::new(Int64Array::from(vec![1, 2, 3]));
+    /// # let rows = RecordBatch::try_from_iter([("id", ids)])?;
+    /// # let mut table = LiveTable::new(rows.schema(), "id")?;
+    /// # table.upsert(rows)?;
+    /// // Keys go in an Arrow array of the key column's type: here an Int64 key.
+    /// table.delete(&Int64Array::from(vec![1, 3]))?;
+    /// assert_eq!(table.len(), 1);
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
     /// # Errors
     /// [`DataError::KeyType`] if `keys` is not of the key column's kind: nothing changes.
     pub fn delete(&mut self, keys: &dyn Array) -> Result<Changes, DataError> {
@@ -865,6 +879,36 @@ fn nullable(schema: &Schema) -> SchemaRef {
 }
 
 /// The rows of a view, in its order. Cheap to get; reading never allocates.
+///
+/// A row is a [`RowRef`]: which of [`LiveTable::batches`] holds it, and where. Read its
+/// values from that batch's columns:
+///
+/// ```
+/// use std::sync::Arc;
+/// use densa_data::arrow_array::cast::AsArray;
+/// use densa_data::arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
+/// use densa_data::{LiveTable, Order, ViewSpec};
+///
+/// let rows = RecordBatch::try_from_iter([
+///     ("symbol", Arc::new(StringArray::from(vec!["AAA", "BBB"])) as ArrayRef),
+///     ("price", Arc::new(Float64Array::from(vec![150.0, 90.0])) as ArrayRef),
+/// ])?;
+/// let mut table = LiveTable::new(rows.schema(), "symbol")?;
+/// let cheapest = table.add_view(ViewSpec::new().sort_by("price", Order::Ascending))?;
+/// table.upsert(rows)?;
+///
+/// let view = table.view(cheapest).unwrap();
+/// let symbols: Vec<&str> = (0..view.len())
+///     .filter_map(|i| view.row(i))
+///     .map(|at| {
+///         let batch = &table.batches()[at.batch];
+///         // The column's Arrow type, as the table's schema has it (Utf8 here).
+///         batch.column_by_name("symbol").unwrap().as_string::<i32>().value(at.row)
+///     })
+///     .collect();
+/// assert_eq!(symbols, ["BBB", "AAA"]);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct View<'a> {
     state: &'a ViewState,
