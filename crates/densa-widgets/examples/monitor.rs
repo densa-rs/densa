@@ -4,11 +4,16 @@
 //! samples table, filtered by host and sorted by time (an hour is kept; older samples are
 //! deleted as new ones arrive).
 //!
+//! The samples come the way an application's data does: a worker thread simulates the fleet,
+//! sends each second's samples over a channel and wakes the window; each frame takes in what
+//! arrived, and nothing is repainted while nothing comes.
+//!
 //! `cargo run --release -p densa-widgets --example monitor` (`--light` for the light theme,
 //! `--seconds N` to close after N seconds).
 
 use std::error::Error;
 use std::f64::consts::TAU;
+use std::sync::mpsc::{self, Receiver};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -31,8 +36,10 @@ use densa_window::{App, Host, WindowOptions};
 const HOSTS: usize = 1_000;
 /// Seconds between two samples of a host.
 const EVERY: usize = 5;
-/// Simulated milliseconds that pass each frame.
+/// Simulated milliseconds in each of the worker's steps: a second of the fleet.
 const FRAME_MS: i64 = 1_000;
+/// Real time between two of the worker's steps: a simulated minute passes each real second.
+const STEP: Duration = Duration::from_millis(16);
 /// Samples kept: an hour of them.
 const KEPT: i64 = 3_600 * (HOSTS / EVERY) as i64;
 /// 2026-10-19 08:00:00 UTC, in milliseconds: where the history starts.
@@ -96,10 +103,12 @@ struct Fleet {
     next_id: i64,
 }
 
-/// One frame's samples, as rows of both tables.
+/// One step's samples, as rows of both tables.
 struct Samples {
     hosts: RecordBatch,
     samples: RecordBatch,
+    /// The id the next sample will have.
+    next_id: i64,
 }
 
 impl Fleet {
@@ -188,6 +197,7 @@ impl Fleet {
         Ok(Samples {
             hosts,
             samples: rows.batch()?,
+            next_id: self.next_id,
         })
     }
 
@@ -398,7 +408,10 @@ type TrailChart = Chart<Trail>;
 struct MonitorApp {
     light: bool,
     close_at: Option<Instant>,
-    fleet: Fleet,
+    /// The fleet, until `build` hands it to the worker thread.
+    fleet: Option<Fleet>,
+    /// What the worker sends.
+    arrivals: Option<Receiver<Samples>>,
     ids: Option<Ids>,
     status_at: Instant,
 }
@@ -415,9 +428,8 @@ impl MonitorApp {
     /// slowest host.
     fn models(&mut self) -> Result<(LiveModel, Trail), Box<dyn Error>> {
         // Lossless: an hour of seconds.
-        let history = self
-            .fleet
-            .sample((KEPT / (HOSTS / EVERY) as i64) as usize)?;
+        let fleet = self.fleet.as_mut().ok_or("the fleet is with the worker")?;
+        let history = fleet.sample((KEPT / (HOSTS / EVERY) as i64) as usize)?;
         let slowest = slowest(&history.hosts);
         let mut hosts = LiveTable::new(history.hosts.schema(), "host")?;
         hosts.upsert(history.hosts)?;
@@ -477,7 +489,7 @@ fn slowest(hosts: &RecordBatch) -> String {
 }
 
 impl App for MonitorApp {
-    fn build(&mut self, ui: &mut Ui, _: &mut Host<'_>) -> Result<(), Box<dyn Error>> {
+    fn build(&mut self, ui: &mut Ui, host: &mut Host<'_>) -> Result<(), Box<dyn Error>> {
         if self.light {
             ui.set_theme(Theme::light());
         }
@@ -514,6 +526,23 @@ impl App for MonitorApp {
         };
         Self::show_status(ui, &ids);
         self.ids = Some(ids);
+
+        // From here on the fleet lives on a thread of its own, as a data source would: it
+        // never touches the interface, only sends samples and wakes the window.
+        let mut fleet = self.fleet.take().ok_or("built twice")?;
+        let (send, arrivals) = mpsc::channel();
+        let waker = host.waker();
+        std::thread::spawn(move || loop {
+            std::thread::sleep(STEP);
+            let Ok(samples) = fleet.sample(1) else {
+                return;
+            };
+            if send.send(samples).is_err() {
+                return; // the window closed
+            }
+            waker.wake();
+        });
+        self.arrivals = Some(arrivals);
         Ok(())
     }
 
@@ -533,18 +562,19 @@ impl App for MonitorApp {
         Self::show_status(ui, ids);
     }
 
+    /// Takes in the samples that arrived since the last frame. Returns `false`: the next frame
+    /// comes when the worker wakes the window again (or the user does something).
     fn frame(&mut self, ui: &mut Ui, host: &mut Host<'_>) -> bool {
-        let Some(ids) = &self.ids else {
+        let (Some(ids), Some(arrivals)) = (&self.ids, &self.arrivals) else {
             return false;
         };
-        if let Ok(samples) = self.fleet.sample(1) {
-            let next_id = self.fleet.next_id;
+        for samples in arrivals.try_iter() {
             ui.update::<Grid, _>(ids.grid, |grid, cx| {
                 // The batch has the table's schema: an upsert cannot fail.
                 let _ = grid.model_mut(cx).table_mut().upsert(samples.hosts);
             });
             ui.update::<TrailChart, _>(ids.chart, |chart, cx| {
-                let _ = chart.model_mut(cx).add(samples.samples, next_id);
+                let _ = chart.model_mut(cx).add(samples.samples, samples.next_id);
             });
         }
         if self.status_at.elapsed() >= STATUS_EVERY {
@@ -553,9 +583,8 @@ impl App for MonitorApp {
         }
         if self.close_at.is_some_and(|at| Instant::now() >= at) {
             host.close();
-            return false;
         }
-        true
+        false
     }
 }
 
@@ -571,7 +600,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let app = MonitorApp {
         light,
         close_at: seconds.map(|s| Instant::now() + Duration::from_secs(s)),
-        fleet: Fleet::new(),
+        fleet: Some(Fleet::new()),
+        arrivals: None,
         ids: None,
         status_at: Instant::now(),
     };

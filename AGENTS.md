@@ -44,9 +44,9 @@ Complete programs to copy from, in `crates/densa-widgets/examples/`:
 
 | Example | Shows |
 |---|---|
-| `monitor.rs` | a live table in a grid, sorted, and a chart of the selected row's history |
+| `monitor.rs` | a live table in a grid, sorted, and a chart of the selected row's history, fed by a worker thread that wakes the window (the pattern to copy for live data) |
 | `linked.rs` | a grid and a chart over two live tables, the chart filtered by the selected row |
-| `live_table.rs` | 100,000 rows, 1,000 updated every frame; click a title to sort, type to filter |
+| `live_table.rs` | 100,000 rows, 1,000 updated every frame (made inside `frame`, a stress test: copy `monitor.rs` for real data); click a title to sort, type to filter |
 | `dock.rs` | panels in tabs and splits, dragged around; with `--layout FILE` the layout is saved and restored |
 | `gallery.rs` | the standard widgets: menus, a toolbar, a list, a splitter, text input |
 | `chart.rs` | a chart of your own data with panes, zoom and pan |

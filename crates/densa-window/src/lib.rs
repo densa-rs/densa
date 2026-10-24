@@ -69,6 +69,11 @@ use crate::gpu::Gpu;
 pub trait App: 'static {
     /// Fills the interface: called once, when the window and its [`Ui`] exist.
     ///
+    /// Start threads that bring data here, giving each a [`Waker`] (`host.waker()`): they
+    /// send what they read (over a channel, say) and call [`Waker::wake`];
+    /// [`frame`](Self::frame) takes it in. The `densa` crate's front page and densa-widgets'
+    /// `monitor` example show the whole pattern.
+    ///
     /// # Errors
     /// Any error stops [`run`], which returns it.
     fn build(&mut self, ui: &mut Ui, host: &mut Host<'_>) -> Result<(), Box<dyn Error>>;
@@ -85,9 +90,11 @@ pub trait App: 'static {
         let _ = (ui, host, drop);
     }
 
-    /// Updates live content before a frame is painted. Return `true` to keep painting frames
+    /// Updates live content before a frame is painted: take in what your threads sent, and
+    /// change widgets through `ui.update`. Return `true` to keep painting frames
     /// continuously (animation), `false` to paint only when something changes or a
-    /// [`Waker`] asks for a frame.
+    /// [`Waker`] asks for a frame. Data that arrives from threads needs `false`: their
+    /// wakes bring the frames.
     fn frame(&mut self, ui: &mut Ui, host: &mut Host<'_>) -> bool {
         let _ = (ui, host);
         false
