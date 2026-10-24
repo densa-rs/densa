@@ -547,3 +547,56 @@ fn each_pane_has_its_title_on_a_line_above_it() {
         "a pane without a title has no line"
     );
 }
+
+/// Three bars named by place, one pane.
+struct Named(Option<[&'static str; 3]>);
+
+impl ChartModel for Named {
+    fn x_kind(&self) -> AxisKind {
+        AxisKind::Category
+    }
+
+    fn x_extent(&self) -> Option<(f64, f64)> {
+        Some((-0.5, 2.5))
+    }
+
+    fn y_axis(&self, _: usize, _: &Axis) -> Option<Axis> {
+        Some(Axis::number(0.0, 10.0))
+    }
+
+    fn paint(&self, _: usize, _: &Plot, _: &mut Canvas<'_>, _: &ChartPalette) {}
+
+    fn category(&self, index: usize) -> Option<&str> {
+        self.0?.get(index).copied()
+    }
+}
+
+#[test]
+fn category_names_are_written_under_the_chart_and_in_the_crosshair() {
+    let glyphs_below = |names: Option<[&'static str; 3]>, hover: bool| {
+        let mut ui = Ui::new(TextSystem::bundled().unwrap());
+        ui.resize(Size::new(800.0, 400.0));
+        let id = ui
+            .add(
+                ui.root(),
+                Chart::new(Named(names), 3.0),
+                Chart::<Named>::style(),
+            )
+            .unwrap();
+        ui.layout();
+        assert!(ui.widget::<Chart<Named>>(id).is_some());
+        if hover {
+            send(&mut ui, PointerKind::Move, Point::new(400.0, 100.0));
+        }
+        let instances = paint(&mut ui);
+        // The plot ends a label line above the bottom.
+        instances
+            .iter()
+            .filter(|i| i.is_glyph() && i.rect[1] > 370.0)
+            .count()
+    };
+    assert_eq!(glyphs_below(Some(["north", "south", "east"]), false), 14);
+    assert_eq!(glyphs_below(None, false), 0, "no names, no labels");
+    // Hovering the middle bar names it in the crosshair's box too.
+    assert_eq!(glyphs_below(Some(["north", "south", "east"]), true), 19);
+}

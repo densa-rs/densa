@@ -458,11 +458,13 @@ impl<M: ChartModel> Chart<M> {
                     .y_axis(pane, &x)
                     .unwrap_or_else(|| Axis::number(0.0, 1.0));
                 let plot = Plot::new(area, x, y);
-                painter.paint_axes(canvas, &plot, last);
-                self.model.paint(pane, &plot, canvas, painter.palette());
+                let model = &self.model;
+                let names = |index| model.category(index);
+                painter.paint_axes_named(canvas, &plot, last, &names);
+                model.paint(pane, &plot, canvas, painter.palette());
                 painter.paint_title(canvas, &plot, title);
                 if let Some(at) = hover {
-                    painter.paint_crosshair(canvas, &plot, at, last);
+                    painter.paint_crosshair_named(canvas, &plot, at, last, &names);
                 }
             }
         }

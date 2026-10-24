@@ -11,6 +11,11 @@ pub enum AxisKind {
     /// Seconds since 1970-01-01 UTC: ticks at whole seconds, minutes, hours or days,
     /// labelled as times of day or dates (in UTC; there is no time-zone database).
     Time,
+    /// Places `0, 1, 2, ...` of named things, such as a bar chart's categories: ticks at
+    /// whole places (every one, or every 2nd, 5th, 10th... as room allows), labelled with
+    /// their names by [`ChartPainter::paint_axes_named`](crate::ChartPainter::paint_axes_named)
+    /// (`paint_axes` draws their gridlines only).
+    Category,
 }
 
 /// The values one axis of a plot spans, `start` below `end`.
@@ -46,6 +51,11 @@ impl Axis {
     /// An axis of times from `start` to `end`, in seconds since 1970-01-01 UTC.
     pub fn time(start: f64, end: f64) -> Self {
         Self::new(start, end, AxisKind::Time)
+    }
+
+    /// An axis of category places from `start` to `end` (place `i` is the `i`th name).
+    pub fn category(start: f64, end: f64) -> Self {
+        Self::new(start, end, AxisKind::Category)
     }
 
     /// An axis of `kind` from `start` to `end`.
@@ -136,6 +146,8 @@ impl Axis {
         let raw = self.span() / max.max(1) as f64;
         let step = match self.kind {
             AxisKind::Number => nice_step(raw),
+            // Between two places there is nothing to label.
+            AxisKind::Category => nice_step(raw).max(1.0),
             AxisKind::Time if raw < 1.0 => nice_step(raw),
             AxisKind::Time if raw > DAY => nice_step(raw / DAY) * DAY,
             AxisKind::Time => TIME_STEPS
@@ -195,8 +207,9 @@ impl Ticks {
     }
 
     /// Appends the label of tick `value`, as precise as the step needs: `0.25` for steps of
-    /// 0.05, `14:30` for steps of minutes, `2026-10-19` for steps of days. All or nothing,
-    /// like every `densa_fmt` write.
+    /// 0.05, `14:30` for steps of minutes, `2026-10-19` for steps of days; a category's
+    /// place as a number (its name is the caller's). All or nothing, like every `densa_fmt`
+    /// write.
     ///
     /// # Errors
     /// [`FmtError::Overflow`] if the label does not fit, [`FmtError::NotFinite`] for a
@@ -210,7 +223,7 @@ impl Ticks {
             return Err(FmtError::NotFinite);
         }
         match self.kind {
-            AxisKind::Number => {
+            AxisKind::Number | AxisKind::Category => {
                 let digits = decimals(self.step);
                 // Lossless: at most 15 digits.
                 let scale = 10f64.powi(digits as i32);

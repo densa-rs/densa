@@ -118,7 +118,7 @@ densa-window = "0.2"
 | [`densa-widgets`](crates/densa-widgets) | Labels, buttons, text inputs with undo and the clipboard, scroll views, splitters, panels, docking with saved layouts, menus and context menus, a data grid widget that selects and copies rows, a chart widget |
 | [`densa-window`](crates/densa-window) | Running an interface in a native window: winit input in, a wgpu frame out, screen readers through AccessKit, files dropped on the window handed to the app |
 | [`densa-grid`](crates/densa-grid) | A data grid over your own data (`GridModel`, `GridSource`): columns, alignment, cell styles |
-| [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number and time axes, a crosshair |
+| [`densa-chart`](crates/densa-chart) | Charts over your own data (`Points`, `Candles`, `ChartModel`): lines, candlesticks, bars, number, time and category axes, a crosshair |
 | [`densa-paragraph`](crates/densa-paragraph) | Paragraphs: shaping, wrapping, bidirectional text, selection, keyboard navigation, editing with input methods, undo and redo |
 | [`densa-text`](crates/densa-text) | Fonts, glyph rasterization and a glyph atlas that fits the GPU's limits |
 | [`densa-draw`](crates/densa-draw) | A frame's display list: a `Canvas` that batches rectangles and glyphs, independent of any GPU API |

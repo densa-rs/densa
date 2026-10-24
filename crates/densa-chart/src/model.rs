@@ -48,6 +48,13 @@ pub trait ChartModel {
         ""
     }
 
+    /// The name of place `index` of a [`Category`](AxisKind::Category) `x` axis, written
+    /// under it and in the crosshair's box; `None` (the default) for none there.
+    fn category(&self, index: usize) -> Option<&str> {
+        let _ = index;
+        None
+    }
+
     /// Called before every frame is painted, to catch up with new data. Does nothing by
     /// default.
     fn prepare(&mut self) {}

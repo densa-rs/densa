@@ -258,3 +258,18 @@ fn huge_times_are_labelled_without_panicking() {
         }
     }
 }
+
+#[test]
+fn categories_tick_at_whole_places_only() {
+    let bars = Axis::category(-0.5, 9.5);
+    assert_eq!(bars.kind(), AxisKind::Category);
+    let every: Vec<f64> = bars.ticks(40).collect();
+    assert_eq!(
+        every,
+        (0..10).map(f64::from).collect::<Vec<_>>(),
+        "never between two"
+    );
+    assert_eq!(labels(bars, 2), ["0", "5"]);
+    assert_eq!(bars.ticks(5).step(), 2.0);
+    assert_eq!(Axis::category(0.0, 1.0).ticks(100).step(), 1.0);
+}

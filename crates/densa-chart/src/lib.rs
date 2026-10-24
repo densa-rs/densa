@@ -4,7 +4,8 @@
 //! Domain-agnostic: an application implements [`Points`] (a line or bars) or [`Candles`]
 //! over its data in ascending `x`, picks the visible part with an [`Axis`] for each
 //! direction, and draws onto a [`Plot`] (an area of the canvas and its two axes). Time axes
-//! count seconds since the epoch and label ticks as times of day or dates (UTC).
+//! count seconds since the epoch and label ticks as times of day or dates (UTC); category
+//! axes place named things (a bar chart's bars) at `0, 1, 2, ...` and label them by name.
 //!
 //! A chart widget asks its data through [`ChartModel`]: panes on one time axis, each giving
 //! its vertical axis for what shows and drawing its series.

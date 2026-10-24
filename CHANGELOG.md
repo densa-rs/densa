@@ -12,6 +12,12 @@ version without changes of its own.
   (`FileDrop::Dropped`). It does nothing by default. `WindowOptions::with_file_drops(false)`
   turns drops off (on Windows the window then leaves OLE alone, for apps whose thread uses
   COM in its multithreaded mode).
+- **Category axes** (`densa-chart`, `densa-widgets`): `AxisKind::Category` (`Axis::category`)
+  places named things at `0, 1, 2, ...`, such as the bars of a bar chart, with ticks only at
+  whole places. `ChartModel::category` names each place; the `Chart` widget writes the names
+  under the bars (every one, or every few when they are dense, cut short with `…` when long)
+  and in the crosshair's box. `ChartPainter::paint_axes_named` and
+  `ChartPainter::paint_crosshair_named` do the same for charts drawn without the widget.
 
 ## 0.2.1
 

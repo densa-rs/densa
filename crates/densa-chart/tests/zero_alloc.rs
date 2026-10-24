@@ -5,7 +5,7 @@ use std::hint::black_box;
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_chart::{
     paint_bars, paint_candles, paint_line, Axis, BarStyle, Candle, CandleStyle, ChartPainter,
-    ChartPalette, LineStyle, Plot, Rect,
+    ChartPalette, LineStyle, Plot, Point, Rect,
 };
 use densa_draw::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, Font, GlyphCache};
@@ -79,5 +79,50 @@ fn frames_of_a_scrolling_chart_perform_zero_heap_operations() {
     });
     assert!(stats.is_zero(), "drawing allocated: {stats:?}");
     assert_eq!(out.dropped(), 0);
+    assert_eq!(cache.stats().dropped, 0);
+}
+
+#[test]
+fn frames_of_named_bars_perform_zero_heap_operations_once_their_names_are_cached() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let names: Vec<String> = (0..500).map(|i| format!("région de mesure {i}")).collect();
+    let bars: Vec<(f64, f64)> = (0..500).map(|i| (f64::from(i), f64::from(i % 7))).collect();
+    let palette = ChartPalette::new();
+    let mut painter = ChartPainter::new(Font::bundled_mono().unwrap(), 13.0, palette);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(50_000);
+    let named = |i: usize| names.get(i).map(String::as_str);
+    let mut frame = |painter: &mut ChartPainter, cache: &mut GlyphCache, left: f64| {
+        let x = Axis::category(left, left + 40.0);
+        let plot = Plot::new(
+            painter.plot_area(Rect::new(0.0, 0.0, 1_200.0, 400.0), true),
+            x,
+            Axis::number(0.0, 7.0),
+        );
+        let mut canvas = Canvas::begin(cache, &mut out);
+        painter.paint_axes_named(&mut canvas, &plot, true, &named);
+        paint_bars(&mut canvas, &plot, &bars[..], 1.0, BarStyle::new(), |_| {
+            palette.line
+        });
+        let at = Point::new(plot.x_px(left + 20.0), 100.0);
+        painter.paint_crosshair_named(&mut canvas, &plot, at, true, &named);
+        cache.drain_updates().for_each(drop);
+        black_box(out.as_slice());
+    };
+    let scroll = |painter: &mut ChartPainter,
+                  cache: &mut GlyphCache,
+                  frame: &mut dyn FnMut(&mut ChartPainter, &mut GlyphCache, f64)| {
+        for step in 0..300 {
+            frame(painter, cache, -0.5 + f64::from(step) * 1.5);
+        }
+    };
+    // The first pass caches the names' characters (the é among them, and the … that ends
+    // the names cut to their 30 pixels) where they fall.
+    scroll(&mut painter, &mut cache, &mut frame);
+    let ((), stats) = measure(|| scroll(&mut painter, &mut cache, &mut frame));
+    assert!(stats.is_zero(), "drawing allocated: {stats:?}");
     assert_eq!(cache.stats().dropped, 0);
 }
