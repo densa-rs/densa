@@ -239,6 +239,8 @@ fn errors_say_what_is_wrong() {
     for (error, needle) in cases {
         let message = error.to_string();
         assert!(message.contains(needle), "{message:?} lacks {needle:?}");
+        // A string continued on the next line without `\` keeps that line's indent.
+        assert!(!message.contains("  "), "{message:?} has a run of spaces");
     }
 }
 

@@ -112,7 +112,8 @@ impl fmt::Display for DataError {
             Self::JoinKey(name) => write!(
                 f,
                 "column {name:?} cannot name the right table's rows: it must hold the same kind \
-                 of value as the right key (signed integers, unsigned integers, or text, not a                  dictionary)"
+                 of value as the right key (signed integers, unsigned integers, or text, not a \
+                 dictionary)"
             ),
             Self::JoinTable => f.write_str(
                 "this table is not the join's output: make it with LookupJoin::table and give \
