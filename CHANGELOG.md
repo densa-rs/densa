@@ -3,7 +3,10 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
-## Unreleased
+## 0.2.3
+
+Nothing in the public API of 0.2.2 was removed or changed in a way that breaks code using it
+(checked with `cargo-semver-checks`): projects asking for `0.2` get this release with `cargo update`.
 
 ### Added
 
@@ -18,8 +21,13 @@ version without changes of its own.
   CI runs, and the `densa` crate's front page maps tasks to modules and shows a complete
   program (a live table in a grid, in a window). `AGENTS.md` at the repository's root gives
   coding agents the versions to use, how the pieces fit and which example to copy, with lines
-  for your own project's `AGENTS.md`; densa.dev serves the docs as plain text at `/llms.txt`
-  and `/llms-full.txt`.
+  for your own project's `AGENTS.md`, and recipes (a menu bar, a grid model of your own,
+  filtering as the user types, a chart following a live table, testing without a window);
+  densa.dev serves the docs as plain text at `/llms.txt` and `/llms-full.txt`. `View`,
+  `Groups`, `LiveTable::delete` and `GridSource::cell` have examples or notes on reading
+  results, and the `monitor` example gets its data from a worker thread that wakes the window,
+  the pattern applications should copy. These were found by agents new to densa doing tasks
+  with it.
 
 ### Changed
 
