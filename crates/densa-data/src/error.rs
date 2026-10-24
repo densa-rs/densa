@@ -53,46 +53,70 @@ pub enum DataError {
 impl fmt::Display for DataError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::UnknownColumn(name) => write!(f, "there is no column named {name:?}"),
+            Self::UnknownColumn(name) => write!(
+                f,
+                "there is no column named {name:?}: names match exactly, case included \
+                 (the table's schema lists them)"
+            ),
             Self::UnsupportedKey(name) => {
                 write!(f, "key column {name:?} must hold integers or strings")
             }
             Self::UnsupportedColumn(name) => {
                 write!(
                     f,
-                    "views and groups cannot read column {name:?} of this type"
+                    "views and groups cannot read column {name:?} of this type: they read \
+                     booleans, integers, floats, decimals, text (or dictionaries of text), dates, \
+                     times, timestamps and durations"
                 )
             }
             Self::LiteralMismatch(name) => {
                 write!(f, "the filter does not fit the type of column {name:?}")
             }
             Self::NotNumeric(name) => {
-                write!(f, "column {name:?} is not numeric: it cannot be summed")
+                write!(
+                    f,
+                    "column {name:?} is not numeric, so it has no sum or mean: those take \
+                     integers, decimals and floats (count takes no column; min and max take any column \
+                     views can sort)"
+                )
             }
             Self::WindowSpan(name) => {
                 write!(
                     f,
-                    "the window's span does not fit the type of column {name:?}"
+                    "the window's span does not fit the type of column {name:?}: \
+                     Window::duration goes with dates, times, timestamps and durations, \
+                     Window::span (zero or more) with integers, decimals and floats"
                 )
             }
             Self::BucketWidth(name) => {
                 write!(
                     f,
-                    "the bucket width does not fit the type of column {name:?}"
+                    "the bucket width does not fit the type of column {name:?}: \
+                     group_by_time takes at least one of the column's units for dates, times, \
+                     timestamps and durations, group_by_step at least one unit for integers \
+                     and decimals, or a finite step above zero for floats"
                 )
             }
-            Self::DuplicateName(name) => write!(f, "two result columns are named {name:?}"),
+            Self::DuplicateName(name) => write!(
+                f,
+                "two result columns are named {name:?}: give an aggregate another name with \
+                 Aggregate::named"
+            ),
             Self::ColumnCount { expected, found } => {
                 write!(f, "the batch has {found} columns, the table {expected}")
             }
             Self::ColumnMismatch { column } => {
                 write!(
                     f,
-                    "column {column} of the batch has another name or data type"
+                    "column {column} of the batch has another name or data type than the \
+                     table's: every batch must have the table's schema (LiveTable::schema)"
                 )
             }
             Self::NullKey { row } => write!(f, "row {row} of the batch has a null key"),
-            Self::KeyType => f.write_str("the keys are not of the key column's kind"),
+            Self::KeyType => f.write_str(
+                "the keys are not of the key column's kind: give integers for a key column of \
+                 integers, strings for one of strings",
+            ),
             Self::TooManyRows => f.write_str("more than 2^32 live keys, or rows in one batch"),
             Self::Arrow(message) => write!(f, "Arrow could not build a batch: {message}"),
         }

@@ -4,6 +4,23 @@
 //! only digit grouping, which `core::fmt` lacks, is hand-written. All writes append
 //! all-or-nothing: on error the buffer is left exactly as it was. [`civil_from_days`] turns
 //! days since the epoch into a calendar date, for writers of dates.
+//!
+//! ```
+//! use densa_fmt::{write_fixed, write_grouped, FmtBuf};
+//!
+//! // On the stack: nothing here allocates, so it can run in every frame.
+//! let mut text = FmtBuf::<32>::new();
+//! write_grouped(&mut text, 1_234_567, ',')?;
+//! text.push_str(" at ")?;
+//! write_fixed(&mut text, 101.5, 2)?;
+//! assert_eq!(text.as_str(), "1,234,567 at 101.50");
+//!
+//! // A write that does not fit leaves the buffer as it was.
+//! let mut small = FmtBuf::<4>::new();
+//! assert!(write_grouped(&mut small, 1_234_567, ',').is_err());
+//! assert!(small.is_empty());
+//! # Ok::<(), densa_fmt::FmtError>(())
+//! ```
 
 use std::fmt::{self, Write as _};
 

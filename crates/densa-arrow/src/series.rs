@@ -27,7 +27,11 @@ impl fmt::Display for SeriesError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::NoSuchColumn(name) => write!(f, "no column named {name:?}"),
-            Self::NotNumeric(name) => write!(f, "column {name:?} is not numeric"),
+            Self::NotNumeric(name) => write!(
+                f,
+                "column {name:?} is not numeric: a series reads integers, f32 and f64 floats, \
+                 decimals, timestamps and dates"
+            ),
         }
     }
 }

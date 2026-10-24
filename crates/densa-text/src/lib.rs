@@ -12,6 +12,26 @@
 //!
 //! A warm cache answers lookups without allocating, so per-frame text drawing stays
 //! allocation-free; rasterizing a glyph seen for the first time allocates, once.
+//!
+//! ```
+//! use densa_text::{quantize_x, AtlasConfig, Font, GlyphCache, GlyphMap};
+//!
+//! let mut chars = GlyphMap::new(Font::bundled_mono()?, 14.0);
+//! let mut cache = GlyphCache::new(AtlasConfig::default());
+//!
+//! cache.begin_frame();
+//! let a = chars.get('A').expect("the bundled font has A");
+//! let (_, subpixel) = quantize_x(10.25); // a pen at x = 10.25 px
+//! let placed = cache.get(chars.font(), a.id, chars.px(), subpixel)?;
+//! assert!(placed.size[0] > 0.0, "rasterized into the atlas");
+//! assert_eq!(cache.cached_glyphs(), 1);
+//!
+//! // Asked again (next frame, say): found, not rasterized again.
+//! cache.begin_frame();
+//! cache.get(chars.font(), a.id, chars.px(), subpixel)?;
+//! assert_eq!(cache.cached_glyphs(), 1);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 mod cache;
 mod font;

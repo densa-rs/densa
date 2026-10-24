@@ -157,7 +157,11 @@ pub enum ParagraphError {
 impl fmt::Display for ParagraphError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::InvalidSize(size) => write!(f, "size {size} is out of the supported range"),
+            Self::InvalidSize(size) => write!(
+                f,
+                "size {size} is out of range: font sizes go above 0 up to {MAX_FONT_PX} px, \
+                 line heights above 0 up to {MAX_LINE_HEIGHT} times the font size"
+            ),
             Self::InvalidWidth(width) => {
                 write!(f, "width {width} is not a finite, non-negative number")
             }

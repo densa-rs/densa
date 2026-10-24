@@ -322,9 +322,12 @@ use densa_sync::triple_buffer;
 
 let (mut writer, mut reader) = triple_buffer([0.0_f64; 64]);
 
-// Producer thread: fill the back slot, then publish it. Never blocks.
+// Producer thread: keep the current values, copy all of them into the back slot (it holds
+// an older snapshot), then publish it. Never blocks.
 std::thread::spawn(move || {
-    writer.write(|rows| rows[0] = 101.25);
+    let mut latest = [0.0_f64; 64];
+    latest[0] = 101.25;
+    writer.write(|rows| *rows = latest);
     writer.publish();
 });
 
@@ -373,6 +376,14 @@ if reader.update() {
 | [`densa-paragraph` `paragraphs`](crates/densa-paragraph/examples/paragraphs.rs) | Wrapping, alignment, selection with mouse and keyboard |
 | [`densa-paragraph` `editor`](crates/densa-paragraph/examples/editor.rs) | Editable text with input methods |
 | [`trading-demo`](examples/trading-demo) | A streaming market grid: a pinned worker thread, a triple buffer and the grid |
+
+## With AI coding agents
+
+densa is newer than most models' training data. [AGENTS.md](AGENTS.md) tells an agent which
+versions to use, how the pieces fit and which example to start from, and ends with lines to
+paste into your own project's `AGENTS.md`. [densa.dev/llms.txt](https://densa.dev/llms.txt)
+lists the docs as plain text. Every crate's front page on docs.rs has an example that CI runs,
+and error messages say what to change.
 
 ## Guarantees and how they are checked
 

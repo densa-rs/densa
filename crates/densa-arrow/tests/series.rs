@@ -163,7 +163,11 @@ fn columns_must_exist_and_hold_numbers() {
     assert_eq!(missing.to_string(), "no column named \"price\"");
     let text = LiveSeries::new(&table, "value", "id").unwrap_err();
     assert_eq!(text, SeriesError::NotNumeric("value".to_owned()));
-    assert_eq!(text.to_string(), "column \"value\" is not numeric");
+    assert_eq!(
+        text.to_string(),
+        "column \"value\" is not numeric: a series reads integers, f32 and f64 floats, \
+         decimals, timestamps and dates"
+    );
 }
 
 /// A table of quotes: `id`, `time` (seconds) and `price`, one row per `(id, time, price)`.

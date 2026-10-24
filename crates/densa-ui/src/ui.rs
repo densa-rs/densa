@@ -32,7 +32,10 @@ pub enum UiError {
 impl fmt::Display for UiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::NoSuchWidget(id) => write!(f, "there is no widget {id:?}"),
+            Self::NoSuchWidget(id) => write!(
+                f,
+                "there is no widget {id:?}: it was removed (or belongs to another Ui)"
+            ),
             Self::TooManyWidgets => f.write_str("more than 2^32 widgets"),
         }
     }

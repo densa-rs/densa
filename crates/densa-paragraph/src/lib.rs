@@ -29,6 +29,22 @@
 //! - `complex-scripts`: dictionaries for word breaks in Chinese and Japanese and line breaks
 //!   in Thai, Lao, Khmer and Burmese (several MB). Without it, a double-click in Japanese
 //!   selects one character.
+//!
+//! ```
+//! use densa_paragraph::{ParagraphStyle, TextSystem};
+//!
+//! // `TextSystem::new()` also finds the system's fonts; `bundled()` is the same everywhere.
+//! let mut text = TextSystem::bundled()?;
+//! let style = ParagraphStyle::new(16.0).with_max_width(Some(120.0));
+//! let mut paragraph = text.paragraph("A paragraph wrapped at a width.", &style, &[])?;
+//! let wrapped = paragraph.lines().len();
+//! assert!(wrapped > 1);
+//!
+//! // A new width re-breaks the lines without shaping the text again.
+//! paragraph.reflow(None)?;
+//! assert_eq!(paragraph.lines().len(), 1);
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 mod editor;
 mod history;

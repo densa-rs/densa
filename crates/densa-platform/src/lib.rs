@@ -6,6 +6,24 @@
 //!
 //! Implemented for Windows. Elsewhere, queries return [`CpuError::Unsupported`] and
 //! [`current_cpu`] returns `None`, so callers degrade to "not pinned".
+//!
+//! ```
+//! use densa_platform::{logical_cpus, pick_performance_cpu, pin_current_thread, CpuError};
+//!
+//! match logical_cpus() {
+//!     Ok(cpus) => {
+//!         // A performance core on a hybrid CPU (any core on another).
+//!         if let Some(cpu) = pick_performance_cpu(&cpus) {
+//!             let worker = std::thread::spawn(move || pin_current_thread(cpu));
+//!             worker.join().unwrap()?;
+//!         }
+//!     }
+//!     // Not implemented on this system: the thread runs where the scheduler puts it.
+//!     Err(CpuError::Unsupported) => {}
+//!     Err(error) => return Err(error.into()),
+//! }
+//! # Ok::<(), Box<dyn std::error::Error>>(())
+//! ```
 
 use std::cmp::Reverse;
 use std::fmt;

@@ -14,6 +14,20 @@ version without changes of its own.
   maximums and means per minute, kept up to date as rows change. With a `Window` on the same
   column, the oldest bucket goes once its rows expire. A width that does not fit the column
   is refused with `DataError::BucketWidth`.
+- **Docs for people and AI agents**: every crate's front page on docs.rs has an example that
+  CI runs, and the `densa` crate's front page maps tasks to modules and shows a complete
+  program (a live table in a grid, in a window). `AGENTS.md` at the repository's root gives
+  coding agents the versions to use, how the pieces fit and which example to copy, with lines
+  for your own project's `AGENTS.md`; densa.dev serves the docs as plain text at `/llms.txt`
+  and `/llms-full.txt`.
+
+### Changed
+
+- **Error messages say what to change**: `DataError` (unknown and unreadable columns, sums of
+  text, window spans, bucket widths, duplicate names, batches of another schema, keys of the
+  wrong kind), `SeriesError::NotNumeric`, `ParagraphError::InvalidSize` and
+  `UiError::NoSuchWidget` now name what is accepted or how to fix the call. Only the text
+  changed: the variants are the same.
 
 ## 0.2.2
 
