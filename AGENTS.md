@@ -15,8 +15,10 @@ lists the same material as plain text.
   "Unreleased" in the CHANGELOG) is documented in the source.
 - The source of the densa you build is on your disk, with every doc comment and example. From
   crates.io: `~/.cargo/registry/src/*/densa-data-0.2.*/` (one folder per crate). From git:
-  `~/.cargo/git/checkouts/densa-*/<commit>/`, where `<commit>` is the first 7 characters of
-  the hash after `#` in the `densa` entries of your `Cargo.lock` (older commits sit beside it).
+  `~/.cargo/git/checkouts/densa-<hash>/<commit>/` (`densa-` and 16 hex digits, not
+  `densa-connectors-...`), where `<commit>` is the first 7 characters of the hash after `#`
+  in the `densa` entries of your `Cargo.lock`. Older commits sit beside it: read the one
+  your build uses.
 - The examples in `crates/densa-widgets/examples/` and the tests in each crate's `tests/`
   folder show every widget in use.
 
@@ -119,6 +121,116 @@ assert!(clicked);
 
 `ui.paint(&mut canvas)` draws the frame into a `densa::draw::Canvas`, for tests that count
 what was drawn.
+
+### Recipes
+
+Each compiles as written (with `use` lines for the names it takes from `densa::`).
+
+A menu bar whose commands reach the app:
+
+```rust
+use densa::ui::ActionKind;
+use densa::widgets::{MenuBar, MenuItem};
+
+const OPEN: u32 = 1;
+const QUIT: u32 = 2;
+let file = [
+    MenuItem::new("Open…", OPEN).with_shortcut("Ctrl+O"), // the shortcut is shown; keys are yours
+    MenuItem::separator(),
+    MenuItem::new("Quit", QUIT),
+];
+let bar = ui.add(ui.root(), MenuBar::new().with_menu("File", file), MenuBar::style())?;
+// In App::action: a chosen item arrives as ActionKind::Command(OPEN) from a menu.
+let chosen = |kind: ActionKind| match kind {
+    ActionKind::Command(command) => Some(command),
+    _ => None,
+};
+```
+
+A grid over data of your own: implement `densa::grid::GridModel` and give it to
+`DataGrid::new`. The types it needs are all in `densa::grid`:
+
+```rust
+use densa::grid::{Align, CellStyle, CellText, Column, GridModel, Palette, SortOrder};
+
+struct Orders {
+    columns: Vec<Column>, // Column::new("Item", 16, Align::Left), ...
+    rows: Vec<(u64, String)>, // (id, item)
+}
+
+impl GridModel for Orders {
+    fn columns(&self) -> &[Column] {
+        &self.columns
+    }
+
+    fn rows(&self) -> usize {
+        self.rows.len()
+    }
+
+    fn cell(&self, row: usize, _column: usize, text: &mut CellText, palette: &Palette) -> CellStyle {
+        // CellText is a 64-byte stack buffer: push_str, or densa::fmt's writers for numbers.
+        // Text that does not fit is refused: write a placeholder such as "#" instead.
+        if text.push_str(&self.rows[row].1).is_err() {
+            let _ = text.push_str("#");
+        }
+        CellStyle::new(palette.text)
+    }
+
+    // Optional: sorting on a title click, and keys so a selected row follows its record.
+    fn sort(&mut self, _column: usize, order: SortOrder) -> bool {
+        self.rows.sort_by(|a, b| a.1.cmp(&b.1));
+        if order == SortOrder::Descending {
+            self.rows.reverse();
+        }
+        true
+    }
+
+    fn row_key(&self, row: usize) -> Option<u64> {
+        self.rows.get(row).map(|r| r.0)
+    }
+
+    fn row_of_key(&self, key: u64) -> Option<usize> {
+        self.rows.iter().position(|r| r.0 == key)
+    }
+}
+```
+
+A live grid filtered as the user types: on `ActionKind::Changed` from a `TextInput`, give the
+grid's `LiveModel` a filter (`Filter::contains` is case-sensitive):
+
+```rust
+use densa::arrow::LiveModel;
+use densa::data::Filter;
+use densa::ui::{Action, ActionKind, Ui, WidgetId};
+use densa::widgets::{DataGrid, TextInput};
+
+fn on_action(ui: &mut Ui, input: WidgetId, grid: WidgetId, action: &Action) {
+    if action.source != input || action.kind != ActionKind::Changed {
+        return;
+    }
+    let text = ui.widget::<TextInput>(input).map_or(String::new(), |t| t.text().to_owned());
+    let filter = (!text.is_empty()).then(|| Filter::contains("symbol", text));
+    ui.update::<DataGrid<LiveModel>, _>(grid, |grid, cx| {
+        let _ = grid.model_mut(cx).set_filter(filter); // Err: no such column, or not text
+    });
+}
+```
+
+A chart that follows a live table: keep the table, a view sorted by time, and a
+`densa::arrow::LiveSeries` per line in your `ChartModel`; call `series.sync(&table)` after
+every change to the table, or the chart shows nothing. `monitor.rs` (its `Trail` model) and
+`linked.rs` are complete examples.
+
+Typing in a test without a window: give the input focus, then send keys.
+
+```rust
+use densa::ui::{Key, KeyEvent, NamedKey};
+
+ui.set_focus(Some(input));
+ui.key(&KeyEvent::down(Key::Character("A")).with_text("A"));
+ui.key(&KeyEvent::down(Key::Named(NamedKey::Backspace)));
+let edits = ui.actions().filter(|a| a.source == input).count(); // a Changed per edit
+```
 
 ## Changing densa
 

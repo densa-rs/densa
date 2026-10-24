@@ -107,7 +107,8 @@ impl Filter {
         Self::not(Self::is_null(column))
     }
 
-    /// The string column contains `text`.
+    /// The string column contains `text`, case included: `"AAPL"` contains `"AA"` but not
+    /// `"aa"`. To ignore case, keep the column in one case and change the text to match.
     pub fn contains(column: impl Into<String>, text: impl Into<String>) -> Self {
         Self::Contains {
             column: column.into(),

@@ -35,8 +35,12 @@ pub enum DockAxis {
 ///
 /// It is written as text (`to_string()`) and read back with [`str::parse`]:
 /// `densa-dock 1 (row 0.6 (tabs 0 "orders" "trades") (tabs 0 "chart"))`, a version then the
-/// tree, each split with its axis and the fraction its first part takes, each group with the
-/// position of its shown tab and its panels' keys (quoted, `\"` and `\\` escaped). Layouts
+/// tree, each split with its axis (`row`: side by side, `column`: one above the other) and
+/// the fraction its first part takes, each group with the position of its shown tab and
+/// its panels' keys (quoted, `\"` and `\\` escaped). Splits nest:
+/// `densa-dock 1 (column 0.25 (tabs 0 "log") (row 0.6 (tabs 0 "chart") (tabs 0 "hosts")))`
+/// puts the log above, then the chart beside the hosts. A text that is not a layout is
+/// refused with a [`DockLayoutError`] naming where and why. Layouts
 /// built in code are written however deep they are, but only those within
 /// [`MAX_LAYOUT_DEPTH`] read back.
 #[derive(Debug, Clone, PartialEq)]

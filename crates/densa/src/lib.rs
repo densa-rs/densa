@@ -34,6 +34,7 @@
 //! | read a view's rows, or grouped results | `data::View::row` (a `data::RowRef` into `data::LiveTable::batches`), `data::Groups::to_batch` |
 //! | chart data | [`widgets::Chart`] with your [`chart::ChartModel`]; `arrow::LiveSeries` reads a live table |
 //! | arrange panels in tabs and splits | [`widgets::DockArea`] |
+//! | add a menu bar | [`widgets::MenuBar`] with [`widgets::MenuItem`]s; choices arrive as [`ui::ActionKind::Command`] |
 //! | update the screen from another thread | `window::Host::waker`, and [`sync::triple_buffer()`] for snapshots |
 //! | format numbers in a frame without allocating | [`fmt`] |
 //! | test widgets without a window | [`ui::Ui::new`] with [`paragraph::TextSystem::bundled`], then [`ui::Ui::pointer`] and [`ui::Ui::actions`] |
