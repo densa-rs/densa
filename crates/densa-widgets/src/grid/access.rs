@@ -44,8 +44,9 @@ fn part_row(part: u32) -> Option<u32> {
 }
 
 impl<M: GridModel> DataGrid<M> {
-    /// The rows with nodes: those on screen.
-    fn shown_rows(&self) -> std::ops::Range<usize> {
+    /// The rows on screen (each one painted, the last perhaps cut off): those with nodes,
+    /// and those the model hears it shows ([`GridModel::showing`]).
+    pub(super) fn shown_rows(&self) -> std::ops::Range<usize> {
         let shown = self
             .visible_rows()
             .min(self.model.rows().saturating_sub(self.first_row));

@@ -13,6 +13,11 @@
 //! and [`LiveSeries`] reads two of its numeric columns as a `densa_chart` series (a price
 //! over time), so a chart follows the same live data.
 //!
+//! For tables too large to hold (a query engine's result over billions of rows), a
+//! [`PagedModel`] is the grid widget's model: your [`PageSource`] gives rows a page at a
+//! time, on a thread of the model's own, and the grid fetches only the pages it shows, in
+//! the order a click on a column title asks for.
+//!
 //! ```
 //! use std::sync::Arc;
 //! use arrow_array::{ArrayRef, Float64Array, RecordBatch, StringArray};
@@ -44,11 +49,13 @@ pub use arrow_schema;
 mod calendar;
 mod live;
 mod model;
+mod paged;
 mod reader;
 mod series;
 mod table;
 
 pub use live::{LiveGrid, LiveGridView};
 pub use model::LiveModel;
+pub use paged::{FetchError, PageError, PageOptions, PageQuery, PageSource, PagedModel, SortKey};
 pub use series::{LiveSeries, SeriesError, SeriesPoints};
 pub use table::{ArrowGrid, ArrowTable, CellState, TableError};

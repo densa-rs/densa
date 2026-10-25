@@ -29,6 +29,7 @@
 //! | lay widgets out | [`ui::Ui::add`] with a [`ui::Style`] (flexbox, logical pixels) |
 //! | show rows of live data | [`widgets::DataGrid`] over `arrow::LiveModel` (a live table) |
 //! | show rows of your own data | [`widgets::DataGrid`] over your [`grid::GridModel`] |
+//! | show a table too large to hold (a query engine's result, a database) | [`widgets::DataGrid`] over `arrow::PagedModel`, with your `arrow::PageSource` giving pages |
 //! | keep data sorted, filtered and aggregated as it changes | `data::LiveTable` with `data::ViewSpec` and `data::GroupSpec` |
 //! | keep only recent rows, or count per minute | `data::Window`, `data::GroupSpec::group_by_time` |
 //! | give each row the columns of the row it names in another table | `data::LookupJoin` |

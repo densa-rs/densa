@@ -10,7 +10,8 @@ param(
   [int]$Fps = 30,
   [int]$Crf = 24,
   # Input to post to the window while recording, one step per line: "MS move X Y",
-  # "MS click X Y", "MS wheel X Y NOTCHES" (client pixels; negative notches scroll down).
+  # "MS click X Y", "MS wheel X Y NOTCHES" (client pixels; negative notches scroll down),
+  # "MS down X Y" and "MS up X Y" (a press and a release: moves between them drag).
   [string]$Script = ""
 )
 Add-Type -ReferencedAssemblies System.Drawing @"
@@ -38,6 +39,12 @@ public static class Rec {
     int x = int.Parse(step[2]), y = int.Parse(step[3]);
     switch (step[1]) {
       case "move": PostMessage(h, 0x0200, IntPtr.Zero, Point(x, y)); break;
+      // A press and a release, with moves between them for a drag.
+      case "down":
+        PostMessage(h, 0x0200, IntPtr.Zero, Point(x, y));
+        PostMessage(h, 0x0201, (IntPtr)1, Point(x, y));
+        break;
+      case "up": PostMessage(h, 0x0202, IntPtr.Zero, Point(x, y)); break;
       case "click":
         PostMessage(h, 0x0200, IntPtr.Zero, Point(x, y));
         PostMessage(h, 0x0201, (IntPtr)1, Point(x, y));

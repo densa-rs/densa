@@ -298,12 +298,14 @@ mod grid {
     use super::*;
 
     /// Records with ids and names, keyed by id. Records added to `pending` join when the
-    /// grid prepares the model; another `generation` is another table.
+    /// grid prepares the model; another `generation` is another table; `copyable`, when set,
+    /// are the rows a copy may hold (as a model holding only some rows says).
     struct Fruits {
         columns: Vec<Column>,
         ids: Vec<u64>,
         pending: Vec<u64>,
         generation: u64,
+        copyable: Option<Vec<std::ops::Range<usize>>>,
     }
 
     impl Fruits {
@@ -316,6 +318,7 @@ mod grid {
                 ids: (0..rows).collect(),
                 pending: Vec::new(),
                 generation: 0,
+                copyable: None,
             }
         }
     }
@@ -367,6 +370,10 @@ mod grid {
 
         fn generation(&self) -> u64 {
             self.generation
+        }
+
+        fn copy_rows(&self, rows: std::ops::Range<usize>) -> Vec<std::ops::Range<usize>> {
+            self.copyable.clone().unwrap_or_else(|| vec![rows])
         }
     }
 
@@ -541,6 +548,38 @@ mod grid {
         update(&mut ui, id, |g, cx| g.model_mut(cx).pending.push(9));
         super::shortcut(&mut ui, "c", Modifiers::NONE);
         assert_eq!(clipboard(&mut ui).unwrap(), "0\tn0\n1\tn1\n9\tn9");
+    }
+
+    #[test]
+    fn a_copy_holds_only_the_rows_the_model_offers_within_the_selection() {
+        let (mut ui, id) = grid(30);
+        // Two runs, the second reaching past the selection: a model cannot widen a copy.
+        update(&mut ui, id, |g, cx| {
+            g.model_mut(cx).copyable = Some(vec![2..4, 20..40]);
+        });
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 1, 24));
+        assert_eq!(rows(&ui, id), 1..25);
+        super::shortcut(&mut ui, "c", Modifiers::NONE);
+        assert_eq!(
+            clipboard(&mut ui).unwrap(),
+            "2\tn2\n3\tn3\n20\tn20\n21\tn21\n22\tn22\n23\tn23\n24\tn24"
+        );
+    }
+
+    #[test]
+    fn a_copy_of_rows_the_model_offers_none_of_leaves_the_clipboard_alone() {
+        let (mut ui, id) = grid(30);
+        ui.clipboard().set_text("before").unwrap();
+        // As a model whose pages of the selected rows are gone.
+        update(&mut ui, id, |g, cx| {
+            g.model_mut(cx).copyable = Some(vec![20..25, 27..30]);
+        });
+        update(&mut ui, id, |g, cx| g.select_rows(cx, 1, 5));
+        assert_eq!(super::shortcut(&mut ui, "c", Modifiers::NONE), Handled::No);
+        assert!(!ui.update(id, |g: &mut Grid, cx| g.copy(cx)).unwrap());
+        assert_eq!(clipboard(&mut ui).unwrap(), "before");
+        let text = ui.update(id, |g: &mut Grid, _| g.selected_text(&Palette::new()));
+        assert_eq!(text.unwrap(), "");
     }
 
     #[test]

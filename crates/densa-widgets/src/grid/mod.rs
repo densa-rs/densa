@@ -400,6 +400,8 @@ impl<M: GridModel + 'static> Widget for DataGrid<M> {
         self.model.prepare();
         self.follow_model();
         self.clamp();
+        let shown = self.shown_rows();
+        self.model.showing(shown);
         self.paint_grid(cx, canvas);
     }
 

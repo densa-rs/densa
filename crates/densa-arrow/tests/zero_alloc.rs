@@ -230,3 +230,121 @@ fn drawing_a_live_series_performs_zero_heap_operations() {
     );
     assert!(out.len() > 900, "the line was drawn: {}", out.len());
 }
+
+/// The rows of [`batch`], a page at a time; it says when it is dropped (with its thread), if
+/// given a sender.
+struct Rows(Option<std::sync::mpsc::Sender<()>>);
+
+impl densa_arrow::PageSource for Rows {
+    fn row_count(&mut self, _: &densa_arrow::PageQuery) -> Result<u64, densa_arrow::PageError> {
+        Ok(ROWS as u64)
+    }
+
+    fn page(
+        &mut self,
+        _: &densa_arrow::PageQuery,
+        offset: u64,
+        limit: usize,
+    ) -> Result<Vec<RecordBatch>, densa_arrow::PageError> {
+        let start = i64::try_from(offset)?;
+        Ok(vec![batch(start, i64::try_from(limit)?.min(ROWS - start))])
+    }
+}
+
+impl Drop for Rows {
+    fn drop(&mut self) {
+        if let Some(dropped) = &self.0 {
+            let _ = dropped.send(());
+        }
+    }
+}
+
+/// A frame of a paged model as the grid paints it: takes in what arrived, says which rows it
+/// shows (50 from `first`), reads each of their cells.
+fn paged_frame(
+    model: &mut densa_arrow::PagedModel,
+    first: usize,
+    text: &mut densa_grid::CellText,
+    palette: &Palette,
+) {
+    use densa_grid::GridModel;
+
+    model.prepare();
+    model.showing(first..first + 50);
+    for row in first..first + 50 {
+        for column in 0..7 {
+            text.clear();
+            black_box(model.cell(row, column, text, palette));
+        }
+    }
+}
+
+#[test]
+fn frames_of_a_paged_model_with_its_pages_held_perform_zero_heap_operations() {
+    use densa_grid::{CellText, GridModel};
+
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    // Pages of 32 rows: the 50 rows shown cross pages as they scroll over 350 rows.
+    let options = densa_arrow::PageOptions::default().page_rows(32);
+    let schema = batch(0, 1).schema();
+    let mut model =
+        densa_arrow::PagedModel::with_options(schema, Rows(None), || {}, options).unwrap();
+    let start = std::time::Instant::now();
+    // Every page the frames show, and one past them, fetched first.
+    while !(0..12).all(|page| model.is_fetched(page * 32)) {
+        assert!(start.elapsed().as_secs() < 5, "{:?}", model.error());
+        model.prepare();
+        model.showing(0..360);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let palette = Palette::new();
+    let mut text = CellText::new();
+    paged_frame(&mut model, 0, &mut text, &palette);
+    let ((), stats) = measure(|| {
+        for at in 0..300 {
+            paged_frame(&mut model, at, &mut text, &palette);
+        }
+    });
+    assert!(
+        stats.is_zero(),
+        "frames of a paged model allocated: {stats:?}"
+    );
+    assert!(model.pages_held() >= 12 && model.error().is_none());
+}
+
+#[test]
+fn frames_of_a_paged_model_whose_thread_stopped_perform_zero_heap_operations() {
+    use densa_grid::CellText;
+
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    let (dropped, gone) = std::sync::mpsc::channel();
+    // The first wake (once the rows are counted) panics: the thread stops.
+    let wake = || panic!("the window is gone");
+    let schema = batch(0, 1).schema();
+    let mut model = densa_arrow::PagedModel::new(schema, Rows(Some(dropped)), wake).unwrap();
+    gone.recv_timeout(std::time::Duration::from_secs(5))
+        .expect("the thread stops");
+    let palette = Palette::new();
+    let mut text = CellText::new();
+    // Takes in the count and why the thread stopped; asks once for pages it cannot get.
+    paged_frame(&mut model, 0, &mut text, &palette);
+    assert!(matches!(
+        model.error(),
+        Some(densa_arrow::FetchError::Stopped { .. })
+    ));
+    let ((), stats) = measure(|| {
+        for at in 0..100 {
+            paged_frame(&mut model, at, &mut text, &palette);
+        }
+    });
+    assert!(
+        stats.is_zero(),
+        "frames after the thread stopped allocated: {stats:?}"
+    );
+}

@@ -45,29 +45,56 @@ impl<M: GridModel> DataGrid<M> {
     }
 
     /// Puts the selected rows on the clipboard, as [`selected_text`](Self::selected_text)
-    /// writes them; `false` if no row is selected or the clipboard would not take them.
+    /// writes them; `false`, leaving the clipboard as it was, if no row is selected, the model
+    /// offers none of them to copy ([`GridModel::copy_rows`]), or the clipboard would not take
+    /// them.
     ///
-    /// The text of every selected row is built at once, on the calling thread: a million
-    /// rows take a noticeable time and as much memory as their text.
+    /// The text of every selected row the model offers (all of them, unless it fetches its
+    /// rows) is built at once, on the calling thread: a million rows take a noticeable time and
+    /// as much memory as their text.
     pub fn copy(&mut self, cx: &mut EventCx<'_>) -> bool {
         self.catch_up();
-        if self.selected_rows().is_empty() {
+        let runs = self.copied_runs();
+        if runs.is_empty() {
             return false;
         }
-        let text = self.selected_text(&super::palette(cx.theme()));
+        let text = self.text_of(runs, &super::palette(cx.theme()));
         cx.clipboard().set_text(&text).is_ok()
     }
 
     /// The selected rows' cells as the grid shows them (with `palette`'s formatting, where
     /// the model's text depends on it), a tab between cells and a line break between rows:
     /// the shape spreadsheets paste into cells. Tabs and line breaks within a cell become
-    /// spaces.
+    /// spaces. Only the rows the model offers to copy are written
+    /// ([`GridModel::copy_rows`]).
     pub fn selected_text(&mut self, palette: &Palette) -> String {
         self.catch_up();
+        let runs = self.copied_runs();
+        self.text_of(runs, palette)
+    }
+
+    /// The selected rows a copy holds, in runs: those the model offers, within the selection
+    /// (a model narrows a copy, never widens it).
+    fn copied_runs(&self) -> Vec<Range<usize>> {
+        let selected = self.selected_rows();
+        if selected.is_empty() {
+            return Vec::new();
+        }
+        self.model
+            .copy_rows(selected.clone())
+            .into_iter()
+            .map(|run| run.start.max(selected.start)..run.end.min(selected.end))
+            .filter(|run| !run.is_empty())
+            .collect()
+    }
+
+    /// The text of the rows of `runs`, as [`selected_text`](Self::selected_text) writes it.
+    fn text_of(&self, runs: Vec<Range<usize>>, palette: &Palette) -> String {
         let columns = self.model.columns().len();
         let mut out = String::new();
         let mut cell = CellText::new();
-        for (index, row) in self.selected_rows().enumerate() {
+        let rows = runs.into_iter().flatten();
+        for (index, row) in rows.enumerate() {
             if index > 0 {
                 out.push('\n');
             }

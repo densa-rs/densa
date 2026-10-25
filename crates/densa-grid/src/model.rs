@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use crate::{CellStyle, CellText, Column, Palette};
 
 /// Which way a column sorts.
@@ -44,6 +46,21 @@ pub trait GridModel {
     /// must keep up while hidden from the application, through
     /// `DataGrid::model_mut`.
     fn prepare(&mut self) {}
+
+    /// The rows the grid shows (every row it paints, the last perhaps cut off), each time it
+    /// paints, after [`prepare`](Self::prepare). A model that fetches its rows, from a
+    /// database or a query engine, asks for these and those around them; it should not
+    /// allocate while it has them. Does nothing by default.
+    fn showing(&mut self, rows: Range<usize>) {
+        let _ = rows;
+    }
+
+    /// The rows of `rows` that a copy of them holds (the grid's copy of selected rows), in
+    /// runs, in order: all of them by default. A model that fetches its rows gives only
+    /// those it has, so copying a billion selected rows does not build a billion lines.
+    fn copy_rows(&self, rows: Range<usize>) -> Vec<Range<usize>> {
+        vec![rows]
+    }
 
     /// Sorts the rows by `column` (an index into [`columns`](Self::columns)) in `order`, when
     /// the user asks for it (a click on its title); `false` if the model does not sort by

@@ -5,6 +5,28 @@ version without changes of its own.
 
 ## Unreleased
 
+### Added
+
+- **Tables too large to hold** (`densa-arrow`, `densa-grid`, `densa-widgets`): `PagedModel`
+  is a model for `DataGrid` whose rows your `PageSource` gives a page at a time (a query
+  engine's result, a database table), on a thread of the model's own, so a source may take
+  as long as it needs and the window never waits; rows not fetched yet show empty until they
+  arrive. The grid fetches only the pages it shows and one on each side, those side by side
+  in one call (each page alone if that call fails, so a page the source cannot give takes
+  none beside it along), and skips those scrolled past before their turn. A click on a
+  column title asks the source for its rows in that order (`PageQuery`, `SortKey`; a source
+  can decline a column with `PageSource::can_sort`), without counting them again, even while
+  the first count is on its way. Pages far from the rows shown are dropped (`PageOptions`).
+  `error` says why rows are missing (`FetchError`): a count or a call that failed or
+  panicked, asked again on `retry`; rows that came back fewer than counted, which `refresh`
+  counts and fetches again (as for any data that changed, showing the rows held until the new
+  ones arrive); or the model's thread stopped, because the wake it was given panicked.
+  `GridModel::showing` tells a model which rows the grid paints, and `GridModel::copy_rows`
+  which rows a copy holds, so copying a billion selected rows copies only those fetched (both
+  do what they did before by default); `DataGrid::copy` leaves the clipboard alone when the
+  model offers none of the selected rows. The `paged` example shows a billion rows, computed
+  when asked.
+
 ### Fixed
 
 - **Charts of a few bars or candles** (`densa-widgets`): a `Chart` whose model gives an

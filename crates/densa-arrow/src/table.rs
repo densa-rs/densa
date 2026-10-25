@@ -106,15 +106,7 @@ impl ArrowTable {
     /// An empty table for batches with `schema`; columns are sized by their titles until
     /// the first rows arrive.
     pub fn new(schema: SchemaRef) -> Self {
-        let formats = schema
-            .fields()
-            .iter()
-            .map(|field| Format {
-                decimals: None,
-                max_chars: field.name().chars().count().max(DEFAULT_CHARS),
-                width_set: false,
-            })
-            .collect();
+        let formats = new_formats(&schema);
         Self {
             schema,
             batches: Vec::new(),
@@ -179,20 +171,7 @@ impl ArrowTable {
 
     /// Grid columns: titled by field name, sized by content, numbers and times aligned right.
     pub fn columns(&self) -> Vec<Column> {
-        self.schema
-            .fields()
-            .iter()
-            .zip(&self.formats)
-            .map(|(field, format)| {
-                let align = if is_numeric(field.data_type()) {
-                    Align::Right
-                } else {
-                    Align::Left
-                };
-                let chars = u32::try_from(format.max_chars).unwrap_or(u32::MAX);
-                Column::new(field.name().clone(), chars, align)
-            })
-            .collect()
+        columns_of(&self.schema, &self.formats)
     }
 
     /// Prints floating-point values of `column` with `decimals` fixed decimal places
@@ -266,23 +245,7 @@ impl ArrowTable {
         if local >= reader.len() {
             return CellState::OutOfRange;
         }
-        if reader.is_null(local) {
-            // A cell always has room for `null`.
-            let _ = text.push_str("null");
-            return CellState::Null;
-        }
-        if !reader.is_supported() {
-            reader.write(local, text, format);
-            return CellState::Unsupported;
-        }
-        let mark = text.len();
-        if reader.write(local, text, format) {
-            return CellState::Value;
-        }
-        text.truncate(mark);
-        // A cell always has room for one byte.
-        let _ = text.push_str("#");
-        CellState::Invalid
+        write_value(reader, local, format, text)
     }
 
     /// A [`GridSource`] showing the table from `first_row` (scrolled), in `palette`'s
@@ -338,14 +301,7 @@ impl ArrowTable {
             .zip(&mut self.formats)
             .zip(self.schema.fields().iter())
         {
-            if format.width_set || !is_numeric(field.data_type()) {
-                continue;
-            }
-            let widest = widest(reader, format, spread(reader.len(), WIDEN_ROWS), &mut text);
-            if widest > format.max_chars {
-                format.max_chars = widest;
-                widened = true;
-            }
+            widened |= widen_column(format, reader, field.data_type(), &mut text);
         }
         if widened {
             self.widths = self.widths.wrapping_add(1);
@@ -376,9 +332,88 @@ impl ArrowTable {
     }
 }
 
+/// Each column's format before any rows: its title's width (at least a few characters).
+pub(crate) fn new_formats(schema: &SchemaRef) -> Vec<Format> {
+    schema
+        .fields()
+        .iter()
+        .map(|field| Format {
+            decimals: None,
+            max_chars: field.name().chars().count().max(DEFAULT_CHARS),
+            width_set: false,
+        })
+        .collect()
+}
+
+/// Grid columns for `schema` in `formats`: titled by field name, as wide as the format,
+/// numbers and times aligned right.
+pub(crate) fn columns_of(schema: &SchemaRef, formats: &[Format]) -> Vec<Column> {
+    schema
+        .fields()
+        .iter()
+        .zip(formats)
+        .map(|(field, format)| {
+            let align = if is_numeric(field.data_type()) {
+                Align::Right
+            } else {
+                Align::Left
+            };
+            let chars = u32::try_from(format.max_chars).unwrap_or(u32::MAX);
+            Column::new(field.name().clone(), chars, align)
+        })
+        .collect()
+}
+
+/// Appends the value at row `local` (within its rows) of `reader` to `text` as `format`
+/// says, or a placeholder: `null`, `?` for a type not formatted, `#` for a value that does
+/// not fit. Never allocates.
+pub(crate) fn write_value(
+    reader: &Reader,
+    local: usize,
+    format: &Format,
+    text: &mut CellText,
+) -> CellState {
+    if reader.is_null(local) {
+        // A cell always has room for `null`.
+        let _ = text.push_str("null");
+        return CellState::Null;
+    }
+    if !reader.is_supported() {
+        reader.write(local, text, format);
+        return CellState::Unsupported;
+    }
+    let mark = text.len();
+    if reader.write(local, text, format) {
+        return CellState::Value;
+    }
+    text.truncate(mark);
+    // A cell always has room for one byte.
+    let _ = text.push_str("#");
+    CellState::Invalid
+}
+
+/// Widens a number or time column (of `data_type`, not sized by the application) to its
+/// widest value among some of `reader`'s rows, if that is wider; whether it did.
+pub(crate) fn widen_column(
+    format: &mut Format,
+    reader: &Reader,
+    data_type: &arrow_schema::DataType,
+    text: &mut CellText,
+) -> bool {
+    if format.width_set || !is_numeric(data_type) {
+        return false;
+    }
+    let widest = widest(reader, format, spread(reader.len(), WIDEN_ROWS), text);
+    let wider = widest > format.max_chars;
+    if wider {
+        format.max_chars = widest;
+    }
+    wider
+}
+
 /// Sizes a column to its longest value among the first rows `reader` holds and its title
 /// `title`, unless its width was set.
-fn size_column(format: &mut Format, reader: &Reader, title: &str) {
+pub(crate) fn size_column(format: &mut Format, reader: &Reader, title: &str) {
     if format.width_set {
         return;
     }

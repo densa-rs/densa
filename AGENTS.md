@@ -49,6 +49,7 @@ Complete programs to copy from, in `crates/densa-widgets/examples/`:
 | `monitor.rs` | a live table in a grid, sorted, and a chart of the selected row's history, fed by a worker thread that wakes the window (the pattern to copy for live data) |
 | `linked.rs` | a grid and a chart over two live tables, the chart filtered by the selected row |
 | `live_table.rs` | 100,000 rows, 1,000 updated every frame (made inside `frame`, a stress test: copy `monitor.rs` for real data); click a title to sort, type to filter |
+| `paged.rs` | a billion rows, none held: a `PagedModel` fetches the pages on screen from a `PageSource` (the pattern for a query engine or a database); click a title to sort at the source |
 | `dock.rs` | panels in tabs and splits, dragged around; with `--layout FILE` the layout is saved and restored |
 | `gallery.rs` | the standard widgets: menus, a toolbar, a list, a splitter, text input |
 | `chart.rs` | a chart of your own data with panes, zoom and pan |
@@ -85,6 +86,10 @@ How the pieces fit:
   `table.groups(id).unwrap().to_batch()` (keys first, then the aggregates in the order you added
   them). The rustdoc of `View` and `Groups` shows both. Show a table with
   `DataGrid<densa_arrow::LiveModel>`, and change it through `grid.model_mut(cx).table_mut()`.
+- A table too large to hold (a query engine's result, a database table):
+  `DataGrid<densa_arrow::PagedModel>` with your `densa_arrow::PageSource`, which counts the
+  rows and gives a page (`offset`, `limit`, in the order of a `PageQuery`) on a thread of the
+  model's own. The grid fetches only the pages it shows; see the recipe below.
 - Other threads never touch the `Ui`. They hand data over (a channel, or
   `densa_sync::triple_buffer` for snapshots) and call `Waker::wake` (from `host.waker()`) so a
   frame comes.
@@ -241,6 +246,52 @@ fn enriched(
     //   ui.update::<DataGrid<LiveModel>, _>(grid, |g, cx| join.upsert_left(g.model_mut(cx).table_mut(), more));
     Ok((join, grid))
 }
+```
+
+A grid over a table too large to hold: implement `densa::arrow::PageSource` (its calls run on
+a thread of the model's own, so they may wait on a database or a query engine; return the
+batches as they come, the model joins them) and give it to a `PagedModel`, with a wake that
+brings a frame when pages arrive. A copy of selected rows holds only the rows fetched.
+`model.error()` says why rows are missing (a `FetchError`); `retry` asks again for what
+failed, `refresh` counts and fetches again after the data changed:
+
+```rust
+use densa::arrow::{PageError, PageQuery, PageSource, PagedModel};
+use densa::data::arrow_array::RecordBatch;
+use densa::data::arrow_schema::SchemaRef;
+use densa::widgets::DataGrid;
+
+struct Trips {
+    schema: SchemaRef, // every page must have these columns' data types
+}
+
+impl PageSource for Trips {
+    fn row_count(&mut self, _query: &PageQuery) -> Result<u64, PageError> {
+        Ok(2_000_000_000) // SELECT count(*) FROM trips
+    }
+
+    fn page(
+        &mut self,
+        query: &PageQuery,
+        offset: u64,
+        limit: usize,
+    ) -> Result<Vec<RecordBatch>, PageError> {
+        // SELECT * FROM trips ORDER BY <key.column()> [DESC] LIMIT <limit> OFFSET <offset>
+        for key in query.sort() {
+            let _ = (key.column(), key.is_descending());
+        }
+        let _ = (offset, limit);
+        Ok(vec![RecordBatch::new_empty(self.schema.clone())]) // the batches the engine gave
+    }
+}
+
+// In App::build (`host` is its `&mut Host`):
+let waker = host.waker();
+let source = Trips { schema: schema.clone() };
+let model = PagedModel::new(schema, source, move || {
+    waker.wake();
+})?;
+let grid = ui.add(ui.root(), DataGrid::new(model), DataGrid::<PagedModel>::style())?;
 ```
 
 A chart that follows a live table: keep the table, a view sorted by time, and a

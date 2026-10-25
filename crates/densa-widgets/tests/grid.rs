@@ -16,11 +16,13 @@ use densa_ui::{
 };
 use densa_widgets::DataGrid;
 
-/// Instruments and prices; sorts by either column; counts the cells it was asked for.
+/// Instruments and prices; sorts by either column; counts the cells it was asked for and
+/// keeps the rows the grid said it shows last.
 struct Quotes {
     columns: Vec<Column>,
     rows: Vec<(String, f64)>,
     asked: Rc<Cell<usize>>,
+    shown: Rc<Cell<Option<(usize, usize)>>>,
     sorts: bool,
 }
 
@@ -38,6 +40,7 @@ impl Quotes {
             ],
             rows,
             asked: Rc::default(),
+            shown: Rc::default(),
             sorts: true,
         }
     }
@@ -68,6 +71,10 @@ impl GridModel for Quotes {
             _ => text.write_str("-"),
         };
         CellStyle::new(Color::WHITE)
+    }
+
+    fn showing(&mut self, rows: std::ops::Range<usize>) {
+        self.shown.set(Some((rows.start, rows.end)));
     }
 
     fn sort(&mut self, column: usize, order: SortOrder) -> bool {
@@ -181,6 +188,28 @@ fn frame(ui: &mut Ui) -> Vec<Rect> {
         .iter()
         .map(|i| Rect::new(i.rect[0], i.rect[1], i.rect[2], i.rect[3]))
         .collect()
+}
+
+#[test]
+fn the_model_hears_which_rows_each_paint_shows() {
+    let quotes = Quotes::new(1_000);
+    let shown = Rc::clone(&quotes.shown);
+    let (mut ui, id) = grid_of(DataGrid::new(quotes), Size::new(400.0, 300.0));
+    frame(&mut ui);
+    let visible = view(&ui, id).visible_rows();
+    assert!(visible > 5, "{visible}");
+    assert_eq!(shown.get(), Some((0, visible)));
+
+    ui.update::<DataGrid<Quotes>, _>(id, |grid, cx| grid.scroll_to_row(cx, 500));
+    frame(&mut ui);
+    assert_eq!(shown.get(), Some((500, 500 + visible)));
+
+    // At the end, no row past the last.
+    ui.update::<DataGrid<Quotes>, _>(id, |grid, cx| grid.scroll_to_row(cx, 1_000));
+    frame(&mut ui);
+    let (first, end) = shown.get().unwrap();
+    assert_eq!(end, 1_000);
+    assert_eq!(first, view(&ui, id).first_row());
 }
 
 #[test]
