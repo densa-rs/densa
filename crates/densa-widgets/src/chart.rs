@@ -1,7 +1,7 @@
 //! A chart widget: the panes of a [`ChartModel`] on one horizontal axis, following the
 //! newest data until the user pans or zooms.
 
-use densa_chart::{Axis, ChartModel, ChartPainter, ChartPalette, Plot};
+use densa_chart::{Axis, AxisKind, ChartModel, ChartPainter, ChartPalette, Plot};
 use densa_core::{Color, Point, Rect, Size};
 use densa_draw::Canvas;
 use densa_text::Font;
@@ -19,9 +19,11 @@ const ZOOM_STEP: f64 = 1.15;
 const NOTCH: f32 = 48.0;
 /// The share of the view an arrow key pans.
 const KEY_PAN: f64 = 0.1;
-/// Room right of the newest data while following, as a share of the view.
+/// Room right of the newest data while following, as a share of the view (half a step at
+/// least, when the model gives one on a number or time axis).
 const LEAD: f64 = 0.03;
-/// Points a view shows at least, when the model gives their distance.
+/// Points a view shows at least, when the model gives their distance (all of them, when
+/// there are fewer).
 const MIN_STEPS: f64 = 5.0;
 /// The narrowest view, as a share of the data, when the model gives no distance.
 const MIN_SHARE: f64 = 1e-4;
@@ -142,7 +144,7 @@ impl<M: ChartModel> Chart<M> {
         let kind = self.model.x_kind();
         Some(match self.current() {
             View::Follow { span } => {
-                let end = newest + span * LEAD;
+                let end = newest + self.lead(span);
                 Axis::new(end - span, end, kind)
             }
             View::Fixed(axis) => Axis::new(axis.start(), axis.end(), kind),
@@ -194,13 +196,39 @@ impl<M: ChartModel> Chart<M> {
         };
         let width = newest - oldest;
         let low = match self.model.x_step() {
-            Some(step) if step.is_finite() && step > 0.0 => step * MIN_STEPS,
+            // A few points, or all of them when the data holds fewer.
+            Some(step) if step.is_finite() && step > 0.0 => {
+                (step * MIN_STEPS).min(self.whole(width, step))
+            }
             _ => width * MIN_SHARE,
         };
         let magnitude = oldest.abs().max(newest.abs()).max(1.0);
         let low = low.max(magnitude * PRECISION);
         let high = (width * MAX_SHARE).max(self.initial).max(low * 2.0);
         (low, high)
+    }
+
+    /// How wide a view shows all of data `width` wide, its points `step` apart, whole: a
+    /// category axis's extent already holds whole places (a place at least); a number or
+    /// time axis's runs from the first point to the last, so half a step more each side keeps
+    /// the first and last candles or bars whole (with [`lead`](Self::lead) on the right).
+    fn whole(&self, width: f64, step: f64) -> f64 {
+        match self.model.x_kind() {
+            AxisKind::Category => width.max(step),
+            _ => width + step,
+        }
+    }
+
+    /// Room right of the newest data while following a view `span` wide: a share of it,
+    /// and on a number or time axis whose points are a step apart, half a step at least, so
+    /// the newest candle or bar is whole (a category axis's extent holds its places already).
+    fn lead(&self, span: f64) -> f64 {
+        let share = span * LEAD;
+        match (self.model.x_kind(), self.model.x_step()) {
+            (AxisKind::Category, _) => share,
+            (_, Some(step)) if step.is_finite() && step > 0.0 => share.max(step / 2.0),
+            _ => share,
+        }
     }
 
     /// The view `span` wide from `start`, kept over the data: it ends no earlier than the
@@ -211,7 +239,7 @@ impl<M: ChartModel> Chart<M> {
             return View::Fixed(Axis::new(start, start + span, kind));
         };
         let start = start.max(oldest - span);
-        if start + span >= newest + span * LEAD {
+        if start + span >= newest + self.lead(span) {
             return View::Follow { span };
         }
         View::Fixed(Axis::new(start, start + span, kind))
@@ -225,7 +253,9 @@ impl<M: ChartModel> Chart<M> {
         };
         let (low, high) = self.limits();
         let span = (shown.span() * factor).clamp(low, high);
-        if span == shown.span() || !span.is_finite() {
+        // A notch moves only the way it asks: data that grew can raise the narrowest view past
+        // one zoomed in before, and a notch in must not widen it.
+        if span == shown.span() || !span.is_finite() || (span < shown.span()) != (factor < 1.0) {
             return false;
         }
         let area = self.x_area(rect);

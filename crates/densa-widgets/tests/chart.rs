@@ -215,6 +215,128 @@ fn zooming_stops_at_a_few_points_and_at_twice_the_data() {
 }
 
 #[test]
+fn zooming_in_on_fewer_points_than_a_few_stops_at_all_of_them() {
+    // Points at 0, 1 and 2: the narrowest view holds them, half a step to spare each side,
+    // the newest's too while following it.
+    let (mut ui, id) = chart(Line::new(3));
+    for _ in 0..100 {
+        wheel(&mut ui, 0.0, -1.0, MIDDLE);
+    }
+    let (start, end) = shown(&ui, id);
+    assert!(near(start, -0.5) && near(end, 2.5), "{start}..{end}");
+    assert!(of(&ui, id).is_following());
+
+    // One candle: whole.
+    let (mut ui, id) = chart(Line::new(1));
+    for _ in 0..100 {
+        wheel(&mut ui, 0.0, -1.0, MIDDLE);
+    }
+    let (start, end) = shown(&ui, id);
+    assert!(near(start, -0.5) && near(end, 0.5), "{start}..{end}");
+}
+
+/// Bars on a category axis, one place apart, over `extent`.
+struct Bars((f64, f64));
+
+impl ChartModel for Bars {
+    fn x_kind(&self) -> AxisKind {
+        AxisKind::Category
+    }
+
+    fn x_extent(&self) -> Option<(f64, f64)> {
+        Some(self.0)
+    }
+
+    fn x_step(&self) -> Option<f64> {
+        Some(1.0)
+    }
+
+    fn y_axis(&self, _: usize, _: &Axis) -> Option<Axis> {
+        Some(Axis::number(0.0, 10.0))
+    }
+
+    fn paint(&self, _: usize, _: &Plot, _: &mut Canvas<'_>, _: &ChartPalette) {}
+}
+
+/// What a chart of bars over `extent` shows when asked to show `asked`.
+fn bars_shown(extent: (f64, f64), asked: Axis) -> (f64, f64) {
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(800.0, 400.0));
+    let chart = Chart::new(Bars(extent), 3.0);
+    let id = ui.add(ui.root(), chart, Chart::<Bars>::style()).unwrap();
+    ui.layout();
+    ui.update::<Chart<Bars>, _>(id, |chart, cx| chart.show(cx, asked));
+    let x = ui.widget::<Chart<Bars>>(id).unwrap().x_axis().unwrap();
+    (x.start(), x.end())
+}
+
+#[test]
+fn a_few_bars_fill_the_plot_and_many_still_show_a_few() {
+    // Three bars in whole places: all of them, edge to edge, not five places.
+    assert_eq!(
+        bars_shown((-0.5, 2.5), Axis::category(-0.5, 2.5)),
+        (-0.5, 2.5)
+    );
+    // Eight bars, three asked for: a few places still.
+    let (start, end) = bars_shown((-0.5, 7.5), Axis::category(-0.5, 2.5));
+    assert!(near(end - start, 5.0), "{start}..{end}");
+    // One bar given as a point, not a place: a place wide all the same.
+    let (start, end) = bars_shown((0.0, 0.0), Axis::category(-0.1, 0.1));
+    assert!(near(end - start, 1.0), "{start}..{end}");
+}
+
+#[test]
+fn bars_followed_keep_a_share_of_room_their_places_hold_them_whole() {
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(800.0, 400.0));
+    let chart = Chart::new(Bars((-0.5, 2.5)), 3.0);
+    let id = ui.add(ui.root(), chart, Chart::<Bars>::style()).unwrap();
+    ui.layout();
+    let chart = ui.widget::<Chart<Bars>>(id).unwrap();
+    assert!(chart.is_following());
+    let x = chart.x_axis().unwrap();
+    // Half a place more would cut the first bar in half.
+    assert!(near(x.end(), 2.59) && near(x.start(), -0.41), "{x:?}");
+}
+
+#[test]
+fn a_view_short_of_the_room_after_the_newest_stays_as_shown() {
+    // Points 0, 1 and 2, shown to less than half a step past the newest: not following,
+    // which would move the view half a step on.
+    let (mut ui, id) = chart(Line::new(3));
+    ui.update::<LineChart, _>(id, |chart, cx| chart.show(cx, Axis::number(-0.65, 2.35)));
+    assert!(!of(&ui, id).is_following());
+    let (start, end) = shown(&ui, id);
+    assert!(near(start, -0.65) && near(end, 2.35), "{start}..{end}");
+}
+
+#[test]
+fn a_notch_in_never_widens_a_view_the_data_grew_past() {
+    let mut ui = Ui::new(TextSystem::bundled().unwrap());
+    ui.resize(Size::new(800.0, 400.0));
+    let chart = Chart::new(Bars((-0.5, 2.5)), 3.0);
+    let id = ui.add(ui.root(), chart, Chart::<Bars>::style()).unwrap();
+    ui.layout();
+    paint(&mut ui);
+    let span = |ui: &Ui| {
+        ui.widget::<Chart<Bars>>(id)
+            .unwrap()
+            .x_axis()
+            .unwrap()
+            .span()
+    };
+    assert!(near(span(&ui), 3.0));
+    // Ten bars now: the narrowest view is five places, wider than the three shown.
+    ui.update::<Chart<Bars>, _>(id, |chart, cx| chart.model_mut(cx).0 = (-0.5, 9.5));
+    let _ = changes(&mut ui);
+    wheel(&mut ui, 0.0, -1.0, MIDDLE);
+    assert!(near(span(&ui), 3.0), "a notch in kept it: {}", span(&ui));
+    assert_eq!(changes(&mut ui), 0);
+    wheel(&mut ui, 0.0, 1.0, MIDDLE);
+    assert!(near(span(&ui), 5.0), "a notch out widens it: {}", span(&ui));
+}
+
+#[test]
 fn without_a_step_the_narrowest_view_is_a_share_of_the_data() {
     let mut line = Line::new(1_001);
     line.step = None;

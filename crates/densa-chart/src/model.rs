@@ -15,11 +15,14 @@ pub trait ChartModel {
         AxisKind::Time
     }
 
-    /// The lowest and highest `x` of the data, or `None` while there is none.
+    /// The lowest and highest `x` of the data, or `None` while there is none. On a
+    /// [`Category`](AxisKind::Category) axis, the edges of the places: `(-0.5, n - 0.5)` for
+    /// `n` bars, so a view of all of them shows every bar whole.
     fn x_extent(&self) -> Option<(f64, f64)>;
 
-    /// The distance between two points (a candle's period), if the data has one: the
-    /// widget zooms in no further than a few of them.
+    /// The distance between two points (a candle's period, `1.0` between bars), if the data
+    /// has one: the widget zooms in no further than a few of them, or than all of them when
+    /// there are fewer.
     fn x_step(&self) -> Option<f64> {
         None
     }

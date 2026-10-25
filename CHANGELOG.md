@@ -3,6 +3,20 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Fixed
+
+- **Charts of a few bars or candles** (`densa-widgets`): a `Chart` whose model gives an
+  `x_step` zoomed in no further than five steps even when the data held fewer, so three bars
+  took the right three of five places. The narrowest view is now all of the data when it
+  holds fewer than five steps, and a view following the newest data keeps half a step of
+  room after it on a number or time axis: bars on a category axis show edge to edge, and
+  candles whole, the newest too. A wheel notch in no longer widens a view that data grown
+  since left narrower than the narrowest. `ChartModel::x_extent` now says what a category
+  axis's extent covers, the edges of the places (`-0.5` to `n - 0.5`): a model giving the
+  first and last places' middles instead has its end bars cut when zoomed all the way in.
+
 ## 0.2.4
 
 Nothing in the public API of 0.2.3 was removed or changed in a way that breaks code using it
