@@ -3,7 +3,10 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
-## Unreleased
+## 0.2.4
+
+Nothing in the public API of 0.2.3 was removed or changed in a way that breaks code using it
+(checked with `cargo-semver-checks`): projects asking for `0.2` get this release with `cargo update`.
 
 ### Added
 
@@ -14,7 +17,8 @@ version without changes of its own.
   ordinary `LiveTable` (`LookupJoin::table`), so views, groups, windows and grids work on it;
   rows removed from it (deleted, or out of a window) leave the join too. Refused with
   `DataError::JoinKey` when the `on` column cannot hold the right key's values, and with
-  `DataError::JoinTable` when given a table that is not the join's output.
+  `DataError::JoinTable` when given a table that is not the join's output. `AGENTS.md` has a
+  recipe joining a live table into a grid, and the `densa` crate's task map lists the join.
 
 ## 0.2.3
 

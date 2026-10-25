@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*", "examples/*"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.2.4"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 homepage = "https://densa.dev"
@@ -19,23 +19,23 @@ accesskit = "0.25.1"
 accesskit_winit = "0.34.1"
 # Text only: its default image support would pull in the image crate.
 arboard = { version = "3.7.0", default-features = false }
-densa-alloc = { path = "crates/densa-alloc", version = "0.2.3" }
-densa-arrow = { path = "crates/densa-arrow", version = "0.2.3" }
-densa-chart = { path = "crates/densa-chart", version = "0.2.3" }
-densa-core = { path = "crates/densa-core", version = "0.2.3" }
-densa-data = { path = "crates/densa-data", version = "0.2.3" }
-densa-draw = { path = "crates/densa-draw", version = "0.2.3" }
-densa-fmt = { path = "crates/densa-fmt", version = "0.2.3" }
-densa-grid = { path = "crates/densa-grid", version = "0.2.3" }
+densa-alloc = { path = "crates/densa-alloc", version = "0.2.4" }
+densa-arrow = { path = "crates/densa-arrow", version = "0.2.4" }
+densa-chart = { path = "crates/densa-chart", version = "0.2.4" }
+densa-core = { path = "crates/densa-core", version = "0.2.4" }
+densa-data = { path = "crates/densa-data", version = "0.2.4" }
+densa-draw = { path = "crates/densa-draw", version = "0.2.4" }
+densa-fmt = { path = "crates/densa-fmt", version = "0.2.4" }
+densa-grid = { path = "crates/densa-grid", version = "0.2.4" }
 # Without default features: densa-window decides (and forwards) whether system fonts are on.
-densa-paragraph = { path = "crates/densa-paragraph", version = "0.2.3", default-features = false }
-densa-platform = { path = "crates/densa-platform", version = "0.2.3" }
-densa-render = { path = "crates/densa-render", version = "0.2.3" }
-densa-sync = { path = "crates/densa-sync", version = "0.2.3" }
-densa-text = { path = "crates/densa-text", version = "0.2.3" }
-densa-ui = { path = "crates/densa-ui", version = "0.2.3" }
-densa-widgets = { path = "crates/densa-widgets", version = "0.2.3" }
-densa-window = { path = "crates/densa-window", version = "0.2.3" }
+densa-paragraph = { path = "crates/densa-paragraph", version = "0.2.4", default-features = false }
+densa-platform = { path = "crates/densa-platform", version = "0.2.4" }
+densa-render = { path = "crates/densa-render", version = "0.2.4" }
+densa-sync = { path = "crates/densa-sync", version = "0.2.4" }
+densa-text = { path = "crates/densa-text", version = "0.2.4" }
+densa-ui = { path = "crates/densa-ui", version = "0.2.4" }
+densa-widgets = { path = "crates/densa-widgets", version = "0.2.4" }
+densa-window = { path = "crates/densa-window", version = "0.2.4" }
 # The demo application (not published).
 trading-demo = { path = "examples/trading-demo" }
 
