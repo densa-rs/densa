@@ -276,12 +276,11 @@ impl PageSource for Trips {
         offset: u64,
         limit: usize,
     ) -> Result<Vec<RecordBatch>, PageError> {
-        // SELECT * FROM trips ORDER BY <key.column()> [DESC] LIMIT <limit> OFFSET <offset>
-        for key in query.sort() {
-            let _ = (key.column(), key.is_descending());
-        }
-        let _ = (offset, limit);
-        Ok(vec![RecordBatch::new_empty(self.schema.clone())]) // the batches the engine gave
+        // `trip_id` tells rows apart: where sort keys tie, pages keep one order.
+        let order = query.order_by_sql(&["trip_id"]);
+        let sql = format!("SELECT * FROM trips {order} LIMIT {limit} OFFSET {offset}");
+        let _ = sql; // run it on your engine
+        Ok(vec![RecordBatch::new_empty(self.schema.clone())]) // the batches it gave
     }
 }
 

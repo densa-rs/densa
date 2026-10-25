@@ -348,6 +348,28 @@ fn a_query_says_its_order() {
 }
 
 #[test]
+fn a_query_says_its_order_in_sql_with_keys_breaking_ties() {
+    let none: [&str; 0] = [];
+    assert_eq!(
+        PageQuery::new().order_by_sql(&none),
+        "",
+        "the engine's order"
+    );
+    assert_eq!(PageQuery::new().order_by_sql(&["id"]), r#"ORDER BY "id""#);
+    let by_time = PageQuery::new().sorted_by(SortKey::new("time", SortOrder::Descending));
+    assert_eq!(
+        by_time.order_by_sql(&["id", "region"]),
+        r#"ORDER BY "time" DESC, "id", "region""#
+    );
+    // A key sorted by already, or named twice, is named once: the first way it comes.
+    let by_id = PageQuery::new().sorted_by(SortKey::new("id", SortOrder::Descending));
+    assert_eq!(by_id.order_by_sql(&["id", "id"]), r#"ORDER BY "id" DESC"#);
+    // Quotes in a name are doubled, as standard SQL does.
+    let quoted = PageQuery::new().sorted_by(SortKey::new(r#"a "b""#, SortOrder::Ascending));
+    assert_eq!(quoted.order_by_sql(&none), r#"ORDER BY "a ""b""""#);
+}
+
+#[test]
 fn pages_wanted_below_those_held_come_in_one_call() {
     let (source, calls) = Numbers::new(1_000_000);
     let mut model = model(source, 10);

@@ -16,7 +16,9 @@ version without changes of its own.
   none beside it along), and skips those scrolled past before their turn. A click on a
   column title asks the source for its rows in that order (`PageQuery`, `SortKey`; a source
   can decline a column with `PageSource::can_sort`), without counting them again, even while
-  the first count is on its way. Pages far from the rows shown are dropped (`PageOptions`).
+  the first count is on its way; `PageQuery::order_by_sql` writes that order as an SQL
+  `ORDER BY`, with key columns breaking ties, for a source that pages with `LIMIT` and
+  `OFFSET`. Pages far from the rows shown are dropped (`PageOptions`).
   `error` says why rows are missing (`FetchError`): a count or a call that failed or
   panicked, asked again on `retry`; rows that came back fewer than counted, which `refresh`
   counts and fetches again (as for any data that changed, showing the rows held until the new

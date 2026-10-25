@@ -71,6 +71,47 @@ impl PageQuery {
     pub fn sort(&self) -> &[SortKey] {
         &self.sort
     }
+
+    /// The order as an SQL `ORDER BY` clause, for a source that pages a query with `LIMIT` and
+    /// `OFFSET`: the sort keys, then the `keys` not among them, ascending. Give as `keys` the
+    /// columns that tell rows apart (an id): rows that tie in every sort key then keep one
+    /// order from page to page, so none shows twice or goes missing. Names are quoted as
+    /// standard SQL quotes them (`"time"`, and `"a ""b"""` for a column named `a "b"`), each
+    /// once. Empty with no sort keys and no `keys`, which leaves the order to the engine: one
+    /// that reads in parallel may change it from one page to the next.
+    ///
+    /// ```
+    /// use densa_arrow::{PageQuery, SortKey};
+    /// use densa_grid::SortOrder;
+    ///
+    /// let query = PageQuery::new().sorted_by(SortKey::new("time", SortOrder::Descending));
+    /// let order = query.order_by_sql(&["id"]);
+    /// assert_eq!(order, r#"ORDER BY "time" DESC, "id""#);
+    /// let sql = format!("SELECT * FROM trips {order} LIMIT 256 OFFSET 512");
+    /// ```
+    pub fn order_by_sql<S: AsRef<str>>(&self, keys: &[S]) -> String {
+        let sorted = self
+            .sort
+            .iter()
+            .map(|key| (key.column(), key.is_descending()));
+        let then = keys.iter().map(|key| (key.as_ref(), false));
+        let mut named: Vec<&str> = Vec::new();
+        let mut sql = String::new();
+        for (column, descending) in sorted.chain(then) {
+            if named.contains(&column) {
+                continue;
+            }
+            sql.push_str(if named.is_empty() { "ORDER BY " } else { ", " });
+            named.push(column);
+            sql.push('"');
+            sql.push_str(&column.replace('"', "\"\""));
+            sql.push('"');
+            if descending {
+                sql.push_str(" DESC");
+            }
+        }
+        sql
+    }
 }
 
 /// The rows of a table too large to hold, a page at a time: what a
