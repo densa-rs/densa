@@ -870,7 +870,7 @@ checksum = "f27ae1dd37df86211c42e150270f82743308803d90a6f6e6651cd730d5e1732f"
 
 [[package]]
 name = "densa"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-arrow",
@@ -892,11 +892,11 @@ dependencies = [
 
 [[package]]
 name = "densa-alloc"
-version = "0.2.4"
+version = "0.2.5"
 
 [[package]]
 name = "densa-arrow"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "arrow-array",
  "arrow-buffer",
@@ -917,7 +917,7 @@ dependencies = [
 
 [[package]]
 name = "densa-bench"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "arrow-array",
  "criterion",
@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "densa-chart"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-core",
@@ -944,11 +944,11 @@ dependencies = [
 
 [[package]]
 name = "densa-core"
-version = "0.2.4"
+version = "0.2.5"
 
 [[package]]
 name = "densa-data"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "arrow-array",
  "arrow-schema",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "densa-draw"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "bytemuck",
  "densa-core",
@@ -968,14 +968,14 @@ dependencies = [
 
 [[package]]
 name = "densa-fmt"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
 ]
 
 [[package]]
 name = "densa-grid"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-core",
@@ -986,7 +986,7 @@ dependencies = [
 
 [[package]]
 name = "densa-paragraph"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-core",
@@ -1004,14 +1004,14 @@ dependencies = [
 
 [[package]]
 name = "densa-platform"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "windows-sys 0.61.2",
 ]
 
 [[package]]
 name = "densa-render"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "bytemuck",
  "densa-core",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "densa-sync"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "crossbeam-utils",
  "densa-alloc",
@@ -1033,7 +1033,7 @@ dependencies = [
 
 [[package]]
 name = "densa-text"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-core",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "densa-ui"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "densa-alloc",
  "densa-core",
@@ -1057,7 +1057,7 @@ dependencies = [
 
 [[package]]
 name = "densa-widgets"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "arrow-array",
  "densa-alloc",
@@ -1075,7 +1075,7 @@ dependencies = [
 
 [[package]]
 name = "densa-window"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -3392,7 +3392,7 @@ dependencies = [
 
 [[package]]
 name = "trading-demo"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "crossbeam-utils",
  "densa-alloc",

@@ -3,7 +3,10 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
-## Unreleased
+## 0.2.5
+
+Nothing in the public API of 0.2.4 was removed or changed in a way that breaks code using it
+(checked with `cargo-semver-checks`): projects asking for `0.2` get this release with `cargo update`.
 
 ### Added
 
