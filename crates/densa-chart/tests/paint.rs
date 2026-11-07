@@ -613,3 +613,42 @@ fn a_width_set_directly_is_still_held_to_something_drawable() {
     let instances = drawn(|canvas| paint_line(canvas, &square(), &points[..], style));
     assert_eq!(instances.len(), 10, "one pixel thick");
 }
+
+#[test]
+fn merged_bars_take_the_color_of_the_largest_value_even_past_the_plot() {
+    // In one pixel column, bars past the top of the plot: all drawn to its edge, but the
+    // largest gives the color, and the first of those as large.
+    let bars = [
+        (5.0, 150.0),
+        (5.001, 400.0),
+        (5.002, -30.0),
+        (5.003, 400.0),
+        (5.004, 20.0),
+    ];
+    let colors = [GREEN, RED, GREEN, GREEN, GREEN];
+    let instances = drawn(|canvas| {
+        paint_bars(
+            canvas,
+            &chart(),
+            &bars[..],
+            1e-3,
+            BarStyle::new(),
+            |index| colors[index],
+        );
+    });
+    assert_eq!(instances.len(), 1);
+    assert_eq!(instances[0].color, RED.to_array());
+    // Below zero counts as far as above.
+    let below = [(5.0, 150.0), (5.001, -400.0)];
+    let instances = drawn(|canvas| {
+        paint_bars(
+            canvas,
+            &chart(),
+            &below[..],
+            1e-3,
+            BarStyle::new(),
+            |index| colors[index],
+        );
+    });
+    assert_eq!(instances[0].color, RED.to_array());
+}

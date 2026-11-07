@@ -15,8 +15,10 @@
 //! still shows (M4 aggregation). Finding them visits each point that shows; for lines of
 //! millions of points, a [`LineSummary`] built once lets a frame
 //! ([`paint_line_summarized`]) and the vertical extent of what shows cost about the plot's
-//! width instead, drawing the same pixels. No GPU dependency: hand the canvas's instances to
-//! `densa-render` (or any other backend) to show them.
+//! width instead, drawing the same pixels. Bars and candles denser than the pixels merge per
+//! column; a [`BarSummary`] ([`paint_bars_summarized`]) or a [`CandleSummary`]
+//! ([`paint_candles_summarized`]) does the same for millions of them. No GPU dependency: hand
+//! the canvas's instances to `densa-render` (or any other backend) to show them.
 //!
 //! Painting allocates nothing once the label characters are cached.
 //!
@@ -61,4 +63,7 @@ pub use painter::ChartPainter;
 pub use palette::ChartPalette;
 pub use plot::Plot;
 pub use series::{candle_extent, candles_within, points_within, y_extent, Candle, Candles, Points};
-pub use summary::{paint_line_summarized, LineSummary};
+pub use summary::{
+    paint_bars_summarized, paint_candles_summarized, paint_line_summarized, BarSummary,
+    CandleSummary, LineSummary,
+};

@@ -4,8 +4,9 @@ use std::hint::black_box;
 
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_chart::{
-    paint_bars, paint_candles, paint_line, paint_line_summarized, Axis, BarStyle, Candle,
-    CandleStyle, ChartPainter, ChartPalette, LineStyle, LineSummary, Plot, Point, Rect,
+    paint_bars, paint_bars_summarized, paint_candles, paint_candles_summarized, paint_line,
+    paint_line_summarized, Axis, BarStyle, BarSummary, Candle, CandleStyle, CandleSummary,
+    ChartPainter, ChartPalette, LineStyle, LineSummary, Plot, Point, Rect,
 };
 use densa_draw::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, Font, GlyphCache};
@@ -159,6 +160,78 @@ fn frames_of_a_summarized_line_and_its_extents_perform_zero_heap_operations() {
             let mut canvas = Canvas::begin(&mut cache, &mut out);
             let style = LineStyle::new(densa_chart::Color::WHITE);
             paint_line_summarized(&mut canvas, &plot, &line[..], &summary, style);
+            black_box(out.as_slice());
+        }
+    });
+    assert!(stats.is_zero(), "drawing allocated: {stats:?}");
+    assert_eq!(out.dropped(), 0);
+}
+
+#[test]
+fn frames_of_summarized_bars_and_candles_and_their_extents_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    // A million minutes of candles and their volume, zoomed and scrolled across.
+    let candles: Vec<(f64, Candle)> = (0..1_000_000)
+        .map(|m| {
+            let open = 100.0 + (f64::from(m) * 0.0007).sin() * 10.0;
+            let close = open + (f64::from(m) * 0.3).sin();
+            let candle = Candle::new(open, open.max(close) + 0.2, open.min(close) - 0.2, close);
+            (60.0 * f64::from(m), candle)
+        })
+        .collect();
+    let volume: Vec<(f64, f64)> = candles
+        .iter()
+        .map(|(x, candle)| (*x, (candle.close - candle.open) * 1e3))
+        .collect();
+    let (candle_summary, bar_summary) =
+        (CandleSummary::of(&candles[..]), BarSummary::of(&volume[..]));
+    let style = CandleStyle::new(densa_chart::Color::WHITE, densa_chart::Color::BLACK);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(50_000);
+    let ((), stats) = measure(|| {
+        for frame in 0..300 {
+            let width = 60.0 * (2_000.0 + 3_000.0 * f64::from(frame));
+            let left = 30_000.0 * f64::from(frame);
+            let x = Axis::time(left, left + width);
+            let area = Rect::new(0.0, 0.0, 1_200.0, 400.0);
+            let range = densa_chart::candles_within(&candles[..], &x);
+            let (low, high) = candle_summary
+                .y_extent(&candles[..], range)
+                .unwrap_or((0.0, 1.0));
+            let prices = Plot::new(area, x, Axis::number(low, high));
+            let range = densa_chart::points_within(&volume[..], &x);
+            let (least, most) = bar_summary
+                .y_extent(&volume[..], range)
+                .unwrap_or((0.0, 1.0));
+            let traded = Plot::new(area, x, Axis::number(least.min(0.0), most.max(0.0)));
+            let mut canvas = Canvas::begin(&mut cache, &mut out);
+            paint_candles_summarized(
+                &mut canvas,
+                &prices,
+                &candles[..],
+                &candle_summary,
+                60.0,
+                style,
+            );
+            let color = |index: usize| {
+                if volume[index].1 >= 0.0 {
+                    densa_chart::Color::WHITE
+                } else {
+                    densa_chart::Color::BLACK
+                }
+            };
+            paint_bars_summarized(
+                &mut canvas,
+                &traded,
+                &volume[..],
+                &bar_summary,
+                60.0,
+                BarStyle::new(),
+                color,
+            );
             black_box(out.as_slice());
         }
     });

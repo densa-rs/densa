@@ -2,18 +2,12 @@ use std::ops::Range;
 
 use densa_draw::Canvas;
 
+use super::{Levels, Run, Visit, NONE};
 use crate::line::{begin, end, Emit, Spans};
 use crate::series::{points_within, with_neighbours};
 use crate::{paint_line, y_extent, LineStyle, Plot, Points};
 
-/// Points in a node of the lowest level, and nodes of one level in a node of the next.
-const LEAF: usize = 32;
-const FAN: usize = 8;
-
-/// No such point: a node of gaps only.
-const NONE: usize = usize::MAX;
-
-/// What a run of points holds.
+/// What a run of a line's points holds.
 #[derive(Debug, Clone, Copy)]
 struct Node {
     /// The first and last of its points with finite `x` and `y` (drawn), or [`NONE`].
@@ -28,7 +22,7 @@ struct Node {
     whole: bool,
 }
 
-impl Node {
+impl Run for Node {
     const EMPTY: Self = Self {
         first: NONE,
         last: NONE,
@@ -37,6 +31,26 @@ impl Node {
         whole: true,
     };
 
+    fn then(self, next: Self) -> Self {
+        Self {
+            first: if self.first == NONE {
+                next.first
+            } else {
+                self.first
+            },
+            last: if next.last == NONE {
+                self.last
+            } else {
+                next.last
+            },
+            low: self.low.min(next.low),
+            high: self.high.max(next.high),
+            whole: self.whole && next.whole,
+        }
+    }
+}
+
+impl Node {
     fn of_points<P: Points + ?Sized>(points: &P, range: Range<usize>) -> Self {
         let mut node = Self::EMPTY;
         for index in range {
@@ -56,25 +70,6 @@ impl Node {
             node.last = index;
         }
         node
-    }
-
-    /// This node and the one after it, as one.
-    fn then(self, next: Self) -> Self {
-        Self {
-            first: if self.first == NONE {
-                next.first
-            } else {
-                self.first
-            },
-            last: if next.last == NONE {
-                self.last
-            } else {
-                next.last
-            },
-            low: self.low.min(next.low),
-            high: self.high.max(next.high),
-            whole: self.whole && next.whole,
-        }
     }
 
     /// Its lowest and highest finite `y`, if it has any.
@@ -127,13 +122,7 @@ impl Node {
 /// ```
 #[derive(Debug, Clone, Default)]
 pub struct LineSummary {
-    /// The points summarized.
-    len: usize,
-    /// The `x` of the first and last of them, to tell them from others of the same count.
-    ends: (f64, f64),
-    /// Level 0 summarizes runs of `LEAF` points, each level above runs of `FAN` nodes of the
-    /// one below; the top has one node.
-    levels: Vec<Vec<Node>>,
+    levels: Levels<Node>,
 }
 
 impl LineSummary {
@@ -151,74 +140,37 @@ impl LineSummary {
 
     /// How many points it summarizes.
     pub fn len(&self) -> usize {
-        self.len
+        self.levels.len
     }
 
     /// Whether it summarizes no points.
     pub fn is_empty(&self) -> bool {
-        self.len == 0
+        self.levels.len == 0
     }
 
     /// Takes in the points of `points` past those it summarizes, the earlier ones taken as
     /// they were. Fewer points than it summarizes, or a first point or a last summarized point
     /// at another `x` (a window that slid), are summarized anew.
     pub fn update<P: Points + ?Sized>(&mut self, points: &P) {
-        let len = points.len();
-        if len < self.len || !self.same_ends(points, self.len) {
-            self.rebuild(points);
-            return;
-        }
-        if len == self.len {
-            return;
-        }
-        if self.levels.is_empty() {
-            self.levels.push(Vec::new());
-        }
-        // The run holding the first new point, and every run after it, at each level.
-        let mut from = self.len / LEAF;
-        let leaves = &mut self.levels[0];
-        leaves.truncate(from);
-        for start in (from * LEAF..len).step_by(LEAF) {
-            leaves.push(Node::of_points(points, start..(start + LEAF).min(len)));
-        }
-        let mut level = 0;
-        while self.levels[level].len() > 1 {
-            from /= FAN;
-            if self.levels.len() == level + 1 {
-                self.levels.push(Vec::new());
-            }
-            let (below, above) = self.levels.split_at_mut(level + 1);
-            let (below, above) = (&below[level], &mut above[0]);
-            above.truncate(from);
-            for start in (from * FAN..below.len()).step_by(FAN) {
-                let run = &below[start..(start + FAN).min(below.len())];
-                above.push(run.iter().fold(Node::EMPTY, |all, &node| all.then(node)));
-            }
-            level += 1;
-        }
-        self.levels.truncate(level + 1);
-        self.len = len;
-        self.ends = (points.x(0), points.x(len - 1));
+        self.levels.update(
+            points.len(),
+            |index| points.x(index),
+            |run| Node::of_points(points, run),
+        );
     }
 
     /// Summarizes `points` anew, keeping the memory it holds.
     pub fn rebuild<P: Points + ?Sized>(&mut self, points: &P) {
-        self.len = 0;
-        for level in &mut self.levels {
-            level.clear();
-        }
-        self.update(points);
-    }
-
-    /// Whether the first of `points` and the one at `count - 1` are at the `x` of those it
-    /// summarizes (none summarized: yes).
-    fn same_ends<P: Points + ?Sized>(&self, points: &P, count: usize) -> bool {
-        count == 0 || (points.x(0) == self.ends.0 && points.x(count - 1) == self.ends.1)
+        self.levels.rebuild(
+            points.len(),
+            |index| points.x(index),
+            |run| Node::of_points(points, run),
+        );
     }
 
     /// Whether it summarizes `points`, as far as their count and the `x` of their ends tell.
     fn covers<P: Points + ?Sized>(&self, points: &P) -> bool {
-        self.len == points.len() && self.same_ends(points, self.len)
+        self.levels.covers(points.len(), |index| points.x(index))
     }
 
     /// The lowest and highest finite `y` among `range` of `points` (the part of it within
@@ -233,88 +185,9 @@ impl LineSummary {
         if !self.covers(points) {
             return y_extent(points, range);
         }
-        let range = range.start.min(self.len)..range.end.min(self.len);
-        let mut found = Node::EMPTY;
-        self.each_top(|level, index| {
-            self.extent_of(points, level, index, &range, &mut found);
-        });
-        found.extent()
-    }
-
-    fn extent_of<P: Points + ?Sized>(
-        &self,
-        points: &P,
-        level: usize,
-        index: usize,
-        range: &Range<usize>,
-        found: &mut Node,
-    ) {
-        let (start, end) = self.bounds(level, index);
-        if end <= range.start || start >= range.end {
-            return;
-        }
-        if range.start <= start && end <= range.end {
-            *found = found.then(self.levels[level][index]);
-        } else if level == 0 {
-            let part = start.max(range.start)..end.min(range.end);
-            *found = found.then(Node::of_points(points, part));
-        } else {
-            for child in self.children(level, index) {
-                self.extent_of(points, level - 1, child, range, found);
-            }
-        }
-    }
-
-    /// The points of node `index` of `level`.
-    fn bounds(&self, level: usize, index: usize) -> (usize, usize) {
-        // Saturating: a node larger than any count of points holds them all.
-        let levels = u32::try_from(level).unwrap_or(u32::MAX);
-        let size = LEAF.saturating_mul(FAN.saturating_pow(levels));
-        let start = index.saturating_mul(size);
-        (start, start.saturating_add(size).min(self.len))
-    }
-
-    /// The nodes below node `index` of `level` (above level 0).
-    fn children(&self, level: usize, index: usize) -> Range<usize> {
-        let below = self.levels[level - 1].len();
-        (index * FAN).min(below)..((index + 1) * FAN).min(below)
-    }
-
-    /// Calls `visit(level, index)` for each node of the top level.
-    fn each_top(&self, mut visit: impl FnMut(usize, usize)) {
-        if let Some(top) = self.levels.len().checked_sub(1) {
-            for index in 0..self.levels[top].len() {
-                visit(top, index);
-            }
-        }
-    }
-
-    /// Walks the points of `range` (those of node `index` of `level`), each node wholly within
-    /// `range` and one pixel column standing for its points.
-    fn walk<P: Points + ?Sized, E: Emit>(
-        &self,
-        walk: &mut Walk<'_, P, E>,
-        level: usize,
-        index: usize,
-        range: &Range<usize>,
-    ) {
-        let (start, end) = self.bounds(level, index);
-        if end <= range.start || start >= range.end {
-            return;
-        }
-        let node = self.levels[level][index];
-        let within = range.start <= start && end <= range.end;
-        if let Some(column) = within.then(|| walk.column_of(node, start)).flatten() {
-            walk.node(column, node, start..end);
-        } else if level == 0 {
-            for at in start.max(range.start)..end.min(range.end) {
-                walk.point(at);
-            }
-        } else {
-            for child in self.children(level, index) {
-                self.walk(walk, level - 1, child, range);
-            }
-        }
+        self.levels
+            .fold(range, |run| Node::of_points(points, run))
+            .extent()
     }
 }
 
@@ -326,6 +199,31 @@ struct Walk<'w, P: Points + ?Sized, E: Emit> {
     spans: &'w mut Spans<E>,
     /// The run of nodes not pushed yet: its pixel column, what it holds and its points.
     pending: Option<(f64, Node, Range<usize>)>,
+}
+
+impl<P: Points + ?Sized, E: Emit> Visit<Node> for Walk<'_, P, E> {
+    fn node(&mut self, node: Node, run: Range<usize>) -> bool {
+        let Some(column) = self.column_of(node, run.start) else {
+            return false;
+        };
+        match &mut self.pending {
+            Some((at, held, held_run)) if *at == column && held_run.end == run.start => {
+                *held = held.then(node);
+                held_run.end = run.end;
+            }
+            _ => {
+                self.flush();
+                self.pending = Some((column, node, run));
+            }
+        }
+        true
+    }
+
+    fn item(&mut self, at: usize) {
+        self.flush();
+        let (x, y) = (self.points.x(at), self.points.y(at));
+        self.spans.push(self.plot.x_at(x), self.plot.y_at(y));
+    }
 }
 
 impl<P: Points + ?Sized, E: Emit> Walk<'_, P, E> {
@@ -344,27 +242,6 @@ impl<P: Points + ?Sized, E: Emit> Walk<'_, P, E> {
             && drawn(node.high)
             && column(node.first) == column(node.last);
         fits.then(|| column(node.first))
-    }
-
-    /// The points `run`, summarized by `node`, all in pixel column `column`.
-    fn node(&mut self, column: f64, node: Node, run: Range<usize>) {
-        match &mut self.pending {
-            Some((at, held, held_run)) if *at == column && held_run.end == run.start => {
-                *held = held.then(node);
-                held_run.end = run.end;
-            }
-            _ => {
-                self.flush();
-                self.pending = Some((column, node, run));
-            }
-        }
-    }
-
-    /// Point `at` itself.
-    fn point(&mut self, at: usize) {
-        self.flush();
-        let (x, y) = (self.points.x(at), self.points.y(at));
-        self.spans.push(self.plot.x_at(x), self.plot.y_at(y));
     }
 
     /// Pushes the run of nodes not pushed yet.
@@ -432,7 +309,7 @@ pub fn paint_line_summarized<P: Points + ?Sized>(
         spans: &mut spans,
         pending: None,
     };
-    summary.each_top(|level, index| summary.walk(&mut walk, level, index, &range));
+    summary.levels.walk(&mut walk, &range);
     walk.flush();
     end(spans);
 }
@@ -441,26 +318,13 @@ pub fn paint_line_summarized<P: Points + ?Sized>(
 mod tests {
     use super::*;
 
-    fn summary_of(ys: &[f64]) -> (Vec<(f64, f64)>, LineSummary) {
-        let points: Vec<(f64, f64)> = ys.iter().enumerate().map(|(i, &y)| (i as f64, y)).collect();
-        let summary = LineSummary::of(&points[..]);
-        (points, summary)
-    }
-
-    #[test]
-    fn levels_go_up_until_one_node_holds_everything() {
-        let (_, summary) = summary_of(&vec![1.0; LEAF * FAN * FAN + 1]);
-        let sizes: Vec<usize> = summary.levels.iter().map(Vec::len).collect();
-        assert_eq!(sizes, [FAN * FAN + 1, FAN + 1, 2, 1]);
-        let (_, small) = summary_of(&[1.0; 5]);
-        assert_eq!(small.levels.len(), 1);
-        assert!(LineSummary::new().is_empty());
-    }
-
     #[test]
     fn a_node_keeps_its_first_and_last_drawn_points_and_its_extent() {
-        let ys = [f64::NAN, 3.0, -1.0, 7.0, f64::NAN];
-        let (points, _) = summary_of(&ys);
+        let points: Vec<(f64, f64)> = [f64::NAN, 3.0, -1.0, 7.0, f64::NAN]
+            .iter()
+            .enumerate()
+            .map(|(i, &y)| (i as f64, y))
+            .collect();
         let node = Node::of_points(&points[..], 0..5);
         assert_eq!((node.first, node.last), (1, 3));
         assert_eq!(node.extent(), Some((-1.0, 7.0)));
@@ -474,5 +338,6 @@ mod tests {
             (node.first, node.extent(), node.whole),
             (1, Some((2.0, 4.0)), false)
         );
+        assert!(LineSummary::new().is_empty());
     }
 }

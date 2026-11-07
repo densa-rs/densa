@@ -53,7 +53,8 @@ or windowing crate.
 - **Charts over live data.** Lines, candlesticks and volume in stacked panes that follow the
   newest data, zoom around the pointer and pan; a line is drawn one pixel column at a time,
   so every high and low shows however many points share one, and with a `LineSummary` a line
-  of tens of millions of points costs a frame about as much as the chart is wide.
+  of tens of millions of points costs a frame about as much as the chart is wide (bars and
+  candles too, with a `BarSummary` or a `CandleSummary`).
 - **Widgets with flexbox layout.** A retained widget tree laid out with flexbox, with pointer
   capture, hover, focus and Tab order, and widgets for toolbars, forms, lists, split panes
   and docking workspaces; it runs headless, so interfaces are tested without a window.

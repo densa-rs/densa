@@ -37,6 +37,7 @@
 //! | read a view's rows, or grouped results | `data::View::row` (a `data::RowRef` into `data::LiveTable::batches`), `data::Groups::to_batch` |
 //! | chart data | [`widgets::Chart`] with your [`chart::ChartModel`]; `arrow::LiveSeries` reads a live table |
 //! | draw a line of millions of points | [`chart::LineSummary`] with [`chart::paint_line_summarized`] and [`chart::LineSummary::y_extent`] |
+//! | draw millions of bars or candles | [`chart::BarSummary`] with [`chart::paint_bars_summarized`], [`chart::CandleSummary`] with [`chart::paint_candles_summarized`] |
 //! | arrange panels in tabs and splits | [`widgets::DockArea`] |
 //! | add a menu bar | [`widgets::MenuBar`] with [`widgets::MenuItem`]s; choices arrive as [`ui::ActionKind::Command`] |
 //! | update the screen from another thread | `window::Host::waker`, and [`sync::triple_buffer()`] for snapshots |

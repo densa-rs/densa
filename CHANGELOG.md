@@ -7,10 +7,26 @@ version without changes of its own.
 
 ### Added
 
+- **Bars and candles of millions at the cost of the chart's width** (`densa-chart`):
+  `BarSummary` and `CandleSummary` do for bars and candlesticks what `LineSummary` does for a
+  line. `paint_bars_summarized` and `paint_candles_summarized` draw the same pixels as
+  `paint_bars` and `paint_candles`, at a cost of about the plot's width however many show
+  (candles three pixels wide or more are drawn whole, one by one, as few fit when their
+  `interval` is their true distance apart), and each summary's `y_extent` finds the vertical
+  extent of a view in a few steps.
 - **A window on a pair join's rows** (`densa-data`): `PairJoin::set_left_window` keeps the
   join's left rows to a window, as `LiveTable::set_window` does for a table: the rows it lets
   go of leave the join with every pair they are in. A window on the output deletes pairs but
   keeps the left rows behind them, which the join then holds for good.
+
+### Changed
+
+- **Merged bars take the color of the largest** (`densa-chart`): bars that `paint_bars` merges
+  into one pixel column are drawn in the color of the bar whose `y` is farthest from zero (the
+  first of those as far), where it was the tallest bar as drawn. The two differ only where the
+  plot cuts bars: bars reaching past it, all drawn to its edge (the largest now gives the
+  color, not the first to reach the edge), and bars on the far side of a zero out of view,
+  drawn with no height (now the largest of a column gives it its color even so).
 
 ## 0.2.6
 

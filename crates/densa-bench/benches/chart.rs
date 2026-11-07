@@ -1,11 +1,13 @@
-//! Chart costs: a frame of a line far denser than the plot is wide, drawn and scaled.
+//! Chart costs: a frame of a line, bars or candles far denser than the plot is wide, drawn
+//! and scaled.
 //!
 //! Run: `cargo bench -p densa-bench --bench chart`
 
 use criterion::{criterion_group, BenchmarkId, Criterion, Throughput};
 use densa_chart::{
-    paint_line, paint_line_summarized, points_within, y_extent, Axis, Color, LineStyle,
-    LineSummary, Plot, Rect,
+    candle_extent, paint_bars, paint_bars_summarized, paint_candles, paint_candles_summarized,
+    paint_line, paint_line_summarized, points_within, y_extent, Axis, BarStyle, BarSummary, Candle,
+    CandleStyle, CandleSummary, Color, LineStyle, LineSummary, Plot, Rect,
 };
 use densa_draw::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, GlyphCache};
@@ -89,7 +91,109 @@ fn dense_line(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, dense_line);
+fn dense_bars_and_candles(c: &mut Criterion) {
+    let mut group = c.benchmark_group("dense_bars_and_candles");
+    for count in [1_000_000_usize, 10_000_000] {
+        let (xs, ys) = walk(count + 1);
+        let bars: Vec<(f64, f64)> = (0..count).map(|i| (xs[i], ys[i + 1] - ys[i])).collect();
+        let candles: Vec<(f64, Candle)> = (0..count)
+            .map(|i| {
+                let (open, close) = (ys[i], ys[i + 1]);
+                let candle = Candle::new(open, open.max(close) + 0.5, open.min(close) - 0.5, close);
+                (xs[i], candle)
+            })
+            .collect();
+        let x = Axis::number(0.0, count as f64);
+        let area = Rect::new(0.0, 0.0, WIDTH, 400.0);
+        let (low, high) = candle_extent(&candles[..], 0..count).expect("finite");
+        let prices = Plot::new(area, x, Axis::number(low, high));
+        let (least, most) = y_extent(&bars[..], 0..count).expect("finite");
+        let moves = Plot::new(area, x, Axis::number(least, most));
+        let style = CandleStyle::new(Color::WHITE, Color::BLACK);
+        let color = |index: usize| {
+            if bars[index].1 >= 0.0 {
+                Color::WHITE
+            } else {
+                Color::BLACK
+            }
+        };
+        let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+        let mut out = InstanceBuffer::with_capacity(8 * WIDTH as usize);
+        group.throughput(Throughput::Elements(count as u64));
+        group.bench_with_input(BenchmarkId::new("paint_candles", count), &count, |b, _| {
+            b.iter(|| {
+                let mut canvas = Canvas::begin(&mut cache, &mut out);
+                paint_candles(&mut canvas, &prices, &candles[..], 1.0, style);
+            })
+        });
+        let candle_summary = CandleSummary::of(&candles[..]);
+        group.bench_with_input(
+            BenchmarkId::new("candles_summarized", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let mut canvas = Canvas::begin(&mut cache, &mut out);
+                    let summary = &candle_summary;
+                    paint_candles_summarized(
+                        &mut canvas,
+                        &prices,
+                        &candles[..],
+                        summary,
+                        1.0,
+                        style,
+                    );
+                })
+            },
+        );
+        group.bench_with_input(BenchmarkId::new("paint_bars", count), &count, |b, _| {
+            b.iter(|| {
+                let mut canvas = Canvas::begin(&mut cache, &mut out);
+                paint_bars(&mut canvas, &moves, &bars[..], 1.0, BarStyle::new(), color);
+            })
+        });
+        let bar_summary = BarSummary::of(&bars[..]);
+        group.bench_with_input(
+            BenchmarkId::new("bars_summarized", count),
+            &count,
+            |b, _| {
+                b.iter(|| {
+                    let mut canvas = Canvas::begin(&mut cache, &mut out);
+                    let (summary, style) = (&bar_summary, BarStyle::new());
+                    paint_bars_summarized(
+                        &mut canvas,
+                        &moves,
+                        &bars[..],
+                        summary,
+                        1.0,
+                        style,
+                        color,
+                    );
+                })
+            },
+        );
+        group.bench_with_input(BenchmarkId::new("candle_extent", count), &count, |b, _| {
+            b.iter(|| black_box(candle_extent(&candles[..], 0..count)))
+        });
+        group.bench_with_input(
+            BenchmarkId::new("candle_summary_extent", count),
+            &count,
+            |b, _| b.iter(|| black_box(candle_summary.y_extent(&candles[..], 0..count))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("candle_summary_build", count),
+            &count,
+            |b, _| b.iter(|| black_box(CandleSummary::of(&candles[..]))),
+        );
+        group.bench_with_input(
+            BenchmarkId::new("bar_summary_build", count),
+            &count,
+            |b, _| b.iter(|| black_box(BarSummary::of(&bars[..]))),
+        );
+    }
+    group.finish();
+}
+
+criterion_group!(benches, dense_line, dense_bars_and_candles);
 
 fn main() {
     use densa_platform::{logical_cpus, pick_performance_cpu, pin_current_thread};

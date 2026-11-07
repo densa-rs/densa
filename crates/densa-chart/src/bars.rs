@@ -1,8 +1,8 @@
 use densa_core::{Color, Rect};
-use densa_draw::Canvas;
+use densa_draw::{Canvas, CanvasState};
 
 use crate::series::{candles_within, points_within, with_neighbours};
-use crate::{Candles, Plot, Points};
+use crate::{Candle, Candles, Plot, Points};
 
 /// How candlesticks are drawn: `CandleStyle::new(up, down)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -88,7 +88,37 @@ fn usable_body(fraction: f32) -> f32 {
 /// separate wick.
 const MIN_BODY_WITH_WICK: f64 = 3.0;
 
-/// Narrow candles that land on one pixel column, merged into one: the first open, the last
+/// Draws `candles` across `plot`, clipped to its area; `interval` is the distance between
+/// two candles in `x` units (60 for one-minute candles on a time axis), which sets their
+/// width.
+///
+/// Each candle is a body from open to close with a wick from low to high, in whole pixels;
+/// candles narrower than three pixels are a single bar from low to high, and those that land
+/// on the same pixel column are merged into one (first open, last close, highest high,
+/// lowest low), so a frame costs at most two rectangles per candle and one per column
+/// however many candles there are. Candles with a value that is not finite are skipped.
+/// The work is proportional to the candles that show; for millions of them,
+/// [`paint_candles_summarized`] draws the same at a cost of about the plot's width.
+/// Allocation-free.
+///
+/// [`paint_candles_summarized`]: crate::paint_candles_summarized
+pub fn paint_candles<C: Candles + ?Sized>(
+    canvas: &mut Canvas<'_>,
+    plot: &Plot,
+    candles: &C,
+    interval: f64,
+    style: CandleStyle,
+) {
+    let Some(mut draw) = CandleDraw::begin(canvas, plot, interval, style) else {
+        return;
+    };
+    for index in with_neighbours(candles_within(candles, &plot.x()), candles.len()) {
+        draw.candle(candles.x(index), candles.candle(index));
+    }
+    draw.end();
+}
+
+/// Narrow candles that land on one left edge, merged into one: the first open, the last
 /// close, and the highest high and lowest low (as pixels).
 #[derive(Debug, Clone, Copy)]
 struct Period {
@@ -99,89 +129,123 @@ struct Period {
     close: f64,
 }
 
-/// Draws `candles` across `plot`, clipped to its area; `interval` is the distance between
-/// two candles in `x` units (60 for one-minute candles on a time axis), which sets their
-/// width.
-///
-/// Each candle is a body from open to close with a wick from low to high, in whole pixels;
-/// candles narrower than three pixels are a single bar from low to high, and those that land
-/// on the same pixel column are merged into one (first open, last close, highest high,
-/// lowest low), so a frame costs at most two rectangles per candle and one per column
-/// however many candles there are. Candles with a value that is not finite are skipped.
-/// Allocation-free.
-pub fn paint_candles<C: Candles + ?Sized>(
-    canvas: &mut Canvas<'_>,
-    plot: &Plot,
-    candles: &C,
-    interval: f64,
+/// Candles drawn onto a plot, clipped to its area: give them in ascending `x`, then
+/// [`end`](Self::end). Narrow ones are merged per left edge as they come.
+pub(crate) struct CandleDraw<'c, 'a> {
+    canvas: &'c mut Canvas<'a>,
+    /// The canvas's clip before the candles.
+    state: CanvasState,
+    plot: Plot,
+    width: f64,
     style: CandleStyle,
-) {
-    let area = plot.area();
-    if area.is_empty() {
-        return;
+    /// The narrow candles at the last left edge, not drawn yet.
+    merged: Option<Period>,
+}
+
+impl<'c, 'a> CandleDraw<'c, 'a> {
+    /// Candles `interval` apart drawn onto `plot` in `style`, or `None` if its area is empty.
+    pub(crate) fn begin(
+        canvas: &'c mut Canvas<'a>,
+        plot: &Plot,
+        interval: f64,
+        style: CandleStyle,
+    ) -> Option<Self> {
+        let area = plot.area();
+        if area.is_empty() {
+            return None;
+        }
+        let state = canvas.state();
+        canvas.clip(area);
+        Some(Self {
+            canvas,
+            state,
+            plot: *plot,
+            width: bar_width(plot, interval, style.body),
+            style,
+            merged: None,
+        })
     }
-    let state = canvas.state();
-    canvas.clip(area);
-    let width = bar_width(plot, interval, style.body);
-    let mut merged: Option<Period> = None;
-    for index in with_neighbours(candles_within(candles, &plot.x()), candles.len()) {
-        let candle = candles.candle(index);
+
+    /// Whether candles are drawn as one bar each, merged per left edge.
+    pub(crate) fn is_narrow(&self) -> bool {
+        self.width < MIN_BODY_WITH_WICK
+    }
+
+    /// The left edge of a candle at `x`.
+    pub(crate) fn left_of(&self, x: f64) -> f64 {
+        left_of(&self.plot, x, self.width)
+    }
+
+    /// A candle at `x` (skipped unless finite).
+    pub(crate) fn candle(&mut self, x: f64, candle: Candle) {
         if !candle.is_finite() {
-            continue;
+            return;
         }
-        let left = (plot.x_at(candles.x(index)) - width / 2.0).round();
-        let high = plot.clamp_y(plot.y_at(candle.high));
-        let low = plot.clamp_y(plot.y_at(candle.low));
-        if width < MIN_BODY_WITH_WICK {
-            match merged.as_mut() {
-                Some(period) if period.left == left => {
-                    period.top = period.top.min(high);
-                    period.bottom = period.bottom.max(low);
-                    period.close = candle.close;
-                }
-                _ => {
-                    if let Some(period) = merged.take() {
-                        fill_period(canvas, period, width, style);
-                    }
-                    merged = Some(Period {
-                        left,
-                        top: high,
-                        bottom: low,
-                        open: candle.open,
-                        close: candle.close,
-                    });
-                }
+        let left = self.left_of(x);
+        if self.is_narrow() {
+            self.narrow(left, candle);
+            return;
+        }
+        let color = self.style.color(candle.open, candle.close);
+        let wick = left + (self.width / 2.0).floor();
+        let (high, low) = (self.y(candle.high), self.y(candle.low));
+        fill_bar(self.canvas, wick, 1.0, high, low, color);
+        let (open, close) = (self.y(candle.open), self.y(candle.close));
+        fill_bar(
+            self.canvas,
+            left,
+            self.width,
+            open.min(close),
+            open.max(close),
+            color,
+        );
+    }
+
+    /// Narrow candles at `left`, as one: `period` opens as the first of them, closes as the
+    /// last, and reaches the highest high and the lowest low among them. Merged with those
+    /// at that edge before it.
+    pub(crate) fn narrow(&mut self, left: f64, period: Candle) {
+        let (top, bottom) = (self.y(period.high), self.y(period.low));
+        match self.merged.as_mut() {
+            // A left edge that is not a number (an `x` that is not) never merges, here and
+            // in the summaries, which compare edges the same way.
+            Some(merged) if merged.left == left => {
+                merged.top = merged.top.min(top);
+                merged.bottom = merged.bottom.max(bottom);
+                merged.close = period.close;
             }
-            continue;
+            _ => {
+                self.flush();
+                self.merged = Some(Period {
+                    left,
+                    top,
+                    bottom,
+                    open: period.open,
+                    close: period.close,
+                });
+            }
         }
-        let color = style.color(candle.open, candle.close);
-        let wick = left + (width / 2.0).floor();
-        fill_bar(canvas, wick, 1.0, high, low, color);
-        let open = plot.clamp_y(plot.y_at(candle.open));
-        let close = plot.clamp_y(plot.y_at(candle.close));
-        fill_bar(canvas, left, width, open.min(close), open.max(close), color);
     }
-    if let Some(period) = merged {
-        fill_period(canvas, period, width, style);
+
+    /// The pixel of `value`, held within a pixel of the plot.
+    fn y(&self, value: f64) -> f64 {
+        self.plot.clamp_y(self.plot.y_at(value))
     }
-    canvas.restore(state);
-}
 
-/// Fills merged narrow candles as one bar, colored by the period's direction.
-fn fill_period(canvas: &mut Canvas<'_>, period: Period, width: f64, style: CandleStyle) {
-    let color = style.color(period.open, period.close);
-    fill_bar(canvas, period.left, width, period.top, period.bottom, color);
-}
+    /// Draws the merged narrow candles not drawn yet, as one bar colored by their direction.
+    fn flush(&mut self) {
+        if let Some(period) = self.merged.take() {
+            let color = self.style.color(period.open, period.close);
+            let (left, width) = (period.left, self.width);
+            fill_bar(self.canvas, left, width, period.top, period.bottom, color);
+        }
+    }
 
-/// Bars that land on one left edge, merged into one: their whole extent, in the color of
-/// the tallest.
-#[derive(Debug, Clone, Copy)]
-struct Stack {
-    left: f64,
-    top: f64,
-    bottom: f64,
-    color: Color,
-    height: f64,
+    /// Draws what is left and gives the canvas its clip back.
+    pub(crate) fn end(mut self) {
+        self.flush();
+        self.canvas.restore(self.state);
+    }
 }
 
 /// Draws `bars` across `plot` as columns from zero to each `y`, clipped to its area;
@@ -189,8 +253,15 @@ struct Stack {
 /// color by index (to color volume by its candle's direction, say).
 ///
 /// Bars that land on the same left edge (more bars than pixels) are merged into one, in the
-/// color of the tallest, so a frame costs at most one rectangle per bar and per pixel
-/// column. Bars whose `y` is not finite are skipped. Allocation-free.
+/// color of the largest (the `y` farthest from zero; the first of those as large), so a frame
+/// costs at most one rectangle per bar and per pixel column. Bars whose `y` is not finite are
+/// skipped. Bars start at zero: give `plot` a vertical axis that holds it (bars on the far side
+/// of a zero out of view are drawn with no height, though the largest of a column still gives
+/// it its color). The work is proportional to the bars that show; for millions of them,
+/// [`paint_bars_summarized`] draws the same at a cost of about the plot's width.
+/// Allocation-free.
+///
+/// [`paint_bars_summarized`]: crate::paint_bars_summarized
 pub fn paint_bars<P: Points + ?Sized>(
     canvas: &mut Canvas<'_>,
     plot: &Plot,
@@ -199,62 +270,128 @@ pub fn paint_bars<P: Points + ?Sized>(
     style: BarStyle,
     color: impl Fn(usize) -> Color,
 ) {
-    let area = plot.area();
-    if area.is_empty() {
+    let Some(mut draw) = BarDraw::begin(canvas, plot, interval, style, color) else {
         return;
-    }
-    let state = canvas.state();
-    canvas.clip(area);
-    let width = bar_width(plot, interval, style.body);
-    let base = plot.clamp_y(plot.y_at(0.0));
-    let mut merged: Option<Stack> = None;
+    };
     for index in with_neighbours(points_within(bars, &plot.x()), bars.len()) {
-        let y = bars.y(index);
-        if !y.is_finite() {
-            continue;
+        draw.bar(index, bars.x(index), bars.y(index));
+    }
+    draw.end();
+}
+
+/// Bars that land on one left edge, merged into one: their whole extent (as pixels), in the
+/// color of the largest.
+#[derive(Debug, Clone, Copy)]
+struct Stack {
+    left: f64,
+    top: f64,
+    bottom: f64,
+    /// The largest bar's index, and how far its `y` is from zero.
+    largest: usize,
+    size: f64,
+}
+
+/// Bars drawn onto a plot, clipped to its area: give them in ascending `x`, then
+/// [`end`](Self::end). Those at one left edge are merged as they come.
+pub(crate) struct BarDraw<'c, 'a, F> {
+    canvas: &'c mut Canvas<'a>,
+    /// The canvas's clip before the bars.
+    state: CanvasState,
+    plot: Plot,
+    width: f64,
+    /// The pixel of zero, where bars start.
+    base: f64,
+    color: F,
+    /// The bars at the last left edge, not drawn yet.
+    merged: Option<Stack>,
+}
+
+impl<'c, 'a, F: Fn(usize) -> Color> BarDraw<'c, 'a, F> {
+    /// Bars `interval` apart drawn onto `plot` in `style`, each in its `color`, or `None` if
+    /// its area is empty.
+    pub(crate) fn begin(
+        canvas: &'c mut Canvas<'a>,
+        plot: &Plot,
+        interval: f64,
+        style: BarStyle,
+        color: F,
+    ) -> Option<Self> {
+        let area = plot.area();
+        if area.is_empty() {
+            return None;
         }
-        let left = (plot.x_at(bars.x(index)) - width / 2.0).round();
-        let end = plot.clamp_y(plot.y_at(y));
-        let (top, bottom) = (end.min(base), end.max(base));
-        match merged.as_mut() {
+        let state = canvas.state();
+        canvas.clip(area);
+        Some(Self {
+            canvas,
+            state,
+            plot: *plot,
+            width: bar_width(plot, interval, style.body),
+            base: plot.clamp_y(plot.y_at(0.0)),
+            color,
+            merged: None,
+        })
+    }
+
+    /// The left edge of a bar at `x`.
+    pub(crate) fn left_of(&self, x: f64) -> f64 {
+        left_of(&self.plot, x, self.width)
+    }
+
+    /// Bar `index`, at `x` up (or down) to `y` (skipped unless `y` is finite).
+    pub(crate) fn bar(&mut self, index: usize, x: f64, y: f64) {
+        if y.is_finite() {
+            self.stack(self.left_of(x), y, y, index, y.abs());
+        }
+    }
+
+    /// Bars at `left`, as one: from zero to their lowest `y`, `low`, and their highest, `high`,
+    /// the largest of them bar `largest`, `size` from zero. Merged with those at that edge
+    /// before them.
+    pub(crate) fn stack(&mut self, left: f64, low: f64, high: f64, largest: usize, size: f64) {
+        let top = self.y(high).min(self.base);
+        let bottom = self.y(low).max(self.base);
+        match self.merged.as_mut() {
             Some(stack) if stack.left == left => {
                 stack.top = stack.top.min(top);
                 stack.bottom = stack.bottom.max(bottom);
-                if bottom - top > stack.height {
-                    stack.height = bottom - top;
-                    stack.color = color(index);
+                if size > stack.size {
+                    stack.largest = largest;
+                    stack.size = size;
                 }
             }
             _ => {
-                if let Some(stack) = merged.take() {
-                    fill_stack(canvas, stack, width);
-                }
-                merged = Some(Stack {
+                self.flush();
+                self.merged = Some(Stack {
                     left,
                     top,
                     bottom,
-                    color: color(index),
-                    height: bottom - top,
+                    largest,
+                    size,
                 });
             }
         }
     }
-    if let Some(stack) = merged {
-        fill_stack(canvas, stack, width);
-    }
-    canvas.restore(state);
-}
 
-/// Fills merged bars as one.
-fn fill_stack(canvas: &mut Canvas<'_>, stack: Stack, width: f64) {
-    fill_bar(
-        canvas,
-        stack.left,
-        width,
-        stack.top,
-        stack.bottom,
-        stack.color,
-    );
+    /// The pixel of `value`, held within a pixel of the plot.
+    fn y(&self, value: f64) -> f64 {
+        self.plot.clamp_y(self.plot.y_at(value))
+    }
+
+    /// Draws the merged bars not drawn yet, as one.
+    fn flush(&mut self) {
+        if let Some(stack) = self.merged.take() {
+            let color = (self.color)(stack.largest);
+            let (left, width) = (stack.left, self.width);
+            fill_bar(self.canvas, left, width, stack.top, stack.bottom, color);
+        }
+    }
+
+    /// Draws what is left and gives the canvas its clip back.
+    pub(crate) fn end(mut self) {
+        self.flush();
+        self.canvas.restore(self.state);
+    }
 }
 
 /// Kept off a width before rounding it down, so 70% of 10 pixels (0.7 as an `f32` is a
@@ -271,6 +408,11 @@ fn bar_width(plot: &Plot, interval: f64, fraction: f32) -> f64 {
     } else {
         1.0
     }
+}
+
+/// The left edge of a bar `width` pixels wide centred on `x`, in whole pixels.
+fn left_of(plot: &Plot, x: f64, width: f64) -> f64 {
+    (plot.x_at(x) - width / 2.0).round()
 }
 
 /// Fills `width` pixels from `left`, `top` to `bottom` rounded to whole pixels, at least
