@@ -223,8 +223,10 @@ fn on_action(ui: &mut Ui, input: WidgetId, grid: WidgetId, action: &Action) {
 ```
 
 Rows enriched from another table (each trade with its instrument's columns), kept up to date
-as either side changes: a `densa::data::LookupJoin`. Its output is a table of your own, so
-it can sit in a grid:
+as either side changes: a `densa::data::LookupJoin`. (When a value can match many rows on both
+sides, each order with every address of its customer, use `densa::data::PairJoin`: its output
+has a row per pair, keyed by a pair id, and both sides go in through the join.) Its output is a
+table of your own, so it can sit in a grid:
 
 ```rust
 use densa::arrow::LiveModel;

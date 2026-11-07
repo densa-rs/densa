@@ -32,6 +32,17 @@ pub enum DataError {
     /// The table given to a join is not laid out as its output (the join's columns, keyed by
     /// the left key): make it with `LookupJoin::table`.
     JoinTable,
+    /// A pair join's `on` and `by` columns cannot be joined: both must hold integers of one
+    /// kind (signed or unsigned) or both text, as keys do.
+    PairColumns {
+        /// The left column joined on.
+        on: String,
+        /// The right column joined on.
+        by: String,
+    },
+    /// The table given to a pair join is not laid out as its output (the join's columns,
+    /// keyed by the pair id): make it with `PairJoin::table`.
+    PairTable,
     /// The batch has a different number of columns.
     ColumnCount {
         /// Columns in the table.
@@ -118,6 +129,16 @@ impl fmt::Display for DataError {
             Self::JoinTable => f.write_str(
                 "this table is not the join's output: make it with LookupJoin::table and give \
                  that table to every call",
+            ),
+            Self::PairColumns { on, by } => write!(
+                f,
+                "columns {on:?} and {by:?} cannot be joined: a pair join takes two columns of \
+                 one kind, both signed integers, both unsigned integers or both text (not \
+                 dictionaries), as keys are"
+            ),
+            Self::PairTable => f.write_str(
+                "this table is not the pair join's output: make it with PairJoin::table, give \
+                 that table to every call, and give each join a table of its own",
             ),
             Self::ColumnCount { expected, found } => {
                 write!(f, "the batch has {found} columns, the table {expected}")

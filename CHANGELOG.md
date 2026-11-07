@@ -14,6 +14,13 @@ version without changes of its own.
   pixels `paint_line` draws, at a cost of about the plot's width however many points show,
   and `LineSummary::y_extent` finds what a view needs for its vertical axis in a few steps.
   The `dense` example draws twenty million samples, still recording.
+- **Many-to-many joins** (`densa-data`): `PairJoin` pairs each row of one live table with
+  every row of another holding the same value in their join columns (integers or text, keys
+  or not): an order with each address of its customer. A row that pairs with none is in the
+  output once with nulls (a left outer join). Both sides go in through the join
+  (`upsert_left`, `delete_left`, `upsert_right`, `delete_right`), which brings its output, an
+  ordinary `LiveTable` keyed by a pair id, up to date: the pairs a row leaves are deleted,
+  those it joins upserted.
 
 ## 0.2.5
 

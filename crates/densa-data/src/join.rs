@@ -16,20 +16,29 @@ use crate::{Changes, DataError, LiveTable, RowId};
 /// rebuilt once it holds more than twice as many entries as the table has rows.
 const MIN_REBUILD: usize = 1_024;
 
-/// A right table's key, owned.
+/// A key, owned: a right table's, or (for a pair join) a value joined on.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum Owned {
+pub(crate) enum Owned {
     Int(i64),
     UInt(u64),
     Str(Box<str>),
 }
 
 impl Owned {
-    fn of(key: KeyRef<'_>) -> Self {
+    pub(crate) fn of(key: KeyRef<'_>) -> Self {
         match key {
             KeyRef::Int(k) => Self::Int(k),
             KeyRef::UInt(k) => Self::UInt(k),
             KeyRef::Str(k) => Self::Str(k.into()),
+        }
+    }
+
+    /// The key, borrowed.
+    pub(crate) fn key(&self) -> KeyRef<'_> {
+        match self {
+            Self::Int(k) => KeyRef::Int(*k),
+            Self::UInt(k) => KeyRef::UInt(*k),
+            Self::Str(k) => KeyRef::Str(k),
         }
     }
 }
@@ -402,7 +411,7 @@ impl LookupJoin {
 /// Rows to gather from stored batches: only the batches read are handed to Arrow, which may
 /// size a dictionary column by all its inputs' values and holds the buffers of every input
 /// (as `LiveTable`'s own gathers do). Places missing a row take a fill value.
-struct Places {
+pub(crate) struct Places {
     /// The stored batches read, in the order of their first use.
     batches: Vec<usize>,
     /// Each row's (source, row): a source past `batches` is the fill.
@@ -411,7 +420,7 @@ struct Places {
 }
 
 impl Places {
-    fn of(found: impl Iterator<Item = Option<(usize, usize)>>) -> Self {
+    pub(crate) fn of(found: impl Iterator<Item = Option<(usize, usize)>>) -> Self {
         let mut position: FxHashMap<usize, usize> = FxHashMap::default();
         let mut batches = Vec::new();
         let mut missing = false;
@@ -438,7 +447,7 @@ impl Places {
 
     /// Column `column` of `stored` at these places, `fill` (one value) where a row is missing
     /// (a gather with nothing missing needs none).
-    fn gather(
+    pub(crate) fn gather(
         &self,
         stored: &[RecordBatch],
         column: usize,
@@ -463,13 +472,13 @@ fn names(out: &LiveTable, id: RowId, on: usize, read: KeyFn) -> Option<KeyRef<'_
 }
 
 /// A schema of `fields`, every one nullable.
-fn nullable(fields: impl IntoIterator<Item = Field>) -> SchemaRef {
+pub(crate) fn nullable(fields: impl IntoIterator<Item = Field>) -> SchemaRef {
     let fields: Vec<Field> = fields.into_iter().map(|f| f.with_nullable(true)).collect();
     Arc::new(Schema::new(fields))
 }
 
 /// Refuses `rows` unless they have `schema`'s column names and data types.
-fn check_columns(schema: &Schema, rows: &RecordBatch) -> Result<(), DataError> {
+pub(crate) fn check_columns(schema: &Schema, rows: &RecordBatch) -> Result<(), DataError> {
     let (ours, theirs) = (schema.fields(), rows.schema_ref().fields());
     if ours.len() != theirs.len() {
         return Err(DataError::ColumnCount {

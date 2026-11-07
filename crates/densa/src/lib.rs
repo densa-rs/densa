@@ -33,8 +33,10 @@
 //! | keep data sorted, filtered and aggregated as it changes | `data::LiveTable` with `data::ViewSpec` and `data::GroupSpec` |
 //! | keep only recent rows, or count per minute | `data::Window`, `data::GroupSpec::group_by_time` |
 //! | give each row the columns of the row it names in another table | `data::LookupJoin` |
+//! | pair each row with every row of another holding the same value (many to many) | `data::PairJoin` |
 //! | read a view's rows, or grouped results | `data::View::row` (a `data::RowRef` into `data::LiveTable::batches`), `data::Groups::to_batch` |
 //! | chart data | [`widgets::Chart`] with your [`chart::ChartModel`]; `arrow::LiveSeries` reads a live table |
+//! | draw a line of millions of points | [`chart::LineSummary`] with [`chart::paint_line_summarized`] and [`chart::LineSummary::y_extent`] |
 //! | arrange panels in tabs and splits | [`widgets::DockArea`] |
 //! | add a menu bar | [`widgets::MenuBar`] with [`widgets::MenuItem`]s; choices arrive as [`ui::ActionKind::Command`] |
 //! | update the screen from another thread | `window::Host::waker`, and [`sync::triple_buffer()`] for snapshots |
@@ -44,7 +46,8 @@
 //! Complete programs to start from are in
 //! [densa-widgets' examples](https://github.com/densa-rs/densa/tree/main/crates/densa-widgets/examples):
 //! `monitor` (a live table, a grid and a chart of the selected row), `linked`, `live_table`,
-//! `dock`, `gallery` and `chart`.
+//! `paged` (a billion rows fetched a page at a time), `dock`, `gallery`, `chart` and `dense`
+//! (a line of twenty million samples).
 //!
 //! # A live table in a window
 //!

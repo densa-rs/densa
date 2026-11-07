@@ -146,3 +146,41 @@ impl KeyIndex {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use arrow_schema::TimeUnit;
+
+    #[test]
+    fn keys_are_read_from_exactly_the_types_an_index_keys_by() {
+        use DataType as D;
+        let dictionary = D::Dictionary(Box::new(D::Int8), Box::new(D::Utf8));
+        let types = [
+            D::Int8,
+            D::Int16,
+            D::Int32,
+            D::Int64,
+            D::UInt8,
+            D::UInt16,
+            D::UInt32,
+            D::UInt64,
+            D::Utf8,
+            D::LargeUtf8,
+            D::Utf8View,
+            D::Boolean,
+            D::Float64,
+            D::Binary,
+            D::Date32,
+            D::Timestamp(TimeUnit::Millisecond, None),
+            dictionary,
+        ];
+        for data_type in &types {
+            assert_eq!(
+                key_reader(data_type).is_some(),
+                KeyIndex::for_type(data_type).is_some(),
+                "{data_type}"
+            );
+        }
+    }
+}

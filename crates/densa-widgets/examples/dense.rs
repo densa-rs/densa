@@ -1,9 +1,11 @@
 //! A dense line: twenty million samples of a sensor read a thousand times a second, still
 //! recording, kept with a `LineSummary` so each frame costs about the chart's width however
-//! many samples show. The status bar tells how long scaling and drawing the line took a frame
-//! (the processor's work, not the GPU's); `--plain` does both without the summary, visiting
-//! every sample that shows, to compare. Scroll to zoom around the
-//! pointer, drag to pan, double-click (or press End) to follow the newest samples again.
+//! many samples show.
+//!
+//! The status bar tells how long scaling and drawing the line took a frame (the processor's
+//! work, not the GPU's); `--plain` does both without the summary, visiting every sample that
+//! shows, to compare. Scroll to zoom around the pointer, drag to pan, double-click (or press
+//! End) to follow the newest samples again.
 //!
 //! `cargo run --release -p densa-widgets --example dense` (`--plain`, `--light` for the light
 //! theme, `--seconds N` to close after N seconds).

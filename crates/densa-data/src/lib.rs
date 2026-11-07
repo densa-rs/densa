@@ -13,7 +13,9 @@
 //! ([`View::position`]). [`LiveTable::snapshot`] hands the live rows to anything else that
 //! reads Arrow, such as a SQL engine. A [`Window`] keeps a table to its recent rows, by a
 //! time column. A [`LookupJoin`] gives each row of one table the columns of the row of
-//! another that it names (a trade its instrument), kept up to date as either changes.
+//! another that it names (a trade its instrument), and a [`PairJoin`] pairs each row with
+//! every row of another holding the same value (an order with each of its customer's
+//! addresses), both kept up to date as either side changes.
 //!
 //! This crate has no user-interface dependency.
 //!
@@ -50,6 +52,7 @@ mod filter;
 mod group;
 mod join;
 mod key;
+mod pair;
 mod snapshot;
 mod sorted;
 mod table;
@@ -63,6 +66,7 @@ pub use error::DataError;
 pub use filter::{CompareOp, Filter, Scalar};
 pub use group::{Aggregate, GroupSpec, Groups};
 pub use join::LookupJoin;
+pub use pair::PairJoin;
 pub use table::{Changes, GroupsId, LiveTable, RecordId, RowRef, TableOptions, View, ViewId};
 pub use view::{Order, ViewSpec};
 pub use window::Window;
