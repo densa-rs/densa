@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use densa_core::{Color, Rect};
-use densa_draw::Canvas;
+use densa_draw::{Canvas, CanvasState};
 
 use crate::series::{points_within, with_neighbours};
 use crate::{Plot, Points};
@@ -49,33 +49,77 @@ fn usable_width(width: f32) -> f32 {
 /// draw a joined line; each column gets at most one span, gaps or not, so a frame costs at
 /// most three rectangles per column. A gap (a `y` that is not finite) breaks the line. The
 /// work is proportional to the points within the plot plus the width that shows; nothing is
-/// allocated.
+/// allocated. For lines of many millions of points, [`paint_line_summarized`] draws the same
+/// at a cost of about the width alone.
+///
+/// [`paint_line_summarized`]: crate::paint_line_summarized
 pub fn paint_line<P: Points + ?Sized>(
     canvas: &mut Canvas<'_>,
     plot: &Plot,
     points: &P,
     style: LineStyle,
 ) {
+    let Some(mut spans) = begin(canvas, plot, style) else {
+        return;
+    };
+    let range = with_neighbours(points_within(points, &plot.x()), points.len());
+    for index in range {
+        spans.push(plot.x_at(points.x(index)), plot.y_at(points.y(index)));
+    }
+    end(spans);
+}
+
+/// The spans of a line drawn onto `plot`, clipped to its area, or `None` if it has none: push
+/// its points, then [`end`] it.
+pub(crate) fn begin<'c, 'a>(
+    canvas: &'c mut Canvas<'a>,
+    plot: &Plot,
+    style: LineStyle,
+) -> Option<Spans<Painter<'c, 'a>>> {
     let area = plot.area();
     if area.is_empty() {
-        return;
+        return None;
     }
     let state = canvas.state();
     canvas.clip(area);
-    let range = with_neighbours(points_within(points, &plot.x()), points.len());
-    let at = range.map(|index| (plot.x_at(points.x(index)), plot.y_at(points.y(index))));
     // Only the columns that show: a plot wider than its view costs the view's width.
     let shown = canvas.clip_rect();
     // Lossless enough: columns are whole pixels of a canvas.
     let columns = shown.x0.floor() as i64..shown.x1.ceil() as i64;
-    let half = f64::from(usable_width(style.width)) / 2.0;
-    for_each_span(at, columns, |column, low, high| {
-        let top = plot.clamp_y(low - half);
-        let bottom = plot.clamp_y(high + half);
+    let painter = Painter {
+        canvas,
+        state,
+        plot: *plot,
+        half: f64::from(usable_width(style.width)) / 2.0,
+        color: style.color,
+    };
+    Some(Spans::new(columns, painter))
+}
+
+/// Draws the last span of a line [`begin`] began, and gives the canvas its clip back.
+pub(crate) fn end(spans: Spans<Painter<'_, '_>>) {
+    let painter = spans.finish();
+    painter.canvas.restore(painter.state);
+}
+
+/// Draws the spans of a line onto a canvas.
+pub(crate) struct Painter<'c, 'a> {
+    canvas: &'c mut Canvas<'a>,
+    /// The canvas's clip before the line.
+    state: CanvasState,
+    plot: Plot,
+    /// Half the line's thickness, in pixels.
+    half: f64,
+    color: Color,
+}
+
+impl Emit for Painter<'_, '_> {
+    fn emit(&mut self, column: i64, low: f64, high: f64) {
+        let top = self.plot.clamp_y(low - self.half);
+        let bottom = self.plot.clamp_y(high + self.half);
         // Lossless enough: a pixel column of a canvas.
-        fill_span(canvas, column as f32, top, bottom, style.color);
-    });
-    canvas.restore(state);
+        fill_span(self.canvas, column as f32, top, bottom, self.color);
+    }
 }
 
 /// Fills column `x` from `top` to `bottom` (pixels): whole pixels solid, the partly covered
@@ -128,32 +172,51 @@ impl Span {
     }
 }
 
-/// Calls `emit(column, low, high)` for each pixel column in `columns` the polyline through
-/// `points` (canvas pixels, ascending `x`) passes, left to right: the `y` range the line
-/// covers within that column; for ascending `x`, at most one span per column. A point that
-/// is not finite breaks the line; a lone point is a span of no height.
-pub(crate) fn for_each_span(
-    points: impl Iterator<Item = (f64, f64)>,
+/// Where the spans of a line go: `emit(column, low, high)` for each pixel column it passes.
+pub(crate) trait Emit {
+    fn emit(&mut self, column: i64, low: f64, high: f64);
+}
+
+impl<F: FnMut(i64, f64, f64)> Emit for F {
+    fn emit(&mut self, column: i64, low: f64, high: f64) {
+        self(column, low, high);
+    }
+}
+
+/// The spans of the polyline through the points pushed (canvas pixels, ascending `x`), each
+/// pixel column in `columns` it passes given to `emit` left to right: the `y` range the line
+/// covers within that column; for ascending `x`, at most one span per column. A point that is
+/// not finite breaks the line; a lone point is a span of no height.
+pub(crate) struct Spans<E: Emit> {
     columns: Range<i64>,
-    mut emit: impl FnMut(i64, f64, f64),
-) {
-    let mut flush = |span: Option<Span>| {
-        if let Some(span) = span.filter(|span| columns.contains(&span.column)) {
-            emit(span.column, span.low, span.high);
+    emit: E,
+    /// The span of the column the line is in, not given yet.
+    open: Option<Span>,
+    /// The last point, unless a gap came after it.
+    last: Option<(f64, f64)>,
+}
+
+impl<E: Emit> Spans<E> {
+    pub(crate) fn new(columns: Range<i64>, emit: E) -> Self {
+        Self {
+            columns,
+            emit,
+            open: None,
+            last: None,
         }
-    };
-    let mut open: Option<Span> = None;
-    let mut last: Option<(f64, f64)> = None;
-    for (x, y) in points {
+    }
+
+    /// The line on to point (`x`, `y`).
+    pub(crate) fn push(&mut self, x: f64, y: f64) {
         if !(x.is_finite() && y.is_finite()) {
             // A gap: nothing joins across it, but its column's span stays open, so a column
             // still gets one span however many gaps fall in it.
-            last = None;
-            continue;
+            self.last = None;
+            return;
         }
         // Lossless enough: pixel columns, saturating far off the canvas.
         let column = x.floor() as i64;
-        match (last, open.as_mut()) {
+        match (self.last, self.open.as_mut()) {
             (_, Some(span)) if column == span.column => span.reach(y),
             (Some((x0, y0)), Some(span)) if column > span.column => {
                 let slope = (y - y0) / (x - x0);
@@ -162,22 +225,51 @@ pub(crate) fn for_each_span(
                 let edge = |column: i64| y_at(column as f64);
                 span.reach(edge(span.column + 1));
                 let first = span.column + 1;
-                flush(open.take());
-                for between in first.max(columns.start)..column.min(columns.end) {
-                    flush(Some(Span::new(between, edge(between), edge(between + 1))));
+                let done = self.open.take();
+                self.flush(done);
+                for between in first.max(self.columns.start)..column.min(self.columns.end) {
+                    self.flush(Some(Span::new(between, edge(between), edge(between + 1))));
                 }
-                open = Some(Span::new(column, edge(column), y));
+                self.open = Some(Span::new(column, edge(column), y));
             }
             _ => {
                 // The first point, one after a gap, or one left of the last (x out of
                 // order): start afresh.
-                flush(open.take());
-                open = Some(Span::new(column, y, y));
+                let done = self.open.take();
+                self.flush(done);
+                self.open = Some(Span::new(column, y, y));
             }
         }
-        last = Some((x, y));
+        self.last = Some((x, y));
     }
-    flush(open);
+
+    /// Gives the last span; what it gave the spans to.
+    pub(crate) fn finish(mut self) -> E {
+        let done = self.open.take();
+        self.flush(done);
+        self.emit
+    }
+
+    fn flush(&mut self, span: Option<Span>) {
+        if let Some(span) = span.filter(|span| self.columns.contains(&span.column)) {
+            self.emit.emit(span.column, span.low, span.high);
+        }
+    }
+}
+
+/// Calls `emit(column, low, high)` for each pixel column in `columns` the polyline through
+/// `points` passes, as [`Spans`] gives them.
+#[cfg(test)]
+pub(crate) fn for_each_span(
+    points: impl Iterator<Item = (f64, f64)>,
+    columns: Range<i64>,
+    emit: impl FnMut(i64, f64, f64),
+) {
+    let mut spans = Spans::new(columns, emit);
+    for (x, y) in points {
+        spans.push(x, y);
+    }
+    spans.finish();
 }
 
 #[cfg(test)]

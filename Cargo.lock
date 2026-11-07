@@ -922,6 +922,7 @@ dependencies = [
  "arrow-array",
  "criterion",
  "densa-arrow",
+ "densa-chart",
  "densa-data",
  "densa-draw",
  "densa-grid",

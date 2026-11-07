@@ -52,7 +52,8 @@ or windowing crate.
   aggregates are kept up to date as rows change instead of being recomputed.
 - **Charts over live data.** Lines, candlesticks and volume in stacked panes that follow the
   newest data, zoom around the pointer and pan; a line is drawn one pixel column at a time,
-  so a million points cost about as much as the chart is wide and every high and low shows.
+  so every high and low shows however many points share one, and with a `LineSummary` a line
+  of tens of millions of points costs a frame about as much as the chart is wide.
 - **Widgets with flexbox layout.** A retained widget tree laid out with flexbox, with pointer
   capture, hover, focus and Tab order, and widgets for toolbars, forms, lists, split panes
   and docking workspaces; it runs headless, so interfaces are tested without a window.
@@ -84,6 +85,7 @@ cargo run --release -p densa-widgets --example dock         # a docking workspac
 cargo run --release -p densa-widgets --example live_table   # a live table in the grid widget
 cargo run --release -p densa-widgets --example paged        # a billion rows, fetched a page at a time
 cargo run --release -p densa-widgets --example chart        # live candles, volume, pan and zoom
+cargo run --release -p densa-widgets --example dense        # twenty million samples, still recording
 cargo run --release -p densa-widgets --example linked       # a grid and a chart over live tables
 cargo run --release -p densa-arrow --example live            # a live table, sorted as it moves
 cargo run --release -p densa-arrow --example table           # a million-row Arrow table

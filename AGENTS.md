@@ -53,6 +53,7 @@ Complete programs to copy from, in `crates/densa-widgets/examples/`:
 | `dock.rs` | panels in tabs and splits, dragged around; with `--layout FILE` the layout is saved and restored |
 | `gallery.rs` | the standard widgets: menus, a toolbar, a list, a splitter, text input |
 | `chart.rs` | a chart of your own data with panes, zoom and pan |
+| `dense.rs` | a line of twenty million samples kept with a `LineSummary`, so a frame costs about the chart's width (`--plain` to compare) |
 
 Run one with `cargo run --release -p densa-widgets --example monitor`.
 

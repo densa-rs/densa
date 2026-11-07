@@ -39,7 +39,11 @@ pub trait ChartModel {
     }
 
     /// The vertical axis of pane `pane` while `x` shows: what its series need, with room
-    /// around them (see [`Axis::padded`]); `None` if it has nothing there.
+    /// around them (see [`Axis::padded`]); `None` if it has nothing there. Asked each frame
+    /// the view moves: for lines of millions of points, [`LineSummary::y_extent`] finds it in a
+    /// few steps.
+    ///
+    /// [`LineSummary::y_extent`]: crate::LineSummary::y_extent
     fn y_axis(&self, pane: usize, x: &Axis) -> Option<Axis>;
 
     /// Draws the series of pane `pane` onto `plot`, in `palette`'s colors.

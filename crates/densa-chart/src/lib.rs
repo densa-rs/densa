@@ -10,10 +10,13 @@
 //! A chart widget asks its data through [`ChartModel`]: panes on one time axis, each giving
 //! its vertical axis for what shows and drawing its series.
 //!
-//! A line is drawn as one vertical span per pixel column, shaded at its ends, so a million
-//! points cost about as much as the plot is wide and every high and low still shows (M4
-//! aggregation). No GPU dependency: hand the canvas's instances to `densa-render` (or any
-//! other backend) to show them.
+//! A line is drawn as one vertical span per pixel column, shaded at its ends, so a frame
+//! holds a few rectangles per column however many points share one, and every high and low
+//! still shows (M4 aggregation). Finding them visits each point that shows; for lines of
+//! millions of points, a [`LineSummary`] built once lets a frame
+//! ([`paint_line_summarized`]) and the vertical extent of what shows cost about the plot's
+//! width instead, drawing the same pixels. No GPU dependency: hand the canvas's instances to
+//! `densa-render` (or any other backend) to show them.
 //!
 //! Painting allocates nothing once the label characters are cached.
 //!
@@ -47,6 +50,7 @@ mod painter;
 mod palette;
 mod plot;
 mod series;
+mod summary;
 
 pub use axis::{Axis, AxisKind, Ticks};
 pub use bars::{paint_bars, paint_candles, BarStyle, CandleStyle};
@@ -57,3 +61,4 @@ pub use painter::ChartPainter;
 pub use palette::ChartPalette;
 pub use plot::Plot;
 pub use series::{candle_extent, candles_within, points_within, y_extent, Candle, Candles, Points};
+pub use summary::{paint_line_summarized, LineSummary};

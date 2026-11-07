@@ -3,6 +3,18 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **Lines of millions of points at the cost of the chart's width** (`densa-chart`):
+  `LineSummary` keeps, for runs of a line's points, their first and last points and their
+  lowest and highest values (about a tenth of the memory the points take; built once, grown
+  as points arrive with `update`). `paint_line_summarized` draws the line through it, the same
+  pixels `paint_line` draws, at a cost of about the plot's width however many points show,
+  and `LineSummary::y_extent` finds what a view needs for its vertical axis in a few steps.
+  The `dense` example draws twenty million samples, still recording.
+
 ## 0.2.5
 
 Nothing in the public API of 0.2.4 was removed or changed in a way that breaks code using it

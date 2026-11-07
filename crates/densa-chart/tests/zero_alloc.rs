@@ -4,8 +4,8 @@ use std::hint::black_box;
 
 use densa_alloc::{is_active, measure, CountingAllocator};
 use densa_chart::{
-    paint_bars, paint_candles, paint_line, Axis, BarStyle, Candle, CandleStyle, ChartPainter,
-    ChartPalette, LineStyle, Plot, Point, Rect,
+    paint_bars, paint_candles, paint_line, paint_line_summarized, Axis, BarStyle, Candle,
+    CandleStyle, ChartPainter, ChartPalette, LineStyle, LineSummary, Plot, Point, Rect,
 };
 use densa_draw::{Canvas, InstanceBuffer};
 use densa_text::{AtlasConfig, Font, GlyphCache};
@@ -125,4 +125,43 @@ fn frames_of_named_bars_perform_zero_heap_operations_once_their_names_are_cached
     let ((), stats) = measure(|| scroll(&mut painter, &mut cache, &mut frame));
     assert!(stats.is_zero(), "drawing allocated: {stats:?}");
     assert_eq!(cache.stats().dropped, 0);
+}
+
+#[test]
+fn frames_of_a_summarized_line_and_its_extents_perform_zero_heap_operations() {
+    assert!(
+        is_active(),
+        "counting allocator not installed: test would be vacuous"
+    );
+    // A million points with gaps, zoomed and scrolled across.
+    let line: Vec<(f64, f64)> = (0..1_000_000)
+        .map(|i| {
+            let y = if i % 977 < 3 {
+                f64::NAN
+            } else {
+                (f64::from(i) * 0.0003).sin()
+            };
+            (f64::from(i), y)
+        })
+        .collect();
+    let summary = LineSummary::of(&line[..]);
+    let mut cache = GlyphCache::new(AtlasConfig::DEFAULT);
+    let mut out = InstanceBuffer::with_capacity(50_000);
+    let ((), stats) = measure(|| {
+        for frame in 0..300 {
+            let width = 1_000.0 + 3_000.0 * f64::from(frame);
+            let left = 500.0 * f64::from(frame);
+            let x = Axis::number(left, left + width);
+            let range = densa_chart::points_within(&line[..], &x);
+            let (low, high) = summary.y_extent(&line[..], range).unwrap_or((0.0, 1.0));
+            let area = Rect::new(0.0, 0.0, 1_200.0, 400.0);
+            let plot = Plot::new(area, x, Axis::number(low, high));
+            let mut canvas = Canvas::begin(&mut cache, &mut out);
+            let style = LineStyle::new(densa_chart::Color::WHITE);
+            paint_line_summarized(&mut canvas, &plot, &line[..], &summary, style);
+            black_box(out.as_slice());
+        }
+    });
+    assert!(stats.is_zero(), "drawing allocated: {stats:?}");
+    assert_eq!(out.dropped(), 0);
 }

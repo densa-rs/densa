@@ -15,6 +15,7 @@ trading-demo.workspace = true
 arrow-array.workspace = true
 criterion.workspace = true
 densa-arrow.workspace = true
+densa-chart.workspace = true
 densa-data.workspace = true
 densa-draw.workspace = true
 densa-grid.workspace = true
@@ -40,6 +41,10 @@ harness = false
 
 [[bench]]
 name = "triple_buffer"
+harness = false
+
+[[bench]]
+name = "chart"
 harness = false
 
 [lints]
