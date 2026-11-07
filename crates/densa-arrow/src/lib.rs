@@ -16,7 +16,8 @@
 //! For tables too large to hold (a query engine's result over billions of rows), a
 //! [`PagedModel`] is the grid widget's model: your [`PageSource`] gives rows a page at a
 //! time, on a thread of the model's own, and the grid fetches only the pages it shows, in
-//! the order a click on a column title asks for.
+//! the order a click on a column title asks for. A call for rows no longer shown is cancelled,
+//! and a source that can stop early learns of it through [`PageCall`].
 //!
 //! ```
 //! use std::sync::Arc;
@@ -56,6 +57,9 @@ mod table;
 
 pub use live::{LiveGrid, LiveGridView};
 pub use model::LiveModel;
-pub use paged::{FetchError, PageError, PageOptions, PageQuery, PageSource, PagedModel, SortKey};
+pub use paged::{
+    CallCancelled, FetchError, PageCall, PageError, PageOptions, PageQuery, PageSource, PagedModel,
+    SortKey,
+};
 pub use series::{LiveSeries, SeriesError, SeriesPoints};
 pub use table::{ArrowGrid, ArrowTable, CellState, TableError};

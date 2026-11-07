@@ -255,12 +255,15 @@ fn enriched(
 A grid over a table too large to hold: implement `densa::arrow::PageSource` (its calls run on
 a thread of the model's own, so they may wait on a database or a query engine; return the
 batches as they come, the model joins them) and give it to a `PagedModel`, with a wake that
-brings a frame when pages arrive. A copy of selected rows holds only the rows fetched.
+brings a frame when pages arrive. A call for rows scrolled past (or of an order no longer
+asked) is cancelled: `PageCall::current()` tells the call, so a source stops its query early
+(`is_cancelled`, a `cancelled_within` wait, or await `cancelled()`); the error it then returns
+is not reported. A copy of selected rows holds only the rows fetched.
 `model.error()` says why rows are missing (a `FetchError`); `retry` asks again for what
 failed, `refresh` counts and fetches again after the data changed:
 
 ```rust
-use densa::arrow::{PageError, PageQuery, PageSource, PagedModel};
+use densa::arrow::{PageCall, PageError, PageQuery, PageSource, PagedModel};
 use densa::data::arrow_array::RecordBatch;
 use densa::data::arrow_schema::SchemaRef;
 use densa::widgets::DataGrid;
@@ -283,7 +286,9 @@ impl PageSource for Trips {
         // `trip_id` tells rows apart: where sort keys tie, pages keep one order.
         let order = query.order_by_sql(&["trip_id"]);
         let sql = format!("SELECT * FROM trips {order} LIMIT {limit} OFFSET {offset}");
-        let _ = sql; // run it on your engine
+        // Cancelled once the grid no longer wants these rows: stop the query then.
+        let call = PageCall::current();
+        let _ = (sql, call.is_cancelled()); // run it on your engine
         Ok(vec![RecordBatch::new_empty(self.schema.clone())]) // the batches it gave
     }
 }

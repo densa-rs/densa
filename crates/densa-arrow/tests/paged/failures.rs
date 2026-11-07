@@ -227,12 +227,11 @@ fn a_count_from_before_a_refresh_is_dropped() {
     let (mut source, calls) = Numbers::new(2_000);
     source.counts = VecDeque::from([1_000, 2_000]);
     let (source, go) = source.gated();
-    let (wake, wakes) = counted_wake();
-    let mut model = PagedModel::new(schema(), source, wake).unwrap();
+    let mut model = PagedModel::new(schema(), source, || {}).unwrap();
     until_counting(&calls, 1);
-    model.refresh(); // while the first count is held at the gate
-    go.send(()).unwrap(); // the first count: 1,000
-    until_woken(&wakes, 1);
+    model.refresh(); // while the first count is held at the gate: it is cancelled
+    go.send(()).unwrap(); // the first count, which does not look: 1,000, not used
+    until_counting(&calls, 2);
     model.prepare();
     assert_eq!(
         model.row_count(),

@@ -4,13 +4,13 @@
 use std::collections::{BTreeSet, VecDeque};
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use arrow_array::{ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray};
 use arrow_schema::{DataType, Field, Schema, SchemaRef};
-use densa_arrow::{PageError, PageOptions, PageQuery, PageSource, PagedModel, SortKey};
+use densa_arrow::{PageCall, PageError, PageOptions, PageQuery, PageSource, PagedModel, SortKey};
 use densa_grid::{CellText, GridModel, Palette, SortOrder};
 
 pub(crate) type Sort = Option<(String, SortOrder)>;
@@ -28,11 +28,19 @@ pub(crate) enum Call {
 
 /// Rows `0..rows`: `n`, the row, `name`, `row n`, and `third`, a third of `n`; any column
 /// sorts them, from the last when descending. It records each call as it starts; with a
-/// gate, each call then waits for a go.
+/// gate, each call then waits for a go, or (if it `looks`) until the model cancels it.
 pub(crate) struct Numbers {
     rows: u64,
     calls: Arc<Mutex<Vec<Call>>>,
     gate: Option<Receiver<()>>,
+    /// Whether a call waiting at the gate also ends (failing) once the model cancels it.
+    pub(crate) looks: bool,
+    /// Whether a call that looks, cancelled, gives half its rows rather than failing.
+    pub(crate) stops_short: bool,
+    /// Without a gate, how long each call takes, ended (failing) once the model cancels it.
+    pub(crate) latency: Option<Duration>,
+    /// Calls that ended so.
+    stops: Arc<AtomicUsize>,
     /// Offsets of calls that fail, once each.
     pub(crate) failing: BTreeSet<u64>,
     /// Offsets of calls that panic, once each.
@@ -66,6 +74,10 @@ impl Numbers {
             rows,
             calls: Arc::clone(&calls),
             gate: None,
+            looks: false,
+            stops_short: false,
+            latency: None,
+            stops: Arc::new(AtomicUsize::new(0)),
             failing: BTreeSet::new(),
             panicking: BTreeSet::new(),
             unreadable: None,
@@ -89,10 +101,41 @@ impl Numbers {
         (self, go)
     }
 
-    fn wait(&self) {
-        if let Some(gate) = &self.gate {
+    /// How many calls ended because the model cancelled them.
+    pub(crate) fn stops(&self) -> Arc<AtomicUsize> {
+        Arc::clone(&self.stops)
+    }
+
+    /// Waits at the gate, if there is one, or for the latency; a call that looks ends once it
+    /// is cancelled: failing, or with `true` if it stops short.
+    fn wait(&self) -> Result<bool, PageError> {
+        let call = PageCall::current();
+        let Some(gate) = &self.gate else {
+            match self.latency {
+                Some(latency) if call.cancelled_within(latency) => return self.stop(),
+                _ => return Ok(false),
+            }
+        };
+        if !self.looks {
             let _ = gate.recv();
+            return Ok(false);
         }
+        loop {
+            match gate.recv_timeout(Duration::from_millis(1)) {
+                Err(RecvTimeoutError::Timeout) if call.is_cancelled() => return self.stop(),
+                Err(RecvTimeoutError::Timeout) => {}
+                Ok(()) | Err(RecvTimeoutError::Disconnected) => return Ok(false),
+            }
+        }
+    }
+
+    /// Ends a call cancelled: counted, then failing or stopping short.
+    fn stop(&self) -> Result<bool, PageError> {
+        self.stops.fetch_add(1, Ordering::Relaxed);
+        if self.stops_short {
+            return Ok(true);
+        }
+        Err("cancelled".into())
     }
 
     /// The batch of rows `range` in `query`'s order.
@@ -131,7 +174,7 @@ fn sort_of(query: &PageQuery) -> Sort {
 impl PageSource for Numbers {
     fn row_count(&mut self, query: &PageQuery) -> Result<u64, PageError> {
         self.calls.lock().unwrap().push(Call::Count(sort_of(query)));
-        self.wait();
+        let _ = self.wait()?;
         self.count_calls += 1;
         if self.failing_counts.contains(&(self.count_calls - 1)) {
             return Err("the count is off today".into());
@@ -153,7 +196,7 @@ impl PageSource for Numbers {
             limit,
             sort: sort_of(query),
         });
-        self.wait();
+        let limit = if self.wait()? { limit / 2 } else { limit };
         if self.panicking.remove(&offset) {
             panic!("page {offset} blew up");
         }
@@ -330,6 +373,18 @@ pub(crate) fn until_counting(calls: &Mutex<Vec<Call>>, n: usize) {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "never counted {n} times"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
+/// Waits (5 s at most) until `stops` reaches `n`: until that many calls ended cancelled.
+pub(crate) fn until_stopped(stops: &AtomicUsize, n: usize) {
+    let start = Instant::now();
+    while stops.load(Ordering::Relaxed) < n {
+        assert!(
+            start.elapsed() < Duration::from_secs(5),
+            "never cancelled {n} calls"
         );
         std::thread::sleep(Duration::from_millis(1));
     }

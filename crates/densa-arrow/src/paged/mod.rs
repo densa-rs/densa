@@ -1,5 +1,6 @@
 //! Rows of a table too large to hold, fetched a page at a time as the grid shows them.
 
+mod call;
 mod source;
 mod worker;
 
@@ -13,8 +14,10 @@ use std::thread;
 use arrow_schema::SchemaRef;
 use densa_grid::{CellStyle, CellText, Column, GridModel, Palette, SortOrder, CELL_BYTES};
 
+use call::{answers_count, Calls};
+pub use call::{CallCancelled, PageCall};
 pub use source::{FetchError, PageError, PageOptions, PageQuery, PageSource, SortKey};
-use worker::{Ask, Fetched, Got, Wanted, Worker};
+use worker::{Ask, Fetched, Got, Worker};
 
 use crate::reader::{Format, Reader};
 use crate::table::{
@@ -44,7 +47,8 @@ struct Page {
 /// past `usize::MAX` are not shown.
 ///
 /// Costs: a frame whose pages are held allocates nothing; one that asks for pages or takes
-/// them in does. Dropping the model ends its thread once the source's current call returns.
+/// them in does. Dropping the model cancels the source's call running ([`PageCall`]) and ends its
+/// thread once that returns.
 #[derive(Debug)]
 pub struct PagedModel {
     schema: SchemaRef,
@@ -79,7 +83,9 @@ pub struct PagedModel {
     stopped: Option<FetchError>,
     /// The pages wanted by the rows shown last.
     want: Range<u64>,
-    wanted: Arc<Wanted>,
+    /// What the model wants, shared with its thread: the call running is cancelled once it is
+    /// not.
+    calls: Arc<Calls>,
     asks: Sender<Ask>,
     gots: Receiver<Got>,
 }
@@ -124,14 +130,14 @@ impl PagedModel {
             .collect();
         let (asks, asked) = mpsc::channel();
         let (sent, gots) = mpsc::channel();
-        let wanted = Arc::new(Wanted::default());
+        let calls = Arc::new(Calls::default());
         let worker = Worker {
             source,
             schema: schema.clone(),
             page_rows: options.page_rows,
             asks: asked,
             gots: sent,
-            wanted: Arc::clone(&wanted),
+            calls: Arc::clone(&calls),
             wake: Box::new(wake),
         };
         thread::Builder::new()
@@ -160,7 +166,7 @@ impl PagedModel {
             error: None,
             stopped: None,
             want: 0..0,
-            wanted,
+            calls,
             asks,
             gots,
         };
@@ -233,6 +239,7 @@ impl PagedModel {
             self.counting = true;
             self.count_epoch = self.epoch;
         }
+        self.calls.want_epochs(self.epoch, self.count_epoch);
         // A thread that stopped is reported by `take_in`.
         let _ = self.asks.send(Ask::Query {
             epoch: self.epoch,
@@ -358,10 +365,11 @@ impl PagedModel {
                 epoch,
                 first,
                 pages,
+                cancelled,
             } if epoch == self.epoch => {
                 for (fetched, page) in pages.into_iter().zip(first..) {
                     self.asked.remove(&page);
-                    self.take_page(page, fetched);
+                    self.take_page(page, fetched, cancelled);
                 }
             }
             Got::Failed {
@@ -401,18 +409,21 @@ impl PagedModel {
     /// sort asks for none), not of one before (a refresh asks again). The thread answers the
     /// last count asked once (those asked before with it in one answer).
     fn is_count(&self, epoch: u64) -> bool {
-        epoch.wrapping_sub(self.count_epoch) <= self.epoch.wrapping_sub(self.count_epoch)
+        answers_count(epoch, self.count_epoch, self.epoch)
     }
 
-    /// Holds page `page` if it has every row the count says it has. One short of them (the data
-    /// changed since it was counted) is not held, and says so.
-    fn take_page(&mut self, page: u64, fetched: Fetched) {
+    /// Holds page `page` if it has every row the count says it has. One short of them is not
+    /// held: of a call `cancelled`, which may stop short, it is asked for again when shown
+    /// again; else the data changed since it was counted, which it says.
+    fn take_page(&mut self, page: u64, fetched: Fetched, cancelled: bool) {
         let rows = self.rows_of(page..page + 1);
         // Lossless: usize is at most 64 bits wide.
         let got = fetched.rows as u64;
         if got < rows.end - rows.start {
-            self.failed.insert(page);
-            self.error = Some(FetchError::Short { rows, got });
+            if !cancelled {
+                self.failed.insert(page);
+                self.error = Some(FetchError::Short { rows, got });
+            }
             return;
         }
         self.keep(page, fetched);
@@ -482,8 +493,11 @@ impl PagedModel {
         if first > last {
             return;
         }
-        self.want = first..last + 1;
-        self.wanted.set(first, last);
+        let want = first..last + 1;
+        if self.want != want {
+            self.want = want;
+            self.calls.want_pages(first, last);
+        }
         // Allocates only when there are pages to ask for.
         let mut pages = Vec::new();
         for page in first..=last {
@@ -518,6 +532,12 @@ impl PagedModel {
             }
             _ => CellState::OutOfRange,
         }
+    }
+}
+
+impl Drop for PagedModel {
+    fn drop(&mut self) {
+        self.calls.drop_model();
     }
 }
 

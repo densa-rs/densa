@@ -7,6 +7,14 @@ version without changes of its own.
 
 ### Added
 
+- **Page calls no longer wanted are cancelled** (`densa-arrow`): `PagedModel` cancels the
+  source call running when it no longer wants what that asks: its pages scrolled out of view,
+  another order or a refresh asked for (a sort keeps a count on its way, which holds for any
+  order), or the model dropped. A source learns of it through `PageCall::current()`:
+  `is_cancelled` to look, `cancelled_within` for a wait that ends at a cancel, `cancelled` for
+  a future to race async work against. A call that then stops (an error, or fewer rows) reports
+  no failure, and its pages are asked for again if they are shown again; rows it gives whole
+  are kept, so sources that do not look work as before.
 - **Bars and candles of millions at the cost of the chart's width** (`densa-chart`):
   `BarSummary` and `CandleSummary` do for bars and candlesticks what `LineSummary` does for a
   line. `paint_bars_summarized` and `paint_candles_summarized` draw the same pixels as

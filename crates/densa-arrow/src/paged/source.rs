@@ -117,8 +117,15 @@ impl PageQuery {
 /// The rows of a table too large to hold, a page at a time: what a
 /// [`PagedModel`](super::PagedModel) reads. Its calls (but [`can_sort`](Self::can_sort)) run on
 /// a thread of the model's own, so a call may take as long as it needs: a query to a database
-/// or a query engine. A call is not interrupted; the next waits for it. Rows are numbered from
-/// 0 in the order the query gives them.
+/// or a query engine. Rows are numbered from 0 in the order the query gives them.
+///
+/// A call the model no longer wants (its pages scrolled out of view, another order or a refresh
+/// asked for, the model dropped) is cancelled: a source whose calls can stop early learns of it
+/// through [`PageCall::current`](super::PageCall::current) as the work goes, and may then
+/// return an error or fewer rows, neither reported as a failure. A call that does not look runs
+/// to its end (the rows it gives whole are kept), and the next waits for it. While the view
+/// keeps moving, as in a drag, calls are cancelled as their pages pass out of view: the pages
+/// shown come once it rests.
 ///
 /// A call that fails, or panics (with panics unwinding, the default), is reported by the model
 /// ([`PagedModel::error`](super::PagedModel::error)), and the next calls go on.

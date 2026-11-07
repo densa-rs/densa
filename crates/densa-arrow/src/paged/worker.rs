@@ -5,13 +5,13 @@ use std::any::Any;
 use std::collections::BTreeSet;
 use std::ops::Range;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender, TryRecvError};
 use std::sync::Arc;
 
 use arrow_array::{new_empty_array, Array, ArrayRef, RecordBatch};
 use arrow_schema::SchemaRef;
 
+use super::call::{Asked, Calls, Current};
 use super::source::{PageError, PageQuery, PageSource};
 
 /// Pages wanted side by side, fetched in one call at most.
@@ -38,11 +38,13 @@ pub(super) enum Got {
         epoch: u64,
         rows: u64,
     },
-    /// Pages `first`, `first + 1`, ..., in order.
+    /// Pages `first`, `first + 1`, ..., in order; of a call the model cancelled meanwhile if
+    /// `cancelled`, which may have stopped short (a page short of its rows is then no failure).
     Pages {
         epoch: u64,
         first: u64,
         pages: Vec<Fetched>,
+        cancelled: bool,
     },
     /// `pages` (or the count, for `None`) could not be read: `message` says why.
     Failed {
@@ -50,7 +52,8 @@ pub(super) enum Got {
         pages: Option<Range<u64>>,
         message: String,
     },
-    /// `pages` were not fetched: when their turn came, they were not among the pages wanted.
+    /// `pages` were not fetched: when their turn came, they were not among the pages wanted,
+    /// or the model cancelled the call fetching them.
     Skipped {
         epoch: u64,
         pages: Vec<u64>,
@@ -66,34 +69,6 @@ pub(super) enum Got {
 pub(super) struct Fetched {
     pub(super) rows: usize,
     pub(super) columns: Vec<ArrayRef>,
-}
-
-/// The pages the model wants now, first and last, for its thread to fetch the nearest first and
-/// to skip those no longer wanted.
-#[derive(Debug, Default)]
-pub(super) struct Wanted {
-    first: AtomicU64,
-    last: AtomicU64,
-}
-
-impl Wanted {
-    /// Says pages `first..=last` are wanted.
-    pub(super) fn set(&self, first: u64, last: u64) {
-        // Relaxed: hints of which pages to fetch first and which to skip, stored before the
-        // asks that follow them through a channel (which orders them), so the thread reads them
-        // at least that new. A pair read torn (one from another frame) fetches a page early or
-        // skips one, which is asked for again.
-        self.first.store(first, Ordering::Relaxed);
-        self.last.store(last, Ordering::Relaxed);
-    }
-
-    fn get(&self) -> (u64, u64) {
-        // Relaxed: see `set`.
-        (
-            self.first.load(Ordering::Relaxed),
-            self.last.load(Ordering::Relaxed),
-        )
-    }
 }
 
 /// The pages asked for and not yet fetched.
@@ -166,6 +141,17 @@ impl Queue {
     }
 }
 
+/// What a call of the source came to.
+enum Called<T> {
+    /// What it gave, and whether the model cancelled it meanwhile.
+    Gave(T, bool),
+    /// It failed or panicked: why.
+    Failed(String),
+    /// The model cancelled it, and it gave nothing: it was not made, or it failed or panicked
+    /// once cancelled.
+    Cancelled,
+}
+
 /// The thread fetching pages.
 pub(super) struct Worker<S> {
     pub(super) source: S,
@@ -173,7 +159,7 @@ pub(super) struct Worker<S> {
     pub(super) page_rows: usize,
     pub(super) asks: Receiver<Ask>,
     pub(super) gots: Sender<Got>,
-    pub(super) wanted: Arc<Wanted>,
+    pub(super) calls: Arc<Calls>,
     pub(super) wake: Box<dyn Fn() + Send>,
 }
 
@@ -215,14 +201,10 @@ impl<S: PageSource> Worker<S> {
             if count {
                 self.count(epoch, &query);
             }
-            let (first, last) = self.wanted.get();
-            // Read torn, the pages wanted can come out backwards: then nothing is skipped
-            // rather than pages still wanted.
-            if first <= last {
-                let pages = queue.skip(first, last);
-                if !pages.is_empty() {
-                    self.send(Got::Skipped { epoch, pages });
-                }
+            let (first, last) = self.calls.wanted();
+            let pages = queue.skip(first, last);
+            if !pages.is_empty() {
+                self.send(Got::Skipped { epoch, pages });
             }
             if let Some(pages) = queue.next(first, last) {
                 self.fetch(epoch, &query, pages, &mut queue);
@@ -230,43 +212,75 @@ impl<S: PageSource> Worker<S> {
         }
     }
 
-    /// Calls the source, a panic becoming a failure.
-    fn call<T>(&mut self, call: impl FnOnce(&mut S) -> Result<T, PageError>) -> Result<T, String> {
-        match panic::catch_unwind(AssertUnwindSafe(|| call(&mut self.source))) {
-            Ok(Ok(value)) => Ok(value),
-            Ok(Err(error)) => Err(error.to_string()),
-            Err(panic) => Err(format!("the page source panicked: {}", panic_text(&*panic))),
+    /// Calls the source for what `asked` asks, as this thread's current
+    /// [`PageCall`](super::PageCall).
+    fn call<T>(
+        &mut self,
+        asked: Asked,
+        call: impl FnOnce(&mut S) -> Result<T, PageError>,
+    ) -> Called<T> {
+        let current = self.calls.begin(asked);
+        // Unwanted before it began: not made.
+        let called = (!current.is_cancelled()).then(|| {
+            let _current = Current::set(&current);
+            panic::catch_unwind(AssertUnwindSafe(|| call(&mut self.source)))
+        });
+        let cancelled = self.calls.end(&current);
+        match called {
+            Some(Ok(Ok(value))) => Called::Gave(value, cancelled),
+            Some(Ok(Err(error))) if !cancelled => Called::Failed(error.to_string()),
+            Some(Err(panic)) if !cancelled => {
+                Called::Failed(format!("the page source panicked: {}", panic_text(&*panic)))
+            }
+            // A call that stopped once cancelled has not failed.
+            _ => Called::Cancelled,
         }
     }
 
+    /// Counts the rows; nothing is sent back for a count cancelled (a newer one was asked, or
+    /// the model is gone).
     fn count(&mut self, epoch: u64, query: &PageQuery) {
-        let got = match self.call(|source| source.row_count(query)) {
-            Ok(rows) => Got::Count { epoch, rows },
-            Err(message) => Got::Failed {
+        let asked = Asked::Count { epoch };
+        let got = match self.call(asked, |source| source.row_count(query)) {
+            Called::Gave(rows, false) => Got::Count { epoch, rows },
+            Called::Failed(message) => Got::Failed {
                 epoch,
                 pages: None,
                 message,
             },
+            Called::Gave(_, true) | Called::Cancelled => return,
         };
         self.send(got);
     }
 
     /// Fetches `pages` in one call and sends them back one page each. A call of several pages
     /// that fails puts them back to be fetched alone, so a page the source cannot give does not
-    /// take those beside it along.
+    /// take those beside it along. A call cancelled that gave nothing sends its pages back
+    /// skipped, to be asked for again if they are shown again.
     fn fetch(&mut self, epoch: u64, query: &PageQuery, pages: Range<u64>, queue: &mut Queue) {
         // Lossless: usize is at most 64 bits wide; a call is a few pages.
         let (page_rows, count) = (self.page_rows as u64, (pages.end - pages.start) as usize);
         let offset = pages.start.saturating_mul(page_rows);
         let limit = self.page_rows.saturating_mul(count);
-        let fetched = self
-            .call(|source| source.page(query, offset, limit))
-            .and_then(|batches| self.join(&batches));
-        let got = match fetched {
+        let asked = Asked::Pages {
+            epoch,
+            pages: pages.clone(),
+        };
+        let (gave, cancelled) = match self.call(asked, |source| source.page(query, offset, limit)) {
+            Called::Gave(batches, cancelled) => (self.join(&batches), cancelled),
+            Called::Failed(message) => (Err(message), false),
+            Called::Cancelled => (Err(String::new()), true),
+        };
+        let got = match gave {
             Ok((columns, rows)) => Got::Pages {
                 epoch,
                 first: pages.start,
                 pages: split(&columns, rows, self.page_rows, count),
+                cancelled,
+            },
+            Err(_) if cancelled => Got::Skipped {
+                epoch,
+                pages: pages.collect(),
             },
             Err(_) if count > 1 => {
                 queue.put_back(pages);
@@ -397,6 +411,7 @@ fn panic_text(panic: &(dyn Any + Send)) -> &str {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::{self, Receiver, Sender};
     use std::thread;
     use std::time::Duration;
@@ -445,8 +460,8 @@ mod tests {
         assert!(queue.is_empty() && queue.alone.is_empty());
     }
 
-    /// One page of `n`, the row number, for any offset.
-    struct Rows;
+    /// One page of `n`, the row number, for any offset; it counts its page calls.
+    struct Rows(Arc<AtomicUsize>);
 
     impl PageSource for Rows {
         fn row_count(&mut self, _: &PageQuery) -> Result<u64, PageError> {
@@ -459,6 +474,7 @@ mod tests {
             offset: u64,
             limit: usize,
         ) -> Result<Vec<RecordBatch>, PageError> {
+            self.0.fetch_add(1, Ordering::Relaxed);
             let start = i64::try_from(offset)?;
             let n: Vec<i64> = (start..start + i64::try_from(limit)?).collect();
             let n: ArrayRef = Arc::new(Int64Array::from(n));
@@ -466,46 +482,69 @@ mod tests {
         }
     }
 
-    /// A worker over [`Rows`] in pages of 10 on a thread: its asks, its replies, its hints.
-    fn worker() -> (Sender<Ask>, Receiver<Got>, Arc<Wanted>) {
+    /// A worker over [`Rows`] in pages of 10 on a thread: its asks, its replies, what the model
+    /// wants, and the page calls made.
+    fn worker() -> (Sender<Ask>, Receiver<Got>, Arc<Calls>, Arc<AtomicUsize>) {
         let (asks, asked) = mpsc::channel();
         let (sent, gots) = mpsc::channel();
-        let wanted = Arc::new(Wanted::default());
+        let calls = Arc::new(Calls::default());
+        let made = Arc::new(AtomicUsize::new(0));
         let worker = Worker {
-            source: Rows,
+            source: Rows(Arc::clone(&made)),
             schema: Arc::new(Schema::new(vec![Field::new("n", DataType::Int64, false)])),
             page_rows: 10,
             asks: asked,
             gots: sent,
-            wanted: Arc::clone(&wanted),
+            calls: Arc::clone(&calls),
             wake: Box::new(|| {}),
         };
         thread::spawn(move || worker.serve());
-        (asks, gots, wanted)
+        (asks, gots, calls, made)
     }
 
     #[test]
-    fn hints_read_backwards_skip_nothing() {
-        let (asks, gots, wanted) = worker();
-        let query = PageQuery::new();
-        let (epoch, count) = (1, false);
+    fn a_call_the_model_no_longer_wants_when_it_begins_is_not_made() {
+        let (asks, gots, calls, made) = worker();
+        // The model is in epoch 2 already; the thread has yet to hear of it.
+        calls.want_epochs(2, 0);
+        calls.want_pages(0, 10);
+        let (query, count) = (PageQuery::new(), false);
         asks.send(Ask::Query {
-            epoch,
+            epoch: 1,
             query,
             count,
         })
         .unwrap();
-        // As if read torn: the first page wanted from one frame, the last from another.
-        wanted.set(1_000, 10);
         asks.send(Ask::Pages {
-            epoch,
+            epoch: 1,
+            pages: vec![5],
+        })
+        .unwrap();
+        let got = gots.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert!(
+            matches!(&got, Got::Skipped { epoch: 1, pages } if pages == &[5]),
+            "skipped: {got:?}"
+        );
+        assert_eq!(made.load(Ordering::Relaxed), 0, "the source was not called");
+
+        // Of the epoch the model is in, the page is fetched.
+        let (query, count) = (PageQuery::new(), false);
+        asks.send(Ask::Query {
+            epoch: 2,
+            query,
+            count,
+        })
+        .unwrap();
+        asks.send(Ask::Pages {
+            epoch: 2,
             pages: vec![5],
         })
         .unwrap();
         let got = gots.recv_timeout(Duration::from_secs(5)).unwrap();
         assert!(
             matches!(got, Got::Pages { first: 5, .. }),
-            "fetched, not skipped: {got:?}"
+            "fetched: {got:?}"
         );
+        assert_eq!(made.load(Ordering::Relaxed), 1);
     }
 }

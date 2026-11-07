@@ -1,6 +1,7 @@
 //! The paged model: rows fetched a page at a time from a source, in the order a click asks
 //! for, only the pages shown and one on each side, on a thread of the model's own.
 
+mod cancel;
 mod failures;
 mod support;
 

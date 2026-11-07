@@ -1,7 +1,8 @@
 //! A table of a billion rows in the grid widget, none of them held: a `PagedModel` fetches
 //! the rows on screen a page at a time, on a thread of its own, as you scroll, drag the bar
 //! or click a title to sort. The rows are computed when asked, each page after a short wait
-//! as a query engine or a database would take, so you see them arrive.
+//! as a query engine or a database would take, so you see them arrive. A page scrolled past
+//! before it came is cancelled: its wait ends at once and the pages shown come sooner.
 //!
 //! `cargo run --release -p densa-widgets --example paged` (`--latency MS` for each page's
 //! wait, 40 unless told; `--light` for the light theme; `--seconds N` to close after N
@@ -10,14 +11,13 @@
 use std::error::Error;
 use std::ops::Range;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use arrow_array::{
     ArrayRef, Float64Array, Int64Array, RecordBatch, StringArray, TimestampMillisecondArray,
 };
 use densa_arrow::arrow_schema::{DataType, Field, Schema, SchemaRef, TimeUnit};
-use densa_arrow::{FetchError, PageError, PageQuery, PageSource, PagedModel};
+use densa_arrow::{FetchError, PageCall, PageError, PageQuery, PageSource, PagedModel};
 use densa_grid::{Column, GridModel, SortOrder};
 use densa_ui::{Align, Style, Theme, Ui, WidgetId};
 use densa_widgets::{DataGrid, Label, Panel};
@@ -51,6 +51,16 @@ impl Readings {
             latency,
             unspread: inverse(SPREAD, ROWS),
         }
+    }
+
+    /// The wait a query engine or a database would take, ended at once if the model cancels the
+    /// call (its rows scrolled past, another order asked for): a real source would stop its
+    /// query there. What a cancelled call returns is not used.
+    fn wait(&self) -> Result<(), PageError> {
+        if PageCall::current().cancelled_within(self.latency) {
+            return Err("no longer wanted".into());
+        }
+        Ok(())
     }
 
     fn schema() -> SchemaRef {
@@ -93,7 +103,7 @@ impl Readings {
 
 impl PageSource for Readings {
     fn row_count(&mut self, _: &PageQuery) -> Result<u64, PageError> {
-        thread::sleep(self.latency);
+        self.wait()?;
         Ok(ROWS)
     }
 
@@ -103,7 +113,7 @@ impl PageSource for Readings {
         offset: u64,
         limit: usize,
     ) -> Result<Vec<RecordBatch>, PageError> {
-        thread::sleep(self.latency);
+        self.wait()?;
         // Lossless: a page is a few hundred rows.
         let end = offset.saturating_add(limit as u64).min(ROWS);
         let ids: Vec<u64> = (offset..end).map(|at| self.id_at(query, at)).collect();

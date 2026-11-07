@@ -199,7 +199,8 @@ without widgets.
 A table too large to hold (a query engine's result over billions of rows, a database table)
 goes in the grid widget through `densa_arrow::PagedModel`: your `PageSource` counts the rows
 and gives a page of them in the order asked, on a thread of the model's own, and the grid
-fetches only the pages it shows. The [`paged` example](crates/densa-widgets/examples/paged.rs)
+fetches only the pages it shows; a call for rows scrolled past is cancelled (`PageCall`), so
+a source that looks stops its query and the rows shown come sooner. The [`paged` example](crates/densa-widgets/examples/paged.rs)
 scrolls and sorts a billion rows, computed when asked.
 
 ### Widgets in a window
