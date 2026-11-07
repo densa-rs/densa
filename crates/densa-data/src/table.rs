@@ -7,6 +7,7 @@ use rustc_hash::FxHashMap;
 
 use crate::dictionary::interleave_column;
 use crate::group::{GroupState, Groups};
+use crate::join::Owned;
 use crate::key::{key_reader, KeyFn, KeyIndex, KeyRef};
 use crate::view::{Rows, ViewState};
 use crate::window::WindowState;
@@ -204,6 +205,16 @@ pub struct LiveTable {
     /// Batches the last compaction wrote: automatic compaction counts the ones stored since.
     compacted_batches: usize,
     window: Option<WindowState>,
+    /// The rows the window let go of, kept for a pair join until it takes them.
+    expiring: Option<Expiring>,
+}
+
+/// The rows a window let go of, each with its value in one column, read before it was freed.
+#[derive(Debug, Clone)]
+struct Expiring {
+    column: usize,
+    read: KeyFn,
+    gone: Vec<(RowId, Option<Owned>)>,
 }
 
 impl Clone for LiveTable {
@@ -227,6 +238,8 @@ impl Clone for LiveTable {
             retry_at_dead: self.retry_at_dead,
             compacted_batches: self.compacted_batches,
             window: self.window.clone(),
+            // The hook is the pair join's, for its own table: a clone keeps no rows for it.
+            expiring: None,
         }
     }
 }
@@ -275,6 +288,7 @@ impl LiveTable {
             retry_at_dead: MIN_DEAD_ROWS,
             compacted_batches: 0,
             window: None,
+            expiring: None,
         })
     }
 
@@ -530,6 +544,26 @@ impl LiveTable {
         })
     }
 
+    /// Keeps, for each row the window lets go of from now on, its id and its value in
+    /// `column` (read by `read`), read before the row is freed, until
+    /// [`take_expired`](Self::take_expired): a pair join finds their pairs from them.
+    pub(crate) fn keep_expired(&mut self, column: usize, read: KeyFn) {
+        self.expiring = Some(Expiring {
+            column,
+            read,
+            gone: Vec::new(),
+        });
+    }
+
+    /// The rows the window let go of since the last call, as
+    /// [`keep_expired`](Self::keep_expired) kept them.
+    pub(crate) fn take_expired(&mut self) -> Vec<(RowId, Option<Owned>)> {
+        self.expiring
+            .as_mut()
+            .map(|expiring| std::mem::take(&mut expiring.gone))
+            .unwrap_or_default()
+    }
+
     /// The table's window, if it has one.
     pub fn window(&self) -> Option<&Window> {
         self.window.as_ref().map(WindowState::spec)
@@ -750,6 +784,16 @@ impl LiveTable {
                 Some((id, self.slots[id as usize]?))
             })
             .collect();
+        // Read before the rows are freed (allocates a text value per row): only a pair
+        // join's left table keeps them.
+        if let Some(expiring) = &mut self.expiring {
+            for &(id, slot) in &gone {
+                let at = slot.row_ref();
+                let column = self.batches[at.batch].column(expiring.column).as_ref();
+                let value = (expiring.read)(column, at.row).map(Owned::of);
+                expiring.gone.push((id, value));
+            }
+        }
         let rebuild = count.saturating_mul(REBUILD_RATIO) > self.len();
         if !rebuild {
             self.drop_from_views(gone.iter().copied());

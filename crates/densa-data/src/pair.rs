@@ -10,7 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::join::{check_columns, nullable, Owned, Places};
 use crate::key::{key_reader, KeyFn, KeyIndex, KeyRef};
-use crate::{Changes, DataError, LiveTable, RowId};
+use crate::{Changes, DataError, LiveTable, RowId, Window};
 
 /// The right half of the pair id of a left row that pairs with no right row.
 const NO_RIGHT: RowId = RowId::MAX;
@@ -148,10 +148,12 @@ impl Side {
 /// [`table`](Self::table)), keyed by a pair id (an unsigned integer column, `pair` unless a
 /// side has a column of that name: [`pair_column`](Self::pair_column)), so views, groups and
 /// grids work on it as on any table; view it with `Filter::is_not_null` on a right column to
-/// keep only rows that paired. Give each join a table of its own. A window on it deletes pairs
-/// as on any table: a pair it deleted comes back only when one of its rows changes (to be
-/// deleted again if the window still excludes it), not when the window's end moves back. Do
-/// not upsert into it or delete from it otherwise.
+/// keep only rows that paired. Give each join a table of its own. To keep only recent rows,
+/// window the left rows with [`set_left_window`](Self::set_left_window): the rows it lets go
+/// of leave with every pair they are in. A window on the output deletes pairs as on any table,
+/// but not the left rows behind them (a pair it deleted comes back only when one of its rows
+/// changes, to be deleted again if the window still excludes it). Do not upsert into the
+/// output or delete from it otherwise.
 ///
 /// A table this join did not write to last (the first call after [`table`](Self::table), one
 /// used before another, or one an earlier call failed to bring up to date) is filled whole at
@@ -232,7 +234,7 @@ impl PairJoin {
         right_key: &str,
         by: &str,
     ) -> Result<Self, DataError> {
-        let left = Side::new(nullable(fields(&left)), left_key, on)?;
+        let mut left = Side::new(nullable(fields(&left)), left_key, on)?;
         let right = Side::new(nullable(fields(&right)), right_key, by)?;
         // Keys are read from exactly the types an index keys by: both sides read their column.
         let joinable = KeyIndex::for_type(left.column_type())
@@ -242,6 +244,11 @@ impl PairJoin {
                 on: on.to_owned(),
                 by: by.to_owned(),
             });
+        }
+        // Rows a left window lets go of are freed during an upsert: their values are kept so
+        // their pairs can be found.
+        if let Some(read) = left.read {
+            left.table.keep_expired(left.column, read);
         }
         let right_schema = Arc::clone(right.table.schema());
         let right_columns: Vec<usize> = (0..right_schema.fields().len())
@@ -334,18 +341,60 @@ impl PairJoin {
         let mut stale: FxHashSet<u64> = FxHashSet::default();
         let mut fresh: Vec<(RowId, RowId)> = Vec::new();
         for (key, old_id, old_value) in before {
-            let Some(id) = self.left.table.id_of(key.key()) else {
-                continue;
-            };
-            let value = self.left.value_of(id);
             if let Some(old_id) = old_id {
                 stale.extend(self.pairs_of_left(old_id, old_value.as_ref()).map(id_of));
                 self.left.forget(old_id, old_value.as_ref());
             }
+            // Gone if the window let go of it at once.
+            let Some(id) = self.left.table.id_of(key.key()) else {
+                continue;
+            };
+            let value = self.left.value_of(id);
             fresh.extend(self.pairs_of_left(id, value.as_ref()));
             self.left.note(id, value);
         }
+        self.drop_expired(&mut stale);
         self.bring_up(out, stale, fresh)
+    }
+
+    /// Keeps the left rows to `window` from now on (as [`LiveTable::set_window`] does for a
+    /// table), deleting the rows already past it with every pair they are in; `None` keeps
+    /// every left row again (rows already let go of stay deleted). Each
+    /// [`upsert_left`](Self::upsert_left) then lets go of the rows past it, with their pairs:
+    /// the window's end is the largest value among the left rows (data time, not the clock),
+    /// and [`upsert_right`](Self::upsert_right), [`delete_left`](Self::delete_left) and
+    /// [`delete_right`](Self::delete_right) never let rows go. The changes are `out`'s.
+    ///
+    /// A window on the output table would delete pairs but not the left rows behind them:
+    /// those stay held, and their pairs are written again whenever a row of the other side
+    /// holding their value changes. Keep a pair join's left rows recent with this instead.
+    ///
+    /// # Errors
+    /// [`DataError::PairTable`] if `out` is not a table of this join's output, and what
+    /// [`LiveTable::set_window`] refuses (an unknown left column, or a span that does not
+    /// fit it): nothing changes then. [`DataError::Arrow`] as for
+    /// [`upsert_left`](Self::upsert_left).
+    pub fn set_left_window(
+        &mut self,
+        out: &mut LiveTable,
+        window: Option<Window>,
+    ) -> Result<Changes, DataError> {
+        self.check_output(out)?;
+        self.left.table.set_window(window)?;
+        let mut stale: FxHashSet<u64> = FxHashSet::default();
+        self.drop_expired(&mut stale);
+        self.bring_up(out, stale, Vec::new())
+    }
+
+    /// Lets go of the left rows the window let go of: their pairs go to `stale`. A row of
+    /// the batch just taken that the window let go of at once was never noted: its pairs
+    /// (with its new value) are in no output, and deleting keys a table does not hold
+    /// deletes nothing.
+    fn drop_expired(&mut self, stale: &mut FxHashSet<u64>) {
+        for (id, value) in self.left.table.take_expired() {
+            stale.extend(self.pairs_of_left(id, value.as_ref()).map(id_of));
+            self.left.forget(id, value.as_ref());
+        }
     }
 
     /// Deletes the left rows of `keys` (an array of the left key's kind), and their pairs from
@@ -684,5 +733,42 @@ mod tests {
         }
         assert!(!side.holds(Some(&hot)));
         assert!(side.holding.is_empty());
+    }
+
+    #[test]
+    fn a_copy_of_the_left_rows_keeps_none_it_lets_go_of() {
+        use arrow_array::{Int64Array, StringArray};
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("k", DataType::Int64, false),
+            Field::new("v", DataType::Utf8, true),
+            Field::new("t", DataType::Int64, true),
+        ]));
+        let rows = |keys: Vec<i64>, times: Vec<i64>| {
+            let values: Vec<&str> = keys.iter().map(|_| "x").collect();
+            RecordBatch::try_new(
+                Arc::clone(&schema),
+                vec![
+                    Arc::new(Int64Array::from(keys)),
+                    Arc::new(StringArray::from(values)),
+                    Arc::new(Int64Array::from(times)),
+                ],
+            )
+            .unwrap()
+        };
+        let mut side = Side::new(Arc::clone(&schema), "k", "v").unwrap();
+        side.table.keep_expired(side.column, side.read.unwrap());
+        side.table
+            .set_window(Some(Window::span("t", 10.0)))
+            .unwrap();
+        side.table.upsert(rows(vec![1, 2], vec![0, 100])).unwrap();
+        assert_eq!(
+            side.table.take_expired().len(),
+            1,
+            "the join's own table keeps them"
+        );
+        let mut copy = side.table.clone();
+        copy.upsert(rows(vec![3], vec![200])).unwrap();
+        assert_eq!(copy.len(), 1);
+        assert!(copy.take_expired().is_empty(), "a copy keeps none");
     }
 }

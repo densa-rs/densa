@@ -10,6 +10,7 @@ use densa_data::{DataError, Filter, LiveTable, Order, PairJoin, ViewSpec};
 
 mod outputs;
 mod support;
+mod window;
 
 use support::*;
 

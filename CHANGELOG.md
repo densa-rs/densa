@@ -3,6 +3,15 @@
 Every `densa-*` crate is released together under one version number. A crate can move to a new
 version without changes of its own.
 
+## Unreleased
+
+### Added
+
+- **A window on a pair join's rows** (`densa-data`): `PairJoin::set_left_window` keeps the
+  join's left rows to a window, as `LiveTable::set_window` does for a table: the rows it lets
+  go of leave the join with every pair they are in. A window on the output deletes pairs but
+  keeps the left rows behind them, which the join then holds for good.
+
 ## 0.2.6
 
 Nothing in the public API of 0.2.5 was removed or changed in a way that breaks code using it
